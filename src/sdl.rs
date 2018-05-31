@@ -1,17 +1,12 @@
-use interpreter::Interpreter;
+use interpreter::{Interpreter, InterpResult};
 use bytecode::Bytecode;
-use ast::AstPrimitives;
 
-pub fn log(interp: &mut Interpreter, _bytecode: &Bytecode) -> Option<()> {
-    let args_count = interp.stack.pop()?;
-    if let AstPrimitives::Int(count) = args_count {
-        for _ in 0..count {
-            let arg = interp.stack.pop()?;
-            print!("{:?}", arg);
-        }
-        println!("");
-        Some(())
-    } else {
-        None
+pub fn log(interp: &mut Interpreter, _bytecode: &Bytecode) -> InterpResult {
+    let count = interp.pop_stack()?;
+    for _ in 0..count {
+        let arg = interp.pop_stack()?;
+        print!("{:?}", arg);
     }
+    println!("");
+    Ok(())
 }

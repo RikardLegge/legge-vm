@@ -10,24 +10,20 @@ struct AstError {
 }
 
 impl AstError {
-    fn new(details: &str) ->AstError {
-        AstError {details: details.to_string()}
+    fn new(details: &str) -> AstError {
+        AstError { details: details.to_string() }
     }
 }
 
 type AstResult = Result<AstNode, AstError>;
 
-#[derive(Debug, Clone)]
-pub enum AstPrimitives {
-    Int(i64),
-    Str(String),
-    Void,
-}
-
 #[derive(Debug)]
 pub enum AstNode {
-    Primitive(AstPrimitives),
+    Primitive(i64),
     Op(ArithmeticOp, Box<AstNode>, Box<AstNode>),
+    Declaration(String, Box<AstNode>),
+    GetVariable(String),
+    PrefixOp(ArithmeticOp, Box<AstNode>),
     Scope(Vec<AstNode>),
     Call(String, Vec<AstNode>),
 }
@@ -51,6 +47,17 @@ pub struct TopDownAstParser<'a> {
     iter: &'a mut Peekable<IntoIter<Token>>,
 }
 
+fn get_precedence(token: &Token) -> usize {
+    use ::token::ArithmeticOp::*;
+    match token {
+        Token::Op(op) => match op {
+            Add | Sub => 1,
+            Mul | Div => 2
+        },
+        _ => 0
+    }
+}
+
 impl<'a> TopDownAstParser<'a> {
     fn new(iter: &'a mut Peekable<IntoIter<Token>>) -> Self {
         let stack = Vec::new();
@@ -71,7 +78,6 @@ impl<'a> TopDownAstParser<'a> {
             Some(val) => Ok(val),
             None => Err(AstError::new("No more tokens when peeking"))
         }
-
     }
 
     fn has_token(&mut self) -> bool {
@@ -95,8 +101,8 @@ impl<'a> TopDownAstParser<'a> {
                 assert!(self.peek_token().is_err());
                 assert_eq!(self.stack.len(), 0);
                 Ast { root }
-            },
-            Err(e) => panic!("Ast error: {}",e.details)
+            }
+            Err(e) => panic!("Ast error: {}", e.details)
         }
     }
 
@@ -104,7 +110,7 @@ impl<'a> TopDownAstParser<'a> {
         use ::token::Token::*;
 
         while self.has_token() {
-            if *self.peek_token()? == RightCurlyBrace {break;}
+            if *self.peek_token()? == RightCurlyBrace { break; }
             let expr = self.do_expression()?;
             self.stack.push(expr);
         }
@@ -114,15 +120,35 @@ impl<'a> TopDownAstParser<'a> {
         Ok(scope)
     }
 
+
+    // 2+5*2-1 = 11
+    // 5
+
     fn do_expression(&mut self) -> AstResult {
         use ::token::Token::*;
 
-        let node = match self.next_token()? {
-            Int(value) => AstNode::Primitive(AstPrimitives::Int(value)),
+        let token = self.next_token()?;
+        let node = match token {
+            Int(value) => AstNode::Primitive(value),
             Op(op) => {
-                let lhs = self.pop_stack()?;
-                let rhs = self.do_expression()?;
-                AstNode::Op(op, Box::new(lhs), Box::new(rhs))
+                if let Ok(lhs) = self.pop_stack() {
+                    // Operation between two nodes
+                    let rhs = self.do_expression()?;
+
+                    let lhs_precedence = get_precedence(&token);
+                    let rhs_precedence = get_precedence(self.peek_token()?);
+                    if lhs_precedence > rhs_precedence {
+                        AstNode::Op(op, Box::new(lhs), Box::new(rhs))
+                    } else {
+                        self.push_stack(rhs);
+                        let rhs = self.do_expression()?;
+                        AstNode::Op(op, Box::new(lhs), Box::new(rhs))
+                    }
+                } else {
+                    // Prefix operation of single node
+                    let rhs = self.do_expression()?;
+                    AstNode::PrefixOp(op, Box::new(rhs))
+                }
             }
             Name(symbol) => self.do_symbol(&symbol)?,
             other => panic!("Unkown token {:?}", other)
@@ -133,9 +159,10 @@ impl<'a> TopDownAstParser<'a> {
     fn do_symbol(&mut self, symbol: &str) -> AstResult {
         use ::token::Token::*;
 
-        let token = self.next_token()?;
+        let token = self.peek_token()?;
         let node = match token {
             LeftBrace => {
+                self.next_token()?;
                 let old_stack = mem::replace(&mut self.stack, Vec::new());
                 while *self.peek_token()? != RightBrace {
                     let arg = self.do_expression()?;
@@ -145,7 +172,17 @@ impl<'a> TopDownAstParser<'a> {
                 let args = mem::replace(&mut self.stack, old_stack);
                 AstNode::Call(symbol.to_string(), args)
             },
-            _ => panic!("Unkown token {:?}", token)
+            Declaration => {
+                self.next_token()?;
+                AstNode::Declaration(symbol.to_string(), Box::new(self.do_expression()?))
+            },
+            Op(_) => {
+                AstNode::GetVariable(symbol.to_string())
+            },
+            RightBrace => {
+                AstNode::GetVariable(symbol.to_string())
+            },
+            _ => panic!("Unkown token: {:?}", token)
         };
         Ok(node)
     }

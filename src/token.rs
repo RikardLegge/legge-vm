@@ -5,14 +5,17 @@ use std::str::Chars;
 pub enum ArithmeticOp {
     Add,
     Sub,
+    Mul,
+    Div,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     LeftCurlyBrace,
     RightCurlyBrace,
     LeftBrace,
     RightBrace,
+    Declaration,
     Name(String),
     Int(i64),
     Op(ArithmeticOp),
@@ -21,11 +24,9 @@ pub enum Token {
 pub fn parse_tokens(iter: &mut Peekable<Chars>) -> Vec<Token> {
     let mut tokens = Vec::new();
 
-    loop {
+    while iter.peek().is_some() {
         if let Some(token) = parse_global(iter) {
             tokens.push(token);
-        } else {
-            break;
         }
     }
     tokens
@@ -35,12 +36,24 @@ fn parse_global(iter: &mut Peekable<Chars>) -> Option<Token> {
     let ch = *iter.peek()?;
     match ch {
         '0'...'9' => parse_number(iter),
-        '-' | '+' => parse_arithmetic_op(iter),
+        '-' | '+' | '*' | '/' => parse_arithmetic_op(iter),
         'a'...'z'|'A'...'Z' => parse_name(iter),
+        ':' => parse_declaration(iter),
         '(' => {iter.next(); Some(Token::LeftBrace)},
         ')' => {iter.next(); Some(Token::RightBrace)},
+        '\n'|' '|'\t' => {iter.next(); None},
         _ => panic!("Encountered invalid character in global scope '{}'", ch)
     }
+}
+
+fn parse_declaration(iter: &mut Peekable<Chars>) -> Option<Token> {
+    assert_eq!(iter.next()?, ':');
+    match iter.next()? {
+        ':' => Some(Token::Declaration),
+        ch => panic!("Encountered invalid character when parsing declaration: {:?}", ch)
+    }
+
+
 }
 
 fn parse_name(iter: &mut Peekable<Chars>) -> Option<Token> {
@@ -60,6 +73,8 @@ fn parse_arithmetic_op(iter: &mut Peekable<Chars>) -> Option<Token> {
     let op = match ch {
         '+' => ArithmeticOp::Add,
         '-' => ArithmeticOp::Sub,
+        '*' => ArithmeticOp::Mul,
+        '/' => ArithmeticOp::Div,
         _ => panic!("Encountered invalid character in number scope '{}'", ch)
     };
     Some(Token::Op(op))

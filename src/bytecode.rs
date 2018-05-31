@@ -1,8 +1,9 @@
-use ast::{Ast, AstNode, AstPrimitives};
+use ast::{Ast, AstNode};
 use token::ArithmeticOp;
 use std::collections::HashMap;
 use sdl::log;
 use interpreter::Interpreter;
+use interpreter::InterpResult;
 
 pub struct Bytecode {
     pub code: Vec<Instruction>,
@@ -20,18 +21,22 @@ impl Bytecode {
 pub struct FFIFunction {
     pub arguments: i32,
     pub returns: i32,
-    pub function: &'static Fn(&mut Interpreter, &Bytecode) -> Option<()>
+    pub function: &'static Fn(&mut Interpreter, &Bytecode) -> InterpResult
 }
 
 pub enum Data {
     FFiFunction(usize, FFIFunction),
-    Constant(usize, AstPrimitives)
+    Constant(usize, i64)
 }
 
 #[derive(Debug)]
 pub enum Instruction {
     AddI,
-    Push(AstPrimitives),
+    SubI,
+    MulI,
+    DivI,
+    PushImmediate(i64),
+    PushLoad(usize),
     BlFFI(usize)
 }
 
@@ -88,10 +93,32 @@ impl BytecodeGenerator {
         use ::ast::AstNode::*;
         match node {
             Op(op, expr1, expr2) => self.ev_operation(*op, &expr1, &expr2),
+            PrefixOp(op, expr1) => self.ev_prefix_operation(*op, &expr1),
             Scope(children) => self.ev_scope(children),
             Call(name, args) => self.ev_call(&name, args),
-            _ => panic!("Unsupported node here")
+            Declaration(name, expr) => self.ev_declaration(&name, expr),
+            GetVariable(name) => self.ev_variable_value(&name),
+            _ => panic!("Unsupported node here {:?}", node)
         }
+    }
+
+    fn ev_variable_value(&mut self, symbol: &str) {
+        if let Some(addr) = self.find_address(symbol) {
+            self.code.push(Instruction::PushLoad(addr));
+        } else {
+            panic!("Could not find symbol {}", symbol)
+        }
+    }
+
+    fn ev_declaration(&mut self, symbol: &str, expr: &AstNode) {
+        use ::ast::AstNode::*;
+
+        let addr = self.data.len();
+        match expr {
+            Primitive(val) => self.data.push(Data::Constant(addr, *val)),
+            _ => self.traverse_node(expr)
+        }
+        self.scope.data.insert(symbol.to_string(), addr);
     }
 
     fn ev_call(&mut self, symbol: &str, args: &[AstNode]) {
@@ -105,11 +132,12 @@ impl BytecodeGenerator {
 
         match data {
             Data::FFiFunction(id, _) => {
-                self.code.push(Instruction::BlFFI(*id));
-                self.code.push(Instruction::Push(AstPrimitives::Int(args.len() as i64)));
+                let id = *id;
                 for arg in args  {
                     self.traverse_node(arg);
                 }
+                self.code.push(Instruction::PushImmediate(args.len() as i64));
+                self.code.push(Instruction::BlFFI(id));
             },
             _ => panic!("Symbol is not a function")
         }
@@ -121,12 +149,24 @@ impl BytecodeGenerator {
         }
     }
 
+    fn ev_prefix_operation(&mut self, op: ArithmeticOp, expr1: &AstNode) {
+        self.code.push(Instruction::PushImmediate(0));
+        self.ev_expression(expr1);
+        match op {
+            ArithmeticOp::Add => self.code.push(Instruction::AddI),
+            ArithmeticOp::Sub => self.code.push(Instruction::SubI),
+            _ => panic!("Invalid prefix operation: {:?}", op)
+        }
+    }
+
     fn ev_operation(&mut self, op: ArithmeticOp, expr1: &AstNode, expr2: &AstNode) {
         self.ev_expression(expr1);
         self.ev_expression(expr2);
         match op {
             ArithmeticOp::Add => self.code.push(Instruction::AddI),
-            ArithmeticOp::Sub => ()
+            ArithmeticOp::Sub => self.code.push(Instruction::SubI),
+            ArithmeticOp::Mul => self.code.push(Instruction::MulI),
+            ArithmeticOp::Div => self.code.push(Instruction::DivI)
         }
     }
 
@@ -134,7 +174,8 @@ impl BytecodeGenerator {
         use ::ast::AstNode::*;
         match expr {
             Op(op, expr1, expr2) => self.ev_operation(*op, &expr1, &expr2),
-            Primitive(primitive) => self.code.push(Instruction::Push(primitive.clone())),
+            Primitive(primitive) => self.code.push(Instruction::PushImmediate(primitive.clone())),
+            GetVariable(symbol) => self.ev_variable_value(symbol),
             _ => panic!("Unsupported node here")
         }
     }
