@@ -4,8 +4,8 @@ use foreign_functions::ForeignFunction;
 pub struct Interpreter<'a> {
     program_counter: usize,
     frame_pointer: usize,
+    pub heap: Vec<i64>,
     pub stack: Vec<i64>,
-    pub locals: Vec<i64>,
     pub foreign_functions: &'a [ForeignFunction]
 }
 
@@ -30,7 +30,7 @@ impl<'a> Interpreter<'a> {
             frame_pointer: 0,
             program_counter: 0,
             stack: Vec::with_capacity(1000),
-            locals: Vec::new(),
+            heap: Vec::with_capacity(10000),
             foreign_functions
         }
     }
@@ -71,49 +71,60 @@ impl<'a> Interpreter<'a> {
     }
 
     fn run_command(&mut self, cmd: &Instruction, code: &Bytecode) -> InterpResult {
+        use self::Instruction::*;
+        
         self.program_counter += 1;
         match cmd {
-            Instruction::AddI => {
+            AddI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 self.stack.push(n2 + n1);
             }
-            Instruction::SubI => {
+            SubI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 self.stack.push(n2 - n1);
             }
-            Instruction::MulI => {
+            MulI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 self.stack.push(n2 * n1);
             }
-            Instruction::DivI => {
+            DivI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 self.stack.push(n2 / n1);
             }
-            Instruction::SStore(offset) => {
+            SStore(offset) => {
                 let value = self.pop_stack()?;
                 self.stack[self.frame_pointer + offset] = value;
-            },
-            Instruction::SLoad(offset) => {
+            }
+            SLoad(offset) => {
                 let value = self.stack[self.frame_pointer + offset];
                 self.stack.push(value);
-            },
-            Instruction::PushImmediate(primitive) => self.stack.push(*primitive),
-            Instruction::Pop => {self.pop_stack()?;},
-            Instruction::CallForeign(addr) => {
-                let func =&self.foreign_functions[*addr as usize];
-                let to_call = func.function;
-                to_call(self, code)?;
-            },
+            }
+            PushImmediate(primitive) => self.stack.push(*primitive),
+            Pop => {self.pop_stack()?;}
+            CallForeign(addr) => {
+                let function =&self.foreign_functions[*addr as usize].function;
+                function(self, code)?;
+            }
             _ => panic!("Instruction not implemented: {:?}", cmd)
         }
         Ok(())
     }
 
+    fn setup(&mut self, code: &Bytecode) {
+        self.program_counter = 0;
+        self.frame_pointer = 0;
+        self.stack.clear();
+        self.heap.clear();
+        self.heap.append(&mut code.data.clone());
+    }
+
     pub fn run(&mut self, code: &Bytecode) {
+        self.setup(code);
+
         while let Some(cmd) = code.code.get(self.program_counter) {
             if let Err(err) = self.run_command(cmd, code) {
                 panic!("{:?}", err);

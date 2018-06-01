@@ -13,7 +13,7 @@ mod bytecode;
 mod interpreter;
 mod foreign_functions;
 
-use token::parse_tokens;
+use token::Tokenizer;
 use ast::Ast;
 use bytecode::Bytecode;
 use interpreter::Interpreter;
@@ -28,7 +28,7 @@ fn main() {
     f.read_to_string(&mut contents)
         .expect("something went wrong reading the file");
 
-    let tokens = parse_tokens(&mut contents.chars().peekable().into_iter());
+    let tokens = Tokenizer::parse(&mut contents.chars().peekable().into_iter());
     println!("{:?}", tokens);
 
     let ast = Ast::from_tokens(&mut tokens.into_iter().peekable());
@@ -58,7 +58,7 @@ mod tests {
     }
 
     fn parse(contents: &str) -> Vec<Token> {
-        parse_tokens(&mut contents.chars().peekable().into_iter())
+        Tokenizer::parse(&mut contents.chars().peekable().into_iter())
     }
 
     fn ast(tokens: Vec<Token>) -> Ast {

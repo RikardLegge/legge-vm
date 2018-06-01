@@ -21,13 +21,14 @@ type AstResult = Result<AstNode, AstError>;
 pub enum AstNode {
     Primitive(i64),
     Op(ArithmeticOp, Box<AstNode>, Box<AstNode>),
-    StaticDeclaration(String, Box<AstNode>),
+    ConstDeclaration(String, Box<AstNode>),
     Declaration(String, Box<AstNode>),
+    Assignment(String, Box<AstNode>),
     GetVariable(String),
     PrefixOp(ArithmeticOp, Box<AstNode>),
     Scope(Vec<AstNode>),
     Call(String, Vec<AstNode>),
-    String(String)
+    String(String),
 }
 
 #[derive(Debug)]
@@ -46,6 +47,7 @@ impl Ast {
 pub struct TopDownAstParser<'a> {
     stack: Vec<AstNode>,
     scope: Vec<AstNode>,
+    statement_tokens: Vec<Token>,
     iter: &'a mut Peekable<IntoIter<Token>>,
 }
 
@@ -64,7 +66,8 @@ impl<'a> TopDownAstParser<'a> {
     fn new(iter: &'a mut Peekable<IntoIter<Token>>) -> Self {
         let stack = Vec::new();
         let scope = Vec::new();
-        TopDownAstParser { stack, scope, iter }
+        let statement_tokens = Vec::new();
+        TopDownAstParser { stack, scope, iter, statement_tokens }
     }
 
     fn next_token(&mut self) -> Result<Token, AstError> {
@@ -98,7 +101,7 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn parse(mut self) -> Ast {
-        match self.do_scope() {
+        match self.do_scope_content() {
             Ok(root) => {
                 assert!(self.peek_token().is_err());
                 assert_eq!(self.stack.len(), 0);
@@ -109,17 +112,52 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_scope(&mut self) -> AstResult {
+        let node = self.do_scope_content()?;
+        assert_eq!(self.next_token()?, Token::RightCurlyBrace);
+        Ok(node)
+    }
+
+    fn do_scope_content(&mut self) -> AstResult {
         use ::token::Token::*;
 
         while self.has_token() {
             if *self.peek_token()? == RightCurlyBrace { break; }
-            let expr = self.do_expression()?;
-            self.stack.push(expr);
+
+            let statement = self.do_statement()?;
+
+            match statement {
+                AstNode::Scope(..) => (),
+                _ => match self.next_token()? {
+                    EndStatement => (),
+                    token => panic!("Token after statement was '{:?}', expecting ';'. The statement is {:?}", token, statement)
+                }
+            }
+
+            self.stack.push(statement);
         }
 
         let stack = mem::replace(&mut self.stack, Vec::new());
         let scope = AstNode::Scope(stack);
         Ok(scope)
+    }
+
+    fn do_statement(&mut self) -> AstResult {
+        use ::token::Token::*;
+        assert_eq!(0, self.statement_tokens.len());
+
+        let token = self.next_token()?;
+
+        let node = match token {
+            Int(value) => AstNode::Primitive(value),
+            Op(op) => self.do_operation(token, op)?,
+            String(string) => AstNode::String(string),
+            Name(symbol) => self.do_symbol(&symbol)?,
+            LeftCurlyBrace => self.do_scope()?,
+            other => panic!("Unkown token {:?}", other)
+        };
+
+        self.statement_tokens.clear();
+        Ok(node)
     }
 
     fn do_expression(&mut self) -> AstResult {
@@ -128,34 +166,35 @@ impl<'a> TopDownAstParser<'a> {
         let token = self.next_token()?;
         let node = match token {
             Int(value) => AstNode::Primitive(value),
-            Op(op) => {
-                if let Ok(lhs) = self.pop_stack() {
-                    // Operation between two nodes
-                    let rhs = self.do_expression()?;
-
-                    let lhs_precedence = get_precedence(&token);
-                    let rhs_precedence = get_precedence(self.peek_token()?);
-                    if lhs_precedence > rhs_precedence {
-                        AstNode::Op(op, Box::new(lhs), Box::new(rhs))
-                    } else {
-                        self.push_stack(rhs);
-                        let rhs = self.do_expression()?;
-                        AstNode::Op(op, Box::new(lhs), Box::new(rhs))
-                    }
-                } else {
-                    // Prefix operation of single node
-                    let rhs = self.do_expression()?;
-                    AstNode::PrefixOp(op, Box::new(rhs))
-                }
-            },
+            Op(op) => self.do_operation(token, op)?,
             String(string) => AstNode::String(string),
             Name(symbol) => self.do_symbol(&symbol)?,
-            LeftCurlyBrace => {
-                let node = self.do_scope()?;
-                assert_eq!(self.next_token()?, RightCurlyBrace);
-                node
-            },
+            LeftCurlyBrace => self.do_scope()?,
             other => panic!("Unkown token {:?}", other)
+        };
+        Ok(node)
+    }
+
+    fn do_operation(&mut self, token: Token, op: ArithmeticOp) -> AstResult {
+        let node = {
+            if let Ok(lhs) = self.pop_stack() {
+                // Operation between two nodes
+                let rhs = self.do_expression()?;
+
+                let lhs_precedence = get_precedence(&token);
+                let rhs_precedence = get_precedence(self.peek_token()?);
+                if lhs_precedence > rhs_precedence {
+                    AstNode::Op(op, Box::new(lhs), Box::new(rhs))
+                } else {
+                    self.push_stack(rhs);
+                    let rhs = self.do_expression()?;
+                    AstNode::Op(op, Box::new(lhs), Box::new(rhs))
+                }
+            } else {
+                // Prefix operation of single node
+                let rhs = self.do_expression()?;
+                AstNode::PrefixOp(op, Box::new(rhs))
+            }
         };
         Ok(node)
     }
@@ -175,21 +214,25 @@ impl<'a> TopDownAstParser<'a> {
                 self.next_token()?;
                 let args = mem::replace(&mut self.stack, old_stack);
                 AstNode::Call(symbol.to_string(), args)
-            },
+            }
             StaticDeclaration => {
                 self.next_token()?;
-                AstNode::StaticDeclaration(symbol.to_string(), Box::new(self.do_expression()?))
-            },
+                AstNode::ConstDeclaration(symbol.to_string(), Box::new(self.do_expression()?))
+            }
             Declaration => {
                 self.next_token()?;
                 AstNode::Declaration(symbol.to_string(), Box::new(self.do_expression()?))
             }
             Op(_) => {
                 AstNode::GetVariable(symbol.to_string())
-            },
+            }
             RightBrace => {
                 AstNode::GetVariable(symbol.to_string())
-            },
+            }
+            Assignment => {
+                self.next_token()?;
+                AstNode::Assignment(symbol.to_string(), Box::new(self.do_expression()?))
+            }
             _ => panic!("Unkown token: {:?}", token)
         };
         Ok(node)

@@ -8,13 +8,13 @@ use std::ops::AddAssign;
 #[derive(Debug)]
 pub struct Bytecode {
     pub code: Vec<Instruction>,
-    pub data: Vec<i64>
+    pub data: Vec<i64>,
 }
 
 impl Bytecode {
     pub fn from_ast(ast: &Ast, foreign_functions: &[ForeignFunction]) -> Self {
         let mut bc = BytecodeGenerator::new(foreign_functions);
-        assert_eq!(StackUsage {pushed: 0, popped: 0}, bc.ev_node(&ast.root));
+        assert_eq!(StackUsage { pushed: 0, popped: 0 }, bc.ev_node(&ast.root));
         bc.get_bytecode()
     }
 }
@@ -35,17 +35,19 @@ pub enum Instruction {
     CallForeign(usize),
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 struct Address {
     addr: usize,
     kind: AddressKind,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 enum AddressKind {
     ForeignFunction,
     Function,
     StackValue,
+    ConstStackValue,
+    HeapValue,
 }
 
 struct Scope {
@@ -69,7 +71,7 @@ impl Scope {
 #[derive(PartialEq, Debug)]
 struct StackUsage {
     popped: usize,
-    pushed: usize
+    pushed: usize,
 }
 
 impl AddAssign for StackUsage {
@@ -81,7 +83,7 @@ impl AddAssign for StackUsage {
 
 impl StackUsage {
     fn new(popped: usize, pushed: usize) -> Self {
-        StackUsage {popped, pushed}
+        StackUsage { popped, pushed }
     }
 }
 
@@ -129,47 +131,6 @@ impl<'a> BytecodeGenerator<'a> {
         self.find_address_in_scope(symbol, &self.scope)
     }
 
-    fn ev_node(&mut self, node: &AstNode) -> StackUsage {
-        use ::ast::AstNode::*;
-        match node {
-            Op(op, expr1, expr2) => self.ev_operation(*op, &expr1, &expr2),
-            PrefixOp(op, expr1) => self.ev_prefix_operation(*op, &expr1),
-            Scope(children) => self.ev_scope(children),
-            Call(name, args) => self.ev_call(&name, args),
-            StaticDeclaration(name, expr) => self.ev_declaration(&name, expr),
-            Declaration(name, expr) => self.ev_declaration(&name, expr),
-            GetVariable(name) => self.ev_variable_value(&name),
-            String(value) => self.ev_string(&value),
-            _ => panic!("Unsupported node here {:?}", node)
-        }
-    }
-
-    fn ev_string(&mut self, string: &str) -> StackUsage {
-        let address = self.heap.len();
-        let bytes = string.as_bytes();
-
-        self.heap.push(bytes.len() as i64);
-        for byte in bytes {
-            self.heap.push(*byte as i64);
-        }
-        self.push_instruction(Instruction::PushImmediate(address as i64));
-        StackUsage::new(0,1)
-    }
-
-    fn ev_variable_value(&mut self, symbol: &str) -> StackUsage {
-        if let Some(address) = self.find_address(symbol) {
-            if address.kind == AddressKind::StackValue {
-                let offset = address.addr;
-                self.push_instruction(Instruction::SLoad(offset));
-            } else {
-                unimplemented!();
-            }
-        } else {
-            panic!("Could not find symbol {}", symbol);
-        }
-        StackUsage::new(0,1)
-    }
-
     fn get_stack_allocation_offset(&self) -> usize {
         let mut offset = self.scope.allocations;
         let mut parent = &self.scope.parent;
@@ -180,13 +141,53 @@ impl<'a> BytecodeGenerator<'a> {
         offset
     }
 
-    fn ev_declaration(&mut self, symbol: &str, expr: &AstNode) -> StackUsage {
+    fn ev_node(&mut self, node: &AstNode) -> StackUsage {
+        use ::ast::AstNode::*;
+        match node {
+            Op(op, expr1, expr2) => self.ev_operation(*op, &expr1, &expr2),
+            PrefixOp(op, expr1) => self.ev_prefix_operation(*op, &expr1),
+            Scope(children) => self.ev_scope(children),
+            Call(name, args) => self.ev_call(&name, args),
+            ConstDeclaration(name, expr) => self.ev_declaration(&name, expr, true),
+            Declaration(name, expr) => self.ev_declaration(&name, expr, false),
+            GetVariable(name) => self.ev_variable_value(&name),
+            String(value) => self.ev_string(&value),
+            Assignment(name, expr) => self.ev_assignment(&name, expr, false),
+            _ => panic!("Unsupported node here {:?}", node)
+        }
+    }
+
+    fn ev_string(&mut self, string: &str) -> StackUsage {
+        let address = self.heap.len();
+        let bytes = string.as_bytes();
+
+        for byte in bytes {
+            self.heap.push(*byte as i64);
+        }
+        self.push_instruction(Instruction::PushImmediate(address as i64));
+        StackUsage::new(0, 1)
+    }
+
+    fn ev_variable_value(&mut self, symbol: &str) -> StackUsage {
+        use self::AddressKind::*;
+        let address = self.find_address(symbol).expect("Symbol not found in the current scope");
+        match address.kind {
+            StackValue | ConstStackValue => {
+                let offset = address.addr;
+                self.push_instruction(Instruction::SLoad(offset));
+                StackUsage::new(0, 1)
+            }
+            _ => panic!("{:?}", address)
+        }
+    }
+
+    fn ev_assignment(&mut self, symbol: &str, expr: &AstNode, is_declaration: bool) -> StackUsage {
         use ::ast::AstNode::*;
 
-        let offset = self.get_stack_allocation_offset();
-        self.scope.allocations += 1;
-
-        self.scope.variables.insert(symbol.to_string(), Address { addr: offset, kind: AddressKind::StackValue });
+        let address = self.find_address(symbol).expect("Symbol not found in the current scope");
+        if address.kind == AddressKind::ConstStackValue && !is_declaration {
+            panic!("Can not assign to constant value");
+        }
 
         let stack_usage = match expr {
             Primitive(val) => self.ev_intermediate(*val),
@@ -194,15 +195,25 @@ impl<'a> BytecodeGenerator<'a> {
         };
         assert_eq!(1, stack_usage.pushed);
 
-        self.push_instruction(Instruction::SStore(offset));
+        self.push_instruction(Instruction::SStore(address.addr));
         StackUsage::new(stack_usage.popped, 0)
+    }
+
+    fn ev_declaration(&mut self, symbol: &str, expr: &AstNode, is_constant: bool) -> StackUsage {
+        let offset = self.get_stack_allocation_offset();
+        self.scope.allocations += 1;
+        if is_constant {
+            self.scope.variables.insert(symbol.to_string(), Address { addr: offset, kind: AddressKind::ConstStackValue });
+        } else {
+            self.scope.variables.insert(symbol.to_string(), Address { addr: offset, kind: AddressKind::StackValue });
+        }
+
+        self.ev_assignment(symbol, expr, true)
     }
 
 
     fn ev_call(&mut self, symbol: &str, args: &[AstNode]) -> StackUsage {
-        let address = self.find_address(symbol);
-        if address.is_none() { panic!("Symbol not found in the current scope"); }
-        let address = address.unwrap();
+        let address = self.find_address(symbol).expect("Symbol not found in the current scope");
 
         let popped = match address.kind {
             AddressKind::ForeignFunction => {
@@ -219,17 +230,16 @@ impl<'a> BytecodeGenerator<'a> {
             _ => unimplemented!()
         };
         let pushed = self.foreign_functions[address.addr].returns;
-        StackUsage::new(popped,pushed)
-
+        StackUsage::new(popped, pushed)
     }
 
     fn ev_scope(&mut self, children: &Vec<AstNode>) -> StackUsage {
         let parent = mem::replace(&mut self.scope, Scope::new());
         self.scope.parent = Some(Box::new(parent));
 
-        let mut stack_usage = StackUsage::new(0,0);
+        let mut stack_usage = StackUsage::new(0, 0);
         for node in children {
-             stack_usage += self.ev_node(node);
+            stack_usage += self.ev_node(node);
         }
         assert_eq!(stack_usage.popped, stack_usage.pushed);
 
@@ -248,7 +258,7 @@ impl<'a> BytecodeGenerator<'a> {
             self.code.push(Instruction::Pop);
         }
 
-        StackUsage::new(0,0)
+        StackUsage::new(0, 0)
     }
 
     fn ev_prefix_operation(&mut self, op: ArithmeticOp, expr1: &AstNode) -> StackUsage {
@@ -260,7 +270,7 @@ impl<'a> BytecodeGenerator<'a> {
             ArithmeticOp::Sub => self.push_instruction(Instruction::SubI),
             _ => panic!("Invalid prefix operation: {:?}", op)
         };
-        StackUsage::new(diff.popped,1)
+        StackUsage::new(diff.popped, 1)
     }
 
     fn ev_operation(&mut self, op: ArithmeticOp, expr1: &AstNode, expr2: &AstNode) -> StackUsage {
@@ -275,7 +285,7 @@ impl<'a> BytecodeGenerator<'a> {
             ArithmeticOp::Mul => self.push_instruction(Instruction::MulI),
             ArithmeticOp::Div => self.push_instruction(Instruction::DivI)
         };
-        StackUsage::new(diff1.popped + diff2.popped,1)
+        StackUsage::new(diff1.popped + diff2.popped, 1)
     }
 
     fn ev_expression(&mut self, expr: &AstNode) -> StackUsage {
@@ -284,12 +294,12 @@ impl<'a> BytecodeGenerator<'a> {
             Op(op, expr1, expr2) => self.ev_operation(*op, &expr1, &expr2),
             Primitive(primitive) => self.ev_intermediate(*primitive),
             GetVariable(symbol) => self.ev_variable_value(symbol),
-            _ => panic!("Unsupported node here")
+            _ => panic!("Unsupported node here {:?}", expr)
         }
     }
 
     fn ev_intermediate(&mut self, value: i64) -> StackUsage {
         self.push_instruction(Instruction::PushImmediate(value));
-        StackUsage::new(0,1)
+        StackUsage::new(0, 1)
     }
 }

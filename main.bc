@@ -1,11 +1,11 @@
 {
-    a :: 11
-    b :: 12
+    add :: (a,b) {a+b}
+
+    a :: 11;
+    b :: 12;
     {
-        a :: one()
-        c := "hej"
-        log(a+b*10)
-        log("log 1")
-        log(c)
+        a := one();
+        a = 2;
+        log(a + b * 10);
     }
 }
