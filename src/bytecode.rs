@@ -146,7 +146,10 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn ev_string(&mut self, string: &str) -> StackUsage {
         let address = self.heap.len();
-        for byte in string.as_bytes() {
+        let bytes = string.as_bytes();
+
+        self.heap.push(bytes.len() as i64);
+        for byte in bytes {
             self.heap.push(*byte as i64);
         }
         self.push_instruction(Instruction::PushImmediate(address as i64));

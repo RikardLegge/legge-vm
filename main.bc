@@ -5,5 +5,7 @@
         a :: one()
         c := "hej"
         log(a+b*10)
+        log("log 1")
+        log(c)
     }
 }
