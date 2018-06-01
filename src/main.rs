@@ -17,11 +17,12 @@ use token::parse_tokens;
 use ast::Ast;
 use bytecode::Bytecode;
 use interpreter::Interpreter;
-use foreign_functions::{ForeignFunction, log};
+use foreign_functions::load_foreign_functions;
 
 fn main() {
     let filename = "main.bc";
     let mut f = File::open(filename).expect("file not found");
+    let functions = load_foreign_functions();
 
     let mut contents = String::new();
     f.read_to_string(&mut contents)
@@ -33,28 +34,18 @@ fn main() {
     let ast = Ast::from_tokens(&mut tokens.into_iter().peekable());
     println!("{:?}", ast);
 
-    let mut foreign_functions = Vec::new();
-    foreign_functions.push(ForeignFunction {name: "log".to_string(), arguments: -1, returns: 0, function: &log});
-
-    let bytecode = Bytecode::from_ast(&ast, &foreign_functions);
+    let bytecode = Bytecode::from_ast(&ast, &functions);
     println!("{:?}", bytecode);
 
-    let mut interpreter = Interpreter::new(&foreign_functions);
+    let mut interpreter = Interpreter::new(&functions);
     interpreter.run(&bytecode);
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use test::Bencher;
     use token::Token;
-
-    fn foreign_functions() -> Vec<ForeignFunction> {
-        let mut foreign_functions = Vec::new();
-        foreign_functions.push(ForeignFunction {name: "log".to_string(), arguments: -1, returns: 0, function: &|a,b|{Ok(())}});
-        foreign_functions
-    }
 
     fn read() -> String {
         let filename = "main.bc";
@@ -96,7 +87,7 @@ mod tests {
     fn bench_interp(b: &mut Bencher) {
         let tokens = parse(&read());
         let ast = ast(tokens.to_vec());
-        let functions = foreign_functions();
+        let functions = load_foreign_functions();
         let bytecode = Bytecode::from_ast(&ast, &functions);
 
         b.iter(|| Interpreter::new(&functions).run(&bytecode));

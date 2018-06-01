@@ -42,6 +42,10 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    pub fn push_stack(&mut self, value: i64) {
+        self.stack.push(value);
+    }
+
     pub fn peek_stack(&mut self) -> InterpPrimitiveResult {
         match self.stack.last() {
             Some(val) => Ok(*val),
