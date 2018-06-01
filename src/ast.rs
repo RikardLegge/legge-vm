@@ -170,6 +170,11 @@ impl<'a> TopDownAstParser<'a> {
             String(string) => AstNode::String(string),
             Name(symbol) => self.do_symbol(&symbol)?,
             LeftCurlyBrace => self.do_scope()?,
+            LeftBrace => {
+                let node = self.do_expression()?;
+                assert_eq!(self.next_token()?, RightBrace);
+                node
+            }
             other => panic!("Unkown token {:?}", other)
         };
 
