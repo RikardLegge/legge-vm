@@ -15,6 +15,7 @@ pub enum Token {
     RightCurlyBrace,
     LeftBrace,
     RightBrace,
+    StaticDeclaration,
     Declaration,
     Name(String),
     Int(i64),
@@ -49,7 +50,8 @@ fn parse_global(iter: &mut Peekable<Chars>) -> Option<Token> {
 fn parse_declaration(iter: &mut Peekable<Chars>) -> Option<Token> {
     assert_eq!(iter.next()?, ':');
     match iter.next()? {
-        ':' => Some(Token::Declaration),
+        ':' => Some(Token::StaticDeclaration),
+        '=' => Some(Token::Declaration),
         ch => panic!("Encountered invalid character when parsing declaration: {:?}", ch)
     }
 

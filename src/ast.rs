@@ -21,6 +21,7 @@ type AstResult = Result<AstNode, AstError>;
 pub enum AstNode {
     Primitive(i64),
     Op(ArithmeticOp, Box<AstNode>, Box<AstNode>),
+    StaticDeclaration(String, Box<AstNode>),
     Declaration(String, Box<AstNode>),
     GetVariable(String),
     PrefixOp(ArithmeticOp, Box<AstNode>),
@@ -172,10 +173,14 @@ impl<'a> TopDownAstParser<'a> {
                 let args = mem::replace(&mut self.stack, old_stack);
                 AstNode::Call(symbol.to_string(), args)
             },
+            StaticDeclaration => {
+                self.next_token()?;
+                AstNode::StaticDeclaration(symbol.to_string(), Box::new(self.do_expression()?))
+            },
             Declaration => {
                 self.next_token()?;
                 AstNode::Declaration(symbol.to_string(), Box::new(self.do_expression()?))
-            },
+            }
             Op(_) => {
                 AstNode::GetVariable(symbol.to_string())
             },

@@ -2,6 +2,7 @@
 #![feature(test)]
 
 extern crate test;
+extern crate core;
 
 use std::io::prelude::*;
 use std::fs::File;
@@ -10,12 +11,13 @@ mod token;
 mod ast;
 mod bytecode;
 mod interpreter;
-mod sdl;
+mod foreign_functions;
 
 use token::parse_tokens;
 use ast::Ast;
 use bytecode::Bytecode;
 use interpreter::Interpreter;
+use foreign_functions::{ForeignFunction, log};
 
 fn main() {
     let filename = "main.bc";
@@ -31,9 +33,13 @@ fn main() {
     let ast = Ast::from_tokens(&mut tokens.into_iter().peekable());
     println!("{:?}", ast);
 
-    let bytecode = Bytecode::from_ast(&ast);
+    let mut foreign_functions = Vec::new();
+    foreign_functions.push(ForeignFunction {name: "log".to_string(), arguments: -1, returns: 0, function: &log});
 
-    let mut interpreter = Interpreter::new();
+    let bytecode = Bytecode::from_ast(&ast, &foreign_functions);
+    println!("{:?}", bytecode);
+
+    let mut interpreter = Interpreter::new(&foreign_functions);
     interpreter.run(&bytecode);
 }
 
@@ -43,6 +49,12 @@ mod tests {
     use super::*;
     use test::Bencher;
     use token::Token;
+
+    fn foreign_functions() -> Vec<ForeignFunction> {
+        let mut foreign_functions = Vec::new();
+        foreign_functions.push(ForeignFunction {name: "log".to_string(), arguments: -1, returns: 0, function: &|a,b|{Ok(())}});
+        foreign_functions
+    }
 
     fn read() -> String {
         let filename = "main.bc";
@@ -84,8 +96,9 @@ mod tests {
     fn bench_interp(b: &mut Bencher) {
         let tokens = parse(&read());
         let ast = ast(tokens.to_vec());
-        let bytecode = Bytecode::from_ast(&ast);
+        let functions = foreign_functions();
+        let bytecode = Bytecode::from_ast(&ast, &functions);
 
-        b.iter(|| Interpreter::new().run(&bytecode));
+        b.iter(|| Interpreter::new(&functions).run(&bytecode));
     }
 }

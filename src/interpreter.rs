@@ -1,10 +1,12 @@
-use bytecode::{Bytecode, Instruction, Data};
+use bytecode::{Bytecode, Instruction};
+use foreign_functions::ForeignFunction;
 
-#[derive(Debug)]
-pub struct Interpreter {
+pub struct Interpreter<'a> {
     program_counter: usize,
-    link_register: usize,
+    frame_pointer: usize,
     pub stack: Vec<i64>,
+    pub locals: Vec<i64>,
+    pub foreign_functions: &'a [ForeignFunction]
 }
 
 #[derive(Debug)]
@@ -22,9 +24,15 @@ pub type InterpResult = Result<(), InterpError>;
 pub type InterpPrimitiveResult = Result<i64, InterpError>;
 pub type InterpInstructionResult<'a> = Result<&'a Instruction, InterpError>;
 
-impl Interpreter {
-    pub fn new() -> Self {
-        Interpreter { link_register: 0, program_counter: 0, stack: Vec::new() }
+impl<'a> Interpreter<'a> {
+    pub fn new(foreign_functions: &'a [ForeignFunction]) -> Self {
+        Interpreter {
+            frame_pointer: 0,
+            program_counter: 0,
+            stack: Vec::with_capacity(1000),
+            locals: Vec::new(),
+            foreign_functions
+        }
     }
 
     pub fn pop_stack(&mut self) -> InterpPrimitiveResult {
@@ -37,11 +45,11 @@ impl Interpreter {
     pub fn peek_stack(&mut self) -> InterpPrimitiveResult {
         match self.stack.last() {
             Some(val) => Ok(*val),
-            None => Err(InterpError::new("Stack empty, can not pop"))
+            None => Err(InterpError::new("Stack empty, can not peek"))
         }
     }
 
-    fn get_instruction<'a>(&self, code: &'a Bytecode) -> InterpInstructionResult<'a> {
+    fn get_instruction<'b>(&self, code: &'b Bytecode) -> InterpInstructionResult<'b> {
         match code.code.get(self.program_counter) {
             Some(val) => Ok(val),
             None => Err(InterpError::new("Can not fetch next instruction"))
@@ -71,23 +79,22 @@ impl Interpreter {
                 let n2 = self.pop_stack()?;
                 self.stack.push(n2 / n1);
             }
-            Instruction::PushLoad(addr) => {
-                match code.data[*addr] {
-                    Data::Constant(_, value) => self.stack.push(value),
-                    _ => panic!("Invalid data type")
-                }
-            }
+            Instruction::SStore(offset) => {
+                let value = self.pop_stack()?;
+                self.stack[self.frame_pointer + offset] = value;
+            },
+            Instruction::SLoad(offset) => {
+                let value = self.stack[self.frame_pointer + offset];
+                self.stack.push(value);
+            },
             Instruction::PushImmediate(primitive) => self.stack.push(*primitive),
-            Instruction::BlFFI(addr) => {
-                self.link_register = self.program_counter;
-                match code.data[*addr as usize] {
-                    Data::FFiFunction(_, ref func) => {
-                        let to_call = func.function;
-                        to_call(self, code)?;
-                    }
-                    _ => panic!("NOOO")
-                }
-            }
+            Instruction::Pop => {self.pop_stack()?;},
+            Instruction::CallForeign(addr) => {
+                let func =&self.foreign_functions[*addr as usize];
+                let to_call = func.function;
+                to_call(self, code)?;
+            },
+            _ => panic!("Instruction not implemented: {:?}", cmd)
         }
         Ok(())
     }
