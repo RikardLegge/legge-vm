@@ -172,18 +172,32 @@ impl<'a> TopDownAstParser<'a> {
             LeftCurlyBrace => self.do_scope()?,
             other => panic!("Unkown token {:?}", other)
         };
-        Ok(node)
+
+        match self.peek_token()? {
+            Token::Op(op) => {
+                let op = *op;
+                self.push_stack(node);
+                let token = self.next_token()?;
+                Ok(self.do_operation(token, op)?)
+            }
+            _ => Ok(node)
+        }
     }
 
     fn do_operation(&mut self, token: Token, op: ArithmeticOp) -> AstResult {
+        match token {
+            Token::Op(_) => (),
+            _ => panic!("An opperation was not passed")
+        }
         let node = {
             if let Ok(lhs) = self.pop_stack() {
                 // Operation between two nodes
                 let rhs = self.do_expression()?;
+                let next_token = self.peek_token()?;
 
                 let lhs_precedence = get_precedence(&token);
-                let rhs_precedence = get_precedence(self.peek_token()?);
-                if lhs_precedence > rhs_precedence {
+                let rhs_precedence = get_precedence(next_token);
+                if lhs_precedence >= rhs_precedence {
                     AstNode::Op(op, Box::new(lhs), Box::new(rhs))
                 } else {
                     self.push_stack(rhs);
