@@ -18,6 +18,7 @@ pub enum Token {
     StaticDeclaration,
     Declaration,
     Name(String),
+    String(String),
     Int(i64),
     Op(ArithmeticOp),
 }
@@ -44,9 +45,20 @@ fn parse_global(iter: &mut Peekable<Chars>) -> Option<Token> {
         ')' => {iter.next(); Some(Token::RightBrace)},
         '{' => {iter.next(); Some(Token::LeftCurlyBrace)},
         '}' => {iter.next(); Some(Token::RightCurlyBrace)},
+        '"' => parse_string(iter),
         '\n'|' '|'\t' => {iter.next(); None},
         _ => panic!("Encountered invalid character in global scope '{}'", ch)
     }
+}
+
+fn parse_string(iter: &mut Peekable<Chars>) -> Option<Token> {
+    let mut string = String::new();
+    assert_eq!(iter.next()?, '"');
+    while iter.peek()? != &'"' {
+        string.push(iter.next()?);
+    };
+    assert_eq!(iter.next()?, '"');
+    Some(Token::String(string))
 }
 
 fn parse_declaration(iter: &mut Peekable<Chars>) -> Option<Token> {

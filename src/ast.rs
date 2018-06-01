@@ -27,6 +27,7 @@ pub enum AstNode {
     PrefixOp(ArithmeticOp, Box<AstNode>),
     Scope(Vec<AstNode>),
     Call(String, Vec<AstNode>),
+    String(String)
 }
 
 #[derive(Debug)]
@@ -121,10 +122,6 @@ impl<'a> TopDownAstParser<'a> {
         Ok(scope)
     }
 
-
-    // 2+5*2-1 = 11
-    // 5
-
     fn do_expression(&mut self) -> AstResult {
         use ::token::Token::*;
 
@@ -151,6 +148,7 @@ impl<'a> TopDownAstParser<'a> {
                     AstNode::PrefixOp(op, Box::new(rhs))
                 }
             },
+            String(string) => AstNode::String(string),
             Name(symbol) => self.do_symbol(&symbol)?,
             LeftCurlyBrace => {
                 let node = self.do_scope()?;

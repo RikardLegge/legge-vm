@@ -53,6 +53,16 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    pub fn get_foreign_function_arguments(&mut self) -> Result<Vec<i64>, InterpError> {
+        let mut arguments = Vec::new();
+        let count = self.pop_stack()?;
+        for _ in 0..count {
+            let argument = self.pop_stack()?;
+            arguments.push(argument);
+        }
+        Ok(arguments)
+    }
+
     fn get_instruction<'b>(&self, code: &'b Bytecode) -> InterpInstructionResult<'b> {
         match code.code.get(self.program_counter) {
             Some(val) => Ok(val),

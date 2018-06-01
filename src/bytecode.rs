@@ -7,7 +7,8 @@ use std::ops::AddAssign;
 
 #[derive(Debug)]
 pub struct Bytecode {
-    pub code: Vec<Instruction>
+    pub code: Vec<Instruction>,
+    pub data: Vec<i64>
 }
 
 impl Bytecode {
@@ -86,20 +87,22 @@ impl StackUsage {
 
 struct BytecodeGenerator<'a> {
     code: Vec<Instruction>,
+    heap: Vec<i64>,
     scope: Scope,
     foreign_functions: &'a [ForeignFunction],
 }
 
 impl<'a> BytecodeGenerator<'a> {
     fn get_bytecode(self) -> Bytecode {
-        Bytecode { code: self.code }
+        Bytecode { code: self.code, data: self.heap }
     }
 
     fn new(foreign_functions: &'a [ForeignFunction]) -> Self {
         let scope = Scope::new();
         let code = Vec::new();
+        let heap = Vec::new();
 
-        let mut gen = BytecodeGenerator { code, scope, foreign_functions };
+        let mut gen = BytecodeGenerator { code, scope, foreign_functions, heap };
         for (addr, function) in foreign_functions.iter().enumerate() {
             let name = function.name.to_string();
             let address = Address { addr, kind: AddressKind::ForeignFunction };
@@ -136,8 +139,18 @@ impl<'a> BytecodeGenerator<'a> {
             StaticDeclaration(name, expr) => self.ev_declaration(&name, expr),
             Declaration(name, expr) => self.ev_declaration(&name, expr),
             GetVariable(name) => self.ev_variable_value(&name),
+            String(value) => self.ev_string(&value),
             _ => panic!("Unsupported node here {:?}", node)
         }
+    }
+
+    fn ev_string(&mut self, string: &str) -> StackUsage {
+        let address = self.heap.len();
+        for byte in string.as_bytes() {
+            self.heap.push(*byte as i64);
+        }
+        self.push_instruction(Instruction::PushImmediate(address as i64));
+        StackUsage::new(0,1)
     }
 
     fn ev_variable_value(&mut self, symbol: &str) -> StackUsage {
@@ -172,7 +185,7 @@ impl<'a> BytecodeGenerator<'a> {
 
         self.scope.variables.insert(symbol.to_string(), Address { addr: offset, kind: AddressKind::StackValue });
 
-        let mut stack_usage = match expr {
+        let stack_usage = match expr {
             Primitive(val) => self.ev_intermediate(*val),
             _ => self.ev_node(expr)
         };
