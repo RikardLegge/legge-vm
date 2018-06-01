@@ -42,6 +42,8 @@ fn parse_global(iter: &mut Peekable<Chars>) -> Option<Token> {
         ':' => parse_declaration(iter),
         '(' => {iter.next(); Some(Token::LeftBrace)},
         ')' => {iter.next(); Some(Token::RightBrace)},
+        '{' => {iter.next(); Some(Token::LeftCurlyBrace)},
+        '}' => {iter.next(); Some(Token::RightCurlyBrace)},
         '\n'|' '|'\t' => {iter.next(); None},
         _ => panic!("Encountered invalid character in global scope '{}'", ch)
     }

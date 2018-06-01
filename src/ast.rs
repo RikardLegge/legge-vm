@@ -150,8 +150,13 @@ impl<'a> TopDownAstParser<'a> {
                     let rhs = self.do_expression()?;
                     AstNode::PrefixOp(op, Box::new(rhs))
                 }
-            }
+            },
             Name(symbol) => self.do_symbol(&symbol)?,
+            LeftCurlyBrace => {
+                let node = self.do_scope()?;
+                assert_eq!(self.next_token()?, RightCurlyBrace);
+                node
+            },
             other => panic!("Unkown token {:?}", other)
         };
         Ok(node)

@@ -154,10 +154,20 @@ impl<'a> BytecodeGenerator<'a> {
         StackUsage::new(0,1)
     }
 
+    fn get_stack_allocation_offset(&self) -> usize {
+        let mut offset = self.scope.allocations;
+        let mut parent = &self.scope.parent;
+        while let Some(scope) = parent {
+            offset += scope.allocations;
+            parent = &scope.parent;
+        };
+        offset
+    }
+
     fn ev_declaration(&mut self, symbol: &str, expr: &AstNode) -> StackUsage {
         use ::ast::AstNode::*;
 
-        let offset = self.scope.allocations;
+        let offset = self.get_stack_allocation_offset();
         self.scope.allocations += 1;
 
         self.scope.variables.insert(symbol.to_string(), Address { addr: offset, kind: AddressKind::StackValue });
