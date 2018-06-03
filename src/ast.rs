@@ -66,7 +66,6 @@ fn get_precedence(token: &Token) -> usize {
 
 fn ast_error(details: &str) -> AstError {
     panic!("{}", details);
-    AstError::new(details)
 }
 
 impl<'a> TopDownAstParser<'a> {
@@ -226,7 +225,7 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_procedure(&mut self, symbol: &str) -> AstResult {
-        if let Token::Name(_) = self.next_token()? {} else {panic!("This is not a procedure declaration")}
+        if Token::KeyName("fn".to_string()) == self.next_token()? {} else {panic!("This is not a procedure declaration")}
         assert_eq!(self.next_token()?, Token::LeftBrace);
         let mut arguments = Vec::new();
         while self.peek_token()? != &Token::RightBrace {
@@ -279,10 +278,10 @@ impl<'a> TopDownAstParser<'a> {
             }
             StaticDeclaration => {
                 self.next_token()?;
-                if let Token::Name(name) = self.peek_token()? {
+                if let Token::KeyName(name) = self.peek_token()? {
                     match name.as_ref() {
                         "fn" => self.do_procedure(symbol)?,
-                        _ => AstNode::ConstDeclaration(symbol.to_string(), Box::new(self.do_expression()?))
+                        _ => panic!("Unknown keyname")
                     }
                 } else {
                     AstNode::ConstDeclaration(symbol.to_string(), Box::new(self.do_expression()?))
@@ -292,7 +291,7 @@ impl<'a> TopDownAstParser<'a> {
                 self.next_token()?;
                 AstNode::Declaration(symbol.to_string(), Box::new(self.do_expression()?))
             }
-            Op(_) | RightBrace | EndStatement => {
+            Op(_) | RightBrace | EndStatement | ListSeparator => {
                 AstNode::GetVariable(symbol.to_string())
             }
             Assignment => {

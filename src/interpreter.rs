@@ -7,13 +7,16 @@ pub struct Interpreter<'a> {
     pub heap: Vec<i64>,
     pub stack: Vec<i64>,
     pub foreign_functions: &'a [ForeignFunction],
-    pub log_level: InterpLogLevel
+    pub log_level: InterpLogLevel,
+    pub stack_max: usize
 }
 
+#[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq)]
 pub enum InterpLogLevel {
-    None,
-    LogDebug
+    LogNone,
+    LogDebug,
+    LogEval,
 }
 
 #[derive(Debug)]
@@ -29,7 +32,6 @@ impl InterpError {
 
 pub type InterpResult = Result<(), InterpError>;
 pub type InterpPrimitiveResult = Result<i64, InterpError>;
-pub type InterpInstructionResult<'a> = Result<&'a Instruction, InterpError>;
 
 impl<'a> Interpreter<'a> {
     pub fn new(foreign_functions: &'a [ForeignFunction]) -> Self {
@@ -39,7 +41,8 @@ impl<'a> Interpreter<'a> {
             stack: Vec::with_capacity(1000),
             heap: Vec::with_capacity(10000),
             foreign_functions,
-            log_level: InterpLogLevel::None
+            log_level: InterpLogLevel::LogNone,
+            stack_max: 64000
         }
     }
 
@@ -56,14 +59,12 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn push_stack(&mut self, value: i64) {
-        self.stack.push(value);
-    }
-
-    pub fn peek_stack(&mut self) -> InterpPrimitiveResult {
-        match self.stack.last() {
-            Some(val) => Ok(*val),
-            None => Err(InterpError::new("Stack empty, can not peek"))
+    pub fn push_stack(&mut self, value: i64) -> InterpResult {
+        if self.stack.len() < self.stack_max {
+            self.stack.push(value);
+            Ok(())
+        } else {
+            Err(InterpError::new("Stack overflow"))
         }
     }
 
@@ -77,66 +78,58 @@ impl<'a> Interpreter<'a> {
         Ok(arguments)
     }
 
-    fn get_instruction<'b>(&self, code: &'b Bytecode) -> InterpInstructionResult<'b> {
-        match code.code.get(self.program_counter) {
-            Some(val) => Ok(val),
-            None => Err(InterpError::new("Can not fetch next instruction"))
-        }
-    }
-
     fn run_command(&mut self, cmd: &Instruction, code: &Bytecode) -> InterpResult {
         use self::Instruction::*;
         use self::InterpLogLevel::*;
 
-        self.debug_log(LogDebug, &format!("PC: {} \t Inst: {:?} \t Stack size: {}", self.program_counter, cmd, self.stack.len()));
+        self.debug_log(LogDebug, &format!("PC: {} \t SP: {} \t Inst: {:?}", self.program_counter, self.stack.len(), cmd));
         self.program_counter += 1;
         match cmd {
             AddI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let sum = n2 + n1;
-                self.stack.push(sum);
-                self.debug_log(LogDebug, &format!("{}", sum));
+                self.push_stack(sum)?;
+                self.debug_log(LogEval, &format!("{}", sum));
             }
             SubI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let diff = n2 - n1;
-                self.stack.push(diff);
-                self.debug_log(LogDebug, &format!("{}", diff));
+                self.push_stack(diff)?;
+                self.debug_log(LogEval, &format!("{}", diff));
             }
             MulI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let prod = n2 * n1;
-                self.stack.push(prod);
-                self.debug_log(LogDebug, &format!("{}", prod));
+                self.push_stack(prod)?;
+                self.debug_log(LogEval, &format!("{}", prod));
             }
             DivI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let kvote = n2 / n1;
-                self.stack.push(kvote);
-                self.debug_log(LogDebug, &format!("{}", kvote));
+                self.push_stack(kvote)?;
+                self.debug_log(LogEval, &format!("{}", kvote));
             }
             SStore(offset) => {
                 let value = self.pop_stack()?;
                 self.stack[self.frame_pointer + offset] = value;
-                self.debug_log(LogDebug, &format!("{}", value));
             }
             SLoad(offset) => {
                 let value = self.stack[self.frame_pointer + offset];
-                self.stack.push(value);
-                self.debug_log(LogDebug, &format!("{}", value));
+                self.push_stack(value)?;
+                self.debug_log(LogEval, &format!("{}", value));
             }
-            PushImmediate(primitive) => self.stack.push(*primitive),
+            PushImmediate(primitive) => self.push_stack(*primitive)?,
             Pop => {self.pop_stack()?;}
             CallForeign(addr) => {
                 let function =&self.foreign_functions[*addr as usize].function;
                 function(self, code)?;
             },
             PushPc(offset) => {
-                self.push_stack((offset + self.program_counter) as i64);
+                self.push_stack((offset + self.program_counter) as i64)?;
             }
             PopPc => {
                 self.program_counter = self.pop_stack()? as usize;
@@ -145,7 +138,7 @@ impl<'a> Interpreter<'a> {
                 self.program_counter = code.procedure_address + addr;
             }
             PushFrame => {
-                self.push_stack(self.frame_pointer as i64);
+                self.push_stack(self.frame_pointer as i64)?;
             }
             SetFrame(offset) => {
                 let end = self.stack.len() as i64;

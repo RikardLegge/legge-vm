@@ -1,14 +1,17 @@
-add :: fn (a,b) {
-    log(a+b);
+log_add_2 :: fn (a,b) {
+    log(a,b);
 }
 
-add(1,2);
+log_add :: fn (a,b) {
+    log_add_2(a,b);
+}
 
 {
     a :: 2 * (2 + 3);
     log(a);
     a :: 11;
     b :: 12;
+    log_add(a,b);
     {
         a := one();
         a = a + 2;

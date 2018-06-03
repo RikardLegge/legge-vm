@@ -17,15 +17,20 @@ pub fn load_foreign_functions() -> Vec<ForeignFunction> {
 
 fn one(interp: &mut Interpreter, _bytecode: &Bytecode) -> InterpResult {
     interp.get_foreign_function_arguments()?;
-    interp.push_stack(1);
+    interp.push_stack(1)?;
     Ok(())
 }
 
 fn log(interp: &mut Interpreter, _bytecode: &Bytecode) -> InterpResult {
-    let args = interp.get_foreign_function_arguments()?;
+    let mut args = interp.get_foreign_function_arguments()?;
+    let last_arg = args.pop();
     for arg in args {
+        print!("{:?}, ", arg);
+    }
+    if let Some(arg) = last_arg {
         print!("{:?}", arg);
     }
-    println!("");
+
+    println!();
     Ok(())
 }

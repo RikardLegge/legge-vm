@@ -7,3 +7,6 @@ authors = ["Rikard Legge <rikard.legge@gmail.com>"]
 lto = true
 
 [dependencies]
+serde = "1.0.65"
+serde_derive = "1.0.65"
+bincode = "1.0.0"

@@ -4,6 +4,10 @@
 extern crate test;
 extern crate core;
 
+#[macro_use]
+extern crate serde_derive;
+extern crate bincode;
+
 use std::io::prelude::*;
 use std::fs::File;
 
@@ -18,6 +22,8 @@ use ast::Ast;
 use bytecode::Bytecode;
 use interpreter::Interpreter;
 use foreign_functions::load_foreign_functions;
+use bincode::{serialize, deserialize};
+
 
 fn main() {
     let filename = "main.bc";
@@ -36,6 +42,9 @@ fn main() {
 
     let bytecode = Bytecode::from_ast(&ast, &functions);
     println!("{:?}", bytecode);
+
+    let encoded = serialize(&bytecode).unwrap();
+    let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
 
     let mut interpreter = Interpreter::new(&functions);
     interpreter.run(&bytecode);
@@ -91,5 +100,27 @@ mod tests {
         let bytecode = Bytecode::from_ast(&ast, &functions);
 
         b.iter(|| Interpreter::new(&functions).run(&bytecode));
+    }
+
+    #[bench]
+    fn bench_interp_native(b: &mut Bencher) {
+        let add = |a,b| {println!("{}", a+b)};
+        let one = || {1};
+        b.iter(|| {
+            {
+                let a = 2 * (2 + 3);
+                println!("{}", a);
+                let a = 11;
+                let b = 12;
+                add(a, b);
+
+                {
+                    let mut a = one();
+                    a = a + 2;
+                    println!("{}", a+b*10);
+                }
+            }
+
+        });
     }
 }

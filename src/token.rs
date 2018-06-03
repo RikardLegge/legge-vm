@@ -21,6 +21,7 @@ pub enum Token {
     Declaration,
     Assignment,
     Name(String),
+    KeyName(String),
     String(String),
     Int(i64),
     Op(ArithmeticOp),
@@ -63,16 +64,12 @@ impl<'a> Tokenizer<'a> {
         self.iter.next()
     }
 
-    fn next_ignore_whitespace(&mut self) -> Option<char> {
-        self.peek_ignore_whitespace()?;
-        self.next()
-    }
-
     fn parse_global(&mut self) -> Option<Token> {
         let ch = self.peek_ignore_whitespace()?;
         match ch {
             '0'...'9' => self.parse_number(),
-            '-' | '+' | '*' | '/' => self.parse_arithmetic_op(),
+            '-' | '+' | '*' => self.parse_arithmetic_op(),
+            '/' => self.parse_comment(),
             'a'...'z'|'A'...'Z' => self.parse_name(),
             ':' => self.parse_declaration(),
             '=' => self.parse_assignment(),
@@ -123,17 +120,31 @@ impl<'a> Tokenizer<'a> {
             };
         }
 
-        Some(Token::Name(name))
+        let token = match name.as_ref() {
+            "fn" | "return" => Token::KeyName(name),
+            _ => Token::Name(name)
+        };
+        Some(token)
+    }
+
+    fn parse_comment(&mut self) -> Option<Token> {
+        assert_eq!(self.next()?, '/');
+        match self.next()? {
+            '/' => {
+                while self.next()? != '\n' {}
+                None
+            },
+            _ => Some(Token::Op(ArithmeticOp::Div))
+        }
     }
 
     fn parse_arithmetic_op(&mut self) -> Option<Token> {
-        let ch = self.next()?;
-        let op = match ch {
+        let op = match self.next()? {
             '+' => ArithmeticOp::Add,
             '-' => ArithmeticOp::Sub,
             '*' => ArithmeticOp::Mul,
             '/' => ArithmeticOp::Div,
-            _ => panic!("Encountered invalid character in number scope '{}'", ch)
+            ch => panic!("Encountered invalid character in number scope '{}'", ch)
         };
         Some(Token::Op(op))
     }

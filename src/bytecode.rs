@@ -5,7 +5,7 @@ use foreign_functions::ForeignFunction;
 use std::mem;
 use std::ops::AddAssign;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Bytecode {
     pub procedure_address: usize,
     pub code: Vec<Instruction>,
@@ -20,7 +20,7 @@ impl Bytecode {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Instruction {
     AddI,
     SubI,
@@ -57,14 +57,14 @@ enum AddressKind {
     ForeignFunction,
     Function,
     StackValue,
-    ConstStackValue,
-    HeapValue,
+    ConstStackValue
 }
 
 struct Scope {
     parent: Option<Box<Scope>>,
     variables: HashMap<String, Address>,
     allocations: usize,
+    include_parent_allocations: bool,
     code: Vec<Instruction>,
 }
 
@@ -75,6 +75,7 @@ impl Scope {
             variables: HashMap::new(),
             allocations: 0,
             code: Vec::new(),
+            include_parent_allocations: true
         }
     }
 }
@@ -155,12 +156,35 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn get_stack_allocation_offset(&self) -> usize {
         let mut offset = self.scope.allocations;
-        let mut parent = &self.scope.parent;
-        while let Some(scope) = parent {
-            offset += scope.allocations;
-            parent = &scope.parent;
-        };
+        if self.scope.include_parent_allocations {
+            let mut parent = &self.scope.parent;
+            while let Some(scope) = parent {
+                offset += scope.allocations;
+                if scope.include_parent_allocations {
+                    parent = &scope.parent;
+                } else {
+                    parent = &None
+                }
+            };
+        }
         offset
+    }
+
+    fn push_scope_ignore_parent(&mut self) {
+        let mut scope = Scope::new();
+        scope.include_parent_allocations = false;
+        let parent = mem::replace(&mut self.scope, scope);
+        self.scope.parent = Some(Box::new(parent));
+    }
+
+    fn push_scope(&mut self) {
+        let parent = mem::replace(&mut self.scope, Scope::new());
+        self.scope.parent = Some(Box::new(parent));
+    }
+
+    fn pop_scope(&mut self) -> Scope {
+        let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
+        mem::replace(&mut self.scope, parent)
     }
 
     fn ev_node(&mut self, node: &AstNode) -> StackUsage {
@@ -183,15 +207,15 @@ impl<'a> BytecodeGenerator<'a> {
     fn ev_procedure(&mut self, symbol: &str, args: &[String], body: &[AstNode]) -> StackUsage {
         let proc_address = self.procedures.len();
 
-        {
-            self.push_scope();
-            for arg in args {
+        let scope = {
+            self.push_scope_ignore_parent();
+            for arg in args.iter().rev() {
                 let offset = self.get_stack_allocation_offset();
                 self.scope.allocations += 1;
                 self.scope.variables.insert(arg.to_string(), Address { addr: offset, kind: AddressKind::StackValue });
             }
 
-            {
+            let scope = {
                 self.push_scope();
 
                 let mut stack_usage = StackUsage::new(0, 0);
@@ -199,30 +223,30 @@ impl<'a> BytecodeGenerator<'a> {
                     stack_usage += self.ev_node(node);
                 }
                 assert_eq!(stack_usage.popped, stack_usage.pushed);
+                self.pop_scope()
+            };
 
-                let scope = self.pop_scope();
-
-                for _ in 0..scope.allocations {
-                    self.procedures.push(Instruction::PushImmediate(0));
-                }
-
-                for instruction in scope.code {
-                    self.procedures.push(instruction)
-                }
-
-                for _ in 0..scope.allocations {
-                    self.procedures.push(Instruction::Pop);
-                }
+            for _ in 0..scope.allocations {
+                self.procedures.push(Instruction::PushImmediate(0));
             }
 
-            let scope = self.pop_scope();
+            for instruction in scope.code {
+                self.procedures.push(instruction)
+            }
+
             for _ in 0..scope.allocations {
                 self.procedures.push(Instruction::Pop);
             }
 
-            self.procedures.push(Instruction::PopFrame);
-            self.procedures.push(Instruction::PopPc);
+            self.pop_scope()
+        };
+
+        for _ in 0..scope.allocations {
+            self.procedures.push(Instruction::Pop);
         }
+
+        self.procedures.push(Instruction::PopFrame);
+        self.procedures.push(Instruction::PopPc);
 
         self.scope.variables.insert(symbol.to_string(), Address {addr: proc_address, kind: AddressKind::Function});
 
@@ -285,7 +309,7 @@ impl<'a> BytecodeGenerator<'a> {
 
 
     fn ev_call(&mut self, symbol: &str, args: &[AstNode]) -> StackUsage {
-        let address = self.find_address(symbol).expect("Symbol not found in the current scope");
+        let address = self.find_address(symbol).expect(&format!("Symbol '{}' not found in the current scope", symbol));
 
         match address.kind {
             AddressKind::ForeignFunction => {
@@ -316,16 +340,6 @@ impl<'a> BytecodeGenerator<'a> {
             }
             _ => unimplemented!()
         }
-    }
-
-    fn push_scope(&mut self) {
-        let parent = mem::replace(&mut self.scope, Scope::new());
-        self.scope.parent = Some(Box::new(parent));
-    }
-
-    fn pop_scope(&mut self) -> Scope {
-        let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
-        mem::replace(&mut self.scope, parent)
     }
 
     fn ev_scope(&mut self, children: &Vec<AstNode>) -> StackUsage {
