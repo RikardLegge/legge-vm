@@ -6,7 +6,14 @@ pub struct Interpreter<'a> {
     frame_pointer: usize,
     pub heap: Vec<i64>,
     pub stack: Vec<i64>,
-    pub foreign_functions: &'a [ForeignFunction]
+    pub foreign_functions: &'a [ForeignFunction],
+    pub log_level: InterpLogLevel
+}
+
+#[derive(Debug, PartialOrd, PartialEq)]
+pub enum InterpLogLevel {
+    None,
+    LogDebug
 }
 
 #[derive(Debug)]
@@ -31,7 +38,14 @@ impl<'a> Interpreter<'a> {
             program_counter: 0,
             stack: Vec::with_capacity(1000),
             heap: Vec::with_capacity(10000),
-            foreign_functions
+            foreign_functions,
+            log_level: InterpLogLevel::None
+        }
+    }
+
+    fn debug_log(&self, level: InterpLogLevel, info: &str) {
+        if self.log_level >= level {
+            println!("{}", info);
         }
     }
 
@@ -72,42 +86,73 @@ impl<'a> Interpreter<'a> {
 
     fn run_command(&mut self, cmd: &Instruction, code: &Bytecode) -> InterpResult {
         use self::Instruction::*;
-        
+        use self::InterpLogLevel::*;
+
+        self.debug_log(LogDebug, &format!("PC: {} \t Inst: {:?} \t Stack size: {}", self.program_counter, cmd, self.stack.len()));
         self.program_counter += 1;
         match cmd {
             AddI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
-                self.stack.push(n2 + n1);
+                let sum = n2 + n1;
+                self.stack.push(sum);
+                self.debug_log(LogDebug, &format!("{}", sum));
             }
             SubI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
-                self.stack.push(n2 - n1);
+                let diff = n2 - n1;
+                self.stack.push(diff);
+                self.debug_log(LogDebug, &format!("{}", diff));
             }
             MulI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
-                self.stack.push(n2 * n1);
+                let prod = n2 * n1;
+                self.stack.push(prod);
+                self.debug_log(LogDebug, &format!("{}", prod));
             }
             DivI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
-                self.stack.push(n2 / n1);
+                let kvote = n2 / n1;
+                self.stack.push(kvote);
+                self.debug_log(LogDebug, &format!("{}", kvote));
             }
             SStore(offset) => {
                 let value = self.pop_stack()?;
                 self.stack[self.frame_pointer + offset] = value;
+                self.debug_log(LogDebug, &format!("{}", value));
             }
             SLoad(offset) => {
                 let value = self.stack[self.frame_pointer + offset];
                 self.stack.push(value);
+                self.debug_log(LogDebug, &format!("{}", value));
             }
             PushImmediate(primitive) => self.stack.push(*primitive),
             Pop => {self.pop_stack()?;}
             CallForeign(addr) => {
                 let function =&self.foreign_functions[*addr as usize].function;
                 function(self, code)?;
+            },
+            PushPc(offset) => {
+                self.push_stack((offset + self.program_counter) as i64);
+            }
+            PopPc => {
+                self.program_counter = self.pop_stack()? as usize;
+            }
+            Call(addr) => {
+                self.program_counter = code.procedure_address + addr;
+            }
+            PushFrame => {
+                self.push_stack(self.frame_pointer as i64);
+            }
+            SetFrame(offset) => {
+                let end = self.stack.len() as i64;
+                self.frame_pointer = (end + *offset) as usize;
+            }
+            PopFrame => {
+                self.frame_pointer = self.pop_stack()? as usize;
             }
             _ => panic!("Instruction not implemented: {:?}", cmd)
         }
@@ -126,6 +171,7 @@ impl<'a> Interpreter<'a> {
         self.setup(code);
 
         while let Some(cmd) = code.code.get(self.program_counter) {
+            if cmd == &Instruction::Halt {break;}
             if let Err(err) = self.run_command(cmd, code) {
                 panic!("{:?}", err);
             }

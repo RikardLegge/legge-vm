@@ -7,6 +7,7 @@ use std::ops::AddAssign;
 
 #[derive(Debug)]
 pub struct Bytecode {
+    pub procedure_address: usize,
     pub code: Vec<Instruction>,
     pub data: Vec<i64>,
 }
@@ -19,7 +20,7 @@ impl Bytecode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Instruction {
     AddI,
     SubI,
@@ -29,10 +30,20 @@ pub enum Instruction {
     SLoad(usize),
     SStore(usize),
 
+    PushPc(usize),
+    PopPc,
+
     PushImmediate(i64),
     Pop,
 
+    SetFrame(i64),
+    PushFrame,
+    PopFrame,
+
+    Call(usize),
     CallForeign(usize),
+
+    Halt,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -91,20 +102,31 @@ struct BytecodeGenerator<'a> {
     code: Vec<Instruction>,
     heap: Vec<i64>,
     scope: Scope,
+    procedures: Vec<Instruction>,
     foreign_functions: &'a [ForeignFunction],
 }
 
 impl<'a> BytecodeGenerator<'a> {
     fn get_bytecode(self) -> Bytecode {
-        Bytecode { code: self.code, data: self.heap }
+        let data = self.heap;
+
+        let mut code = self.code;
+        code.push(Instruction::Halt);
+        let procedure_address = code.len();
+
+        let mut procedures = self.procedures;
+        code.append(&mut procedures);
+
+        Bytecode { code, data, procedure_address }
     }
 
     fn new(foreign_functions: &'a [ForeignFunction]) -> Self {
         let scope = Scope::new();
         let code = Vec::new();
         let heap = Vec::new();
+        let procedures = Vec::new();
 
-        let mut gen = BytecodeGenerator { code, scope, foreign_functions, heap };
+        let mut gen = BytecodeGenerator { code, scope, foreign_functions, heap, procedures };
         for (addr, function) in foreign_functions.iter().enumerate() {
             let name = function.name.to_string();
             let address = Address { addr, kind: AddressKind::ForeignFunction };
@@ -153,8 +175,58 @@ impl<'a> BytecodeGenerator<'a> {
             GetVariable(name) => self.ev_variable_value(&name),
             String(value) => self.ev_string(&value),
             Assignment(name, expr) => self.ev_assignment(&name, expr, false),
+            ProcedureDeclaration(name, args, body) => self.ev_procedure(name, &args, body),
             _ => panic!("Unsupported node here {:?}", node)
         }
+    }
+
+    fn ev_procedure(&mut self, symbol: &str, args: &[String], body: &[AstNode]) -> StackUsage {
+        let proc_address = self.procedures.len();
+
+        {
+            self.push_scope();
+            for arg in args {
+                let offset = self.get_stack_allocation_offset();
+                self.scope.allocations += 1;
+                self.scope.variables.insert(arg.to_string(), Address { addr: offset, kind: AddressKind::StackValue });
+            }
+
+            {
+                self.push_scope();
+
+                let mut stack_usage = StackUsage::new(0, 0);
+                for node in body {
+                    stack_usage += self.ev_node(node);
+                }
+                assert_eq!(stack_usage.popped, stack_usage.pushed);
+
+                let scope = self.pop_scope();
+
+                for _ in 0..scope.allocations {
+                    self.procedures.push(Instruction::PushImmediate(0));
+                }
+
+                for instruction in scope.code {
+                    self.procedures.push(instruction)
+                }
+
+                for _ in 0..scope.allocations {
+                    self.procedures.push(Instruction::Pop);
+                }
+            }
+
+            let scope = self.pop_scope();
+            for _ in 0..scope.allocations {
+                self.procedures.push(Instruction::Pop);
+            }
+
+            self.procedures.push(Instruction::PopFrame);
+            self.procedures.push(Instruction::PopPc);
+        }
+
+        self.scope.variables.insert(symbol.to_string(), Address {addr: proc_address, kind: AddressKind::Function});
+
+        StackUsage::new(0, 0)
     }
 
     fn ev_string(&mut self, string: &str) -> StackUsage {
@@ -215,27 +287,49 @@ impl<'a> BytecodeGenerator<'a> {
     fn ev_call(&mut self, symbol: &str, args: &[AstNode]) -> StackUsage {
         let address = self.find_address(symbol).expect("Symbol not found in the current scope");
 
-        let popped = match address.kind {
+        match address.kind {
             AddressKind::ForeignFunction => {
                 let mut popped = 0;
                 for arg in args {
-                    let usage = self.ev_node(arg);
+                    let usage = self.ev_expression(arg);
                     assert_eq!(1, usage.pushed);
                     popped += usage.popped;
                 }
                 self.push_instruction(Instruction::PushImmediate(args.len() as i64));
                 self.push_instruction(Instruction::CallForeign(address.addr));
-                popped
+                let pushed = self.foreign_functions[address.addr].returns;
+                StackUsage::new(popped, pushed)
+            }
+            AddressKind::Function => {
+                let call_instruction_count = 3;
+                self.push_instruction(Instruction::PushPc(args.len() + call_instruction_count));
+                self.push_instruction(Instruction::PushFrame);
+                let mut popped = 0;
+                for arg in args {
+                    let usage = self.ev_expression(arg);
+                    assert_eq!(1, usage.pushed);
+                    popped += usage.popped;
+                }
+                self.push_instruction(Instruction::SetFrame(-(args.len() as i64)));
+                self.push_instruction(Instruction::Call(address.addr));
+                StackUsage::new(popped, 0)
             }
             _ => unimplemented!()
-        };
-        let pushed = self.foreign_functions[address.addr].returns;
-        StackUsage::new(popped, pushed)
+        }
+    }
+
+    fn push_scope(&mut self) {
+        let parent = mem::replace(&mut self.scope, Scope::new());
+        self.scope.parent = Some(Box::new(parent));
+    }
+
+    fn pop_scope(&mut self) -> Scope {
+        let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
+        mem::replace(&mut self.scope, parent)
     }
 
     fn ev_scope(&mut self, children: &Vec<AstNode>) -> StackUsage {
-        let parent = mem::replace(&mut self.scope, Scope::new());
-        self.scope.parent = Some(Box::new(parent));
+        self.push_scope();
 
         let mut stack_usage = StackUsage::new(0, 0);
         for node in children {
@@ -243,8 +337,7 @@ impl<'a> BytecodeGenerator<'a> {
         }
         assert_eq!(stack_usage.popped, stack_usage.pushed);
 
-        let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
-        let scope = mem::replace(&mut self.scope, parent);
+        let scope = self.pop_scope();
 
         for _ in 0..scope.allocations {
             self.code.push(Instruction::PushImmediate(0));
