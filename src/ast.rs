@@ -125,6 +125,8 @@ impl<'a> TopDownAstParser<'a> {
     fn do_scope_content(&mut self) -> AstResult {
         use ::token::Token::*;
 
+        let old_stack = mem::replace(&mut self.stack, Vec::new());
+
         while self.has_token() {
             if *self.peek_token()? == RightCurlyBrace { break; }
 
@@ -142,7 +144,7 @@ impl<'a> TopDownAstParser<'a> {
             self.stack.push(statement);
         }
 
-        let stack = mem::replace(&mut self.stack, Vec::new());
+        let stack = mem::replace(&mut self.stack, old_stack);
         let scope = AstNode::Scope(stack);
         Ok(scope)
     }
@@ -225,7 +227,7 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_procedure(&mut self, symbol: &str) -> AstResult {
-        if Token::KeyName("fn".to_string()) == self.next_token()? {} else {panic!("This is not a procedure declaration")}
+        if Token::KeyName("fn".to_string()) != self.next_token()? {panic!("This is not a procedure declaration")}
         assert_eq!(self.next_token()?, Token::LeftBrace);
         let mut arguments = Vec::new();
         while self.peek_token()? != &Token::RightBrace {
@@ -242,10 +244,13 @@ impl<'a> TopDownAstParser<'a> {
                 break;
             }
         }
-        assert_eq!(self.next_token()?, Token::RightBrace);
 
+        assert_eq!(self.next_token()?, Token::RightBrace);
         assert_eq!(self.next_token()?, Token::LeftCurlyBrace);
-        if let AstNode::Scope(children) = self.do_scope()? {
+
+        let scope = self.do_scope();
+
+        if let AstNode::Scope(children) = scope? {
             Ok(AstNode::ProcedureDeclaration(symbol.to_string(), arguments, children))
         } else {
             panic!("Result of scope evaluation was not a scope");

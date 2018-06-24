@@ -1,20 +1,12 @@
-log_add_2 :: fn (a,b) {
+c :: 10;
+
+log_three :: fn (a,b,d) {
     log(a,b);
+    log(b,d);
 }
 
-log_add :: fn (a,b) {
-    log_add_2(a,b);
+log_two :: fn (a,b,d) {
+    log_three(a,b,d);
 }
 
-{
-    a :: 2 * (2 + 3);
-    log(a);
-    a :: 11;
-    b :: 12;
-    log_add(a,b);
-    {
-        a := one();
-        a = a + 2;
-        log(a + b * 10);
-    }
-}
+log_two(1,2,c);

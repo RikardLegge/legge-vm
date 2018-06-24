@@ -64,7 +64,7 @@ struct Scope {
     parent: Option<Box<Scope>>,
     variables: HashMap<String, Address>,
     allocations: usize,
-    include_parent_allocations: bool,
+    is_frame: bool,
     code: Vec<Instruction>,
 }
 
@@ -75,7 +75,7 @@ impl Scope {
             variables: HashMap::new(),
             allocations: 0,
             code: Vec::new(),
-            include_parent_allocations: true
+            is_frame: false
         }
     }
 }
@@ -140,41 +140,53 @@ impl<'a> BytecodeGenerator<'a> {
         self.scope.code.push(instruction);
     }
 
-    fn find_address_in_scope(&self, symbol: &str, scope: &Scope) -> Option<Address> {
+    fn find_address_in_scope(&self, symbol: &str, scope: &Scope, recurse_frames: bool) -> Option<Address> {
         if let Some(val) = scope.variables.get(symbol) {
-            Some(*val)
-        } else if let Some(parent) = &scope.parent {
-            self.find_address_in_scope(symbol, &*parent)
-        } else {
-            None
+            return Some(*val)
+        } else if !scope.is_frame || recurse_frames {
+            if let Some(parent) = &scope.parent {
+                return self.find_address_in_scope(symbol, &*parent, recurse_frames)
+            }
         }
+
+        None
     }
 
-    fn find_address(&self, symbol: &str) -> Option<Address> {
-        self.find_address_in_scope(symbol, &self.scope)
+    fn find_fn_address(&self, symbol: &str) -> Option<Address> {
+        self.find_address_in_scope(symbol, &self.scope, true)
+    }
+
+    fn find_var_address(&self, symbol: &str) -> Option<Address> {
+        self.find_address_in_scope(symbol, &self.scope, false)
     }
 
     fn get_stack_allocation_offset(&self) -> usize {
         let mut offset = self.scope.allocations;
-        if self.scope.include_parent_allocations {
+        if !self.scope.is_frame {
             let mut parent = &self.scope.parent;
             while let Some(scope) = parent {
                 offset += scope.allocations;
-                if scope.include_parent_allocations {
-                    parent = &scope.parent;
-                } else {
+                if scope.is_frame {
                     parent = &None
+                } else {
+                    parent = &scope.parent;
                 }
             };
         }
         offset
     }
 
-    fn push_scope_ignore_parent(&mut self) {
+    fn push_frame(&mut self) {
         let mut scope = Scope::new();
-        scope.include_parent_allocations = false;
+        scope.is_frame = true;
         let parent = mem::replace(&mut self.scope, scope);
         self.scope.parent = Some(Box::new(parent));
+    }
+
+    fn pop_frame(&mut self) -> Scope {
+        assert!(self.scope.is_frame);
+        let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
+        mem::replace(&mut self.scope, parent)
     }
 
     fn push_scope(&mut self) {
@@ -183,6 +195,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn pop_scope(&mut self) -> Scope {
+        assert!(!self.scope.is_frame);
         let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
         mem::replace(&mut self.scope, parent)
     }
@@ -207,9 +220,9 @@ impl<'a> BytecodeGenerator<'a> {
     fn ev_procedure(&mut self, symbol: &str, args: &[String], body: &[AstNode]) -> StackUsage {
         let proc_address = self.procedures.len();
 
-        let scope = {
-            self.push_scope_ignore_parent();
-            for arg in args.iter().rev() {
+        let frame = {
+            self.push_frame();
+            for arg in args.iter() {
                 let offset = self.get_stack_allocation_offset();
                 self.scope.allocations += 1;
                 self.scope.variables.insert(arg.to_string(), Address { addr: offset, kind: AddressKind::StackValue });
@@ -220,6 +233,10 @@ impl<'a> BytecodeGenerator<'a> {
 
                 let mut stack_usage = StackUsage::new(0, 0);
                 for node in body {
+                    // @BUG
+                    // Does currently not handle nested method declarations
+                    // Evaluation of child nodes of type procedure must be
+                    // delayed until all the current procedure code is generated
                     stack_usage += self.ev_node(node);
                 }
                 assert_eq!(stack_usage.popped, stack_usage.pushed);
@@ -238,10 +255,10 @@ impl<'a> BytecodeGenerator<'a> {
                 self.procedures.push(Instruction::Pop);
             }
 
-            self.pop_scope()
+            self.pop_frame()
         };
 
-        for _ in 0..scope.allocations {
+        for _ in 0..frame.allocations {
             self.procedures.push(Instruction::Pop);
         }
 
@@ -266,7 +283,7 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn ev_variable_value(&mut self, symbol: &str) -> StackUsage {
         use self::AddressKind::*;
-        let address = self.find_address(symbol).expect("Symbol not found in the current scope");
+        let address = self.find_var_address(symbol).expect(&format!("Variable symbol '{}' not found in the current scope", symbol));
         match address.kind {
             StackValue | ConstStackValue => {
                 let offset = address.addr;
@@ -280,7 +297,7 @@ impl<'a> BytecodeGenerator<'a> {
     fn ev_assignment(&mut self, symbol: &str, expr: &AstNode, is_declaration: bool) -> StackUsage {
         use ::ast::AstNode::*;
 
-        let address = self.find_address(symbol).expect("Symbol not found in the current scope");
+        let address = self.find_var_address(symbol).expect(&format!("Variable symbol '{}' not found in the current scope", symbol));
         if address.kind == AddressKind::ConstStackValue && !is_declaration {
             panic!("Can not assign to constant value");
         }
@@ -309,7 +326,7 @@ impl<'a> BytecodeGenerator<'a> {
 
 
     fn ev_call(&mut self, symbol: &str, args: &[AstNode]) -> StackUsage {
-        let address = self.find_address(symbol).expect(&format!("Symbol '{}' not found in the current scope", symbol));
+        let address = self.find_fn_address(symbol).expect(&format!("Function symbol '{}' not found in the current scope", symbol));
 
         match address.kind {
             AddressKind::ForeignFunction => {
@@ -329,6 +346,7 @@ impl<'a> BytecodeGenerator<'a> {
                 self.push_instruction(Instruction::PushPc(args.len() + call_instruction_count));
                 self.push_instruction(Instruction::PushFrame);
                 let mut popped = 0;
+
                 for arg in args {
                     let usage = self.ev_expression(arg);
                     assert_eq!(1, usage.pushed);

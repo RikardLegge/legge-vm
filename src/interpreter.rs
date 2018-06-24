@@ -69,12 +69,13 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn get_foreign_function_arguments(&mut self) -> Result<Vec<i64>, InterpError> {
-        let mut arguments = Vec::new();
-        let count = self.pop_stack()?;
+        let count = self.pop_stack()? as usize;
+        let mut arguments = Vec::with_capacity(count);
         for _ in 0..count {
             let argument = self.pop_stack()?;
             arguments.push(argument);
         }
+        arguments.reverse();
         Ok(arguments)
     }
 
