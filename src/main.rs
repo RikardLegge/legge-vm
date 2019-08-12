@@ -1,9 +1,3 @@
-#![feature(nll)]
-#![feature(test)]
-
-extern crate test;
-extern crate core;
-
 #[macro_use]
 extern crate serde_derive;
 extern crate bincode;

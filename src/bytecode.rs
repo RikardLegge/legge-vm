@@ -1,7 +1,7 @@
-use ast::{Ast, AstNode};
-use token::ArithmeticOp;
+use crate::ast::{Ast, AstNode};
+use crate::token::ArithmeticOp;
+use crate::foreign_functions::ForeignFunction;
 use std::collections::HashMap;
-use foreign_functions::ForeignFunction;
 use std::mem;
 use std::ops::AddAssign;
 
@@ -36,9 +36,9 @@ pub enum Instruction {
     PushImmediate(i64),
     Pop,
 
-    SetFrame(i64),
-    PushFrame,
-    PopFrame,
+    SetStackFrame(i64),
+    PushStackFrame,
+    PopStackFrame,
 
     Call(usize),
     CallForeign(usize),
@@ -201,7 +201,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_node(&mut self, node: &AstNode) -> StackUsage {
-        use ::ast::AstNode::*;
+        use crate::ast::AstNode::*;
         match node {
             Op(op, expr1, expr2) => self.ev_operation(*op, &expr1, &expr2),
             PrefixOp(op, expr1) => self.ev_prefix_operation(*op, &expr1),
@@ -262,7 +262,7 @@ impl<'a> BytecodeGenerator<'a> {
             self.procedures.push(Instruction::Pop);
         }
 
-        self.procedures.push(Instruction::PopFrame);
+        self.procedures.push(Instruction::PopStackFrame);
         self.procedures.push(Instruction::PopPc);
 
         self.scope.variables.insert(symbol.to_string(), Address {addr: proc_address, kind: AddressKind::Function});
@@ -295,7 +295,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_assignment(&mut self, symbol: &str, expr: &AstNode, is_declaration: bool) -> StackUsage {
-        use ::ast::AstNode::*;
+        use crate::ast::AstNode::*;
 
         let address = self.find_var_address(symbol).expect(&format!("Variable symbol '{}' not found in the current scope", symbol));
         if address.kind == AddressKind::ConstStackValue && !is_declaration {
@@ -344,7 +344,7 @@ impl<'a> BytecodeGenerator<'a> {
             AddressKind::Function => {
                 let call_instruction_count = 3;
                 self.push_instruction(Instruction::PushPc(args.len() + call_instruction_count));
-                self.push_instruction(Instruction::PushFrame);
+                self.push_instruction(Instruction::PushStackFrame);
                 let mut popped = 0;
 
                 for arg in args {
@@ -352,7 +352,7 @@ impl<'a> BytecodeGenerator<'a> {
                     assert_eq!(1, usage.pushed);
                     popped += usage.popped;
                 }
-                self.push_instruction(Instruction::SetFrame(-(args.len() as i64)));
+                self.push_instruction(Instruction::SetStackFrame(-(args.len() as i64)));
                 self.push_instruction(Instruction::Call(address.addr));
                 StackUsage::new(popped, 0)
             }
@@ -414,7 +414,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_expression(&mut self, expr: &AstNode) -> StackUsage {
-        use ::ast::AstNode::*;
+        use crate::ast::AstNode::*;
         match expr {
             Op(op, expr1, expr2) => self.ev_operation(*op, &expr1, &expr2),
             Primitive(primitive) => self.ev_intermediate(*primitive),

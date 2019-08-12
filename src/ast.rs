@@ -1,6 +1,6 @@
-use token::Token;
+use crate::token::Token;
+use crate::token::ArithmeticOp;
 use std::iter::Peekable;
-use token::ArithmeticOp;
 use std::mem;
 use std::vec::IntoIter;
 
@@ -54,7 +54,7 @@ pub struct TopDownAstParser<'a> {
 }
 
 fn get_precedence(token: &Token) -> usize {
-    use ::token::ArithmeticOp::*;
+    use crate::token::ArithmeticOp::*;
     match token {
         Token::Op(op) => match op {
             Add | Sub => 1,
@@ -123,7 +123,7 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_scope_content(&mut self) -> AstResult {
-        use ::token::Token::*;
+        use crate::token::Token::*;
 
         let old_stack = mem::replace(&mut self.stack, Vec::new());
 
@@ -150,7 +150,7 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_statement(&mut self) -> AstResult {
-        use ::token::Token::*;
+        use crate::token::Token::*;
         assert_eq!(0, self.statement_tokens.len());
 
         let token = self.next_token()?;
@@ -169,7 +169,7 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_expression(&mut self) -> AstResult {
-        use ::token::Token::*;
+        use crate::token::Token::*;
 
         let token = self.next_token()?;
         let node = match token {
@@ -258,7 +258,7 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_symbol(&mut self, symbol: &str) -> AstResult {
-        use ::token::Token::*;
+        use crate::token::Token::*;
 
         if symbol == "return" {
             let node = self.do_expression()?;

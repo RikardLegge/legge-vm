@@ -1,5 +1,5 @@
-use bytecode::{Bytecode, Instruction};
-use foreign_functions::ForeignFunction;
+use crate::bytecode::{Bytecode, Instruction};
+use crate::foreign_functions::ForeignFunction;
 
 pub struct Interpreter<'a> {
     program_counter: usize,
@@ -116,10 +116,10 @@ impl<'a> Interpreter<'a> {
             }
             SStore(offset) => {
                 let value = self.pop_stack()?;
-                self.stack[self.frame_pointer + offset] = value;
+                self.stack[self.frame_pointer + *offset] = value;
             }
             SLoad(offset) => {
-                let value = self.stack[self.frame_pointer + offset];
+                let value = self.stack[self.frame_pointer + *offset];
                 self.push_stack(value)?;
                 self.debug_log(LogEval, &format!("{}", value));
             }
@@ -136,16 +136,16 @@ impl<'a> Interpreter<'a> {
                 self.program_counter = self.pop_stack()? as usize;
             }
             Call(addr) => {
-                self.program_counter = code.procedure_address + addr;
+                self.program_counter = code.procedure_address + *addr;
             }
-            PushFrame => {
+            PushStackFrame => {
                 self.push_stack(self.frame_pointer as i64)?;
             }
-            SetFrame(offset) => {
+            SetStackFrame(offset) => {
                 let end = self.stack.len() as i64;
                 self.frame_pointer = (end + *offset) as usize;
             }
-            PopFrame => {
+            PopStackFrame => {
                 self.frame_pointer = self.pop_stack()? as usize;
             }
             _ => panic!("Instruction not implemented: {:?}", cmd)
@@ -170,6 +170,6 @@ impl<'a> Interpreter<'a> {
                 panic!("{:?}", err);
             }
         }
-        println!("{:?}", self.stack);
+        dbg!(&self.stack);
     }
 }

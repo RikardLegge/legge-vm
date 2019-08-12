@@ -1,4 +1,5 @@
 [package]
+edition = "2018"
 name = "hello-bc"
 version = "0.1.0"
 authors = ["Rikard Legge <rikard.legge@gmail.com>"]
@@ -7,6 +8,6 @@ authors = ["Rikard Legge <rikard.legge@gmail.com>"]
 lto = true
 
 [dependencies]
-serde = "1.0.65"
-serde_derive = "1.0.65"
-bincode = "1.0.0"
+serde = "1.0.98"
+serde_derive = "1.0.98"
+bincode = "1.1.4"

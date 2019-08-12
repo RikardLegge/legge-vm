@@ -1,5 +1,5 @@
-use interpreter::{Interpreter, InterpResult};
-use bytecode::Bytecode;
+use crate::interpreter::{Interpreter, InterpResult};
+use crate::bytecode::Bytecode;
 
 pub struct ForeignFunction {
     pub name: String,
