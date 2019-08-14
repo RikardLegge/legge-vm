@@ -1,28 +1,30 @@
-use crate::interpreter::{Interpreter, InterpResult};
-use crate::bytecode::Bytecode;
+use crate::interpreter::{ForeignInterpResult};
 
 pub struct ForeignFunction {
     pub name: String,
-    pub arguments: i64,
+    pub arguments: Option<usize>,
     pub returns: usize,
-    pub function: &'static Fn(&mut Interpreter, &Bytecode) -> InterpResult
+    pub function: &'static Fn(&mut Vec<i64>) -> ForeignInterpResult
 }
 
 pub fn load_foreign_functions() -> Vec<ForeignFunction> {
-    let mut foreign_functions = Vec::new();
-    foreign_functions.push(ForeignFunction {name: "log".to_string(), arguments: -1, returns: 0, function: &log});
-    foreign_functions.push(ForeignFunction {name: "one".to_string(), arguments: 0, returns: 1, function: &one});
-    foreign_functions
+    return vec![
+        ForeignFunction {name: "log".to_string(), arguments: None, returns: 0, function: &log},
+        ForeignFunction {name: "assert".to_string(), arguments: Some(2), returns: 0, function: &assert}
+    ];
 }
 
-fn one(interp: &mut Interpreter, _bytecode: &Bytecode) -> InterpResult {
-    interp.get_foreign_function_arguments()?;
-    interp.push_stack(1)?;
-    Ok(())
+fn assert(args: &mut Vec<i64>) -> ForeignInterpResult {
+    if args.len() != 2 {
+        panic!("Assert must be called with two arguments")
+    }
+    if args[0] != args[1] {
+        panic!("assertion failed: {} != {}", args[0], args[1])
+    }
+    Ok(vec![])
 }
 
-fn log(interp: &mut Interpreter, _bytecode: &Bytecode) -> InterpResult {
-    let mut args = interp.get_foreign_function_arguments()?;
+fn log(args: &mut Vec<i64>) -> ForeignInterpResult {
     let last_arg = args.pop();
     for arg in args {
         print!("{:?}, ", arg);
@@ -32,5 +34,5 @@ fn log(interp: &mut Interpreter, _bytecode: &Bytecode) -> InterpResult {
     }
 
     println!();
-    Ok(())
+    Ok(vec![])
 }

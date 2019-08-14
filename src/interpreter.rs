@@ -31,6 +31,7 @@ impl InterpError {
 }
 
 pub type InterpResult = Result<(), InterpError>;
+pub type ForeignInterpResult = Result<Vec<i64>, InterpError>;
 pub type InterpPrimitiveResult = Result<i64, InterpError>;
 
 impl<'a> Interpreter<'a> {
@@ -39,10 +40,10 @@ impl<'a> Interpreter<'a> {
             frame_pointer: 0,
             program_counter: 0,
             stack: Vec::with_capacity(1000),
-            heap: Vec::with_capacity(10000),
+            heap: Vec::with_capacity(1000),
             foreign_functions,
-            log_level: InterpLogLevel::LogNone,
-            stack_max: 64000
+            log_level: InterpLogLevel::LogDebug,
+            stack_max: 20
         }
     }
 
@@ -91,51 +92,64 @@ impl<'a> Interpreter<'a> {
                 let n2 = self.pop_stack()?;
                 let sum = n2 + n1;
                 self.push_stack(sum)?;
-                self.debug_log(LogEval, &format!("{}", sum));
+                self.debug_log(LogEval, &format!("{} + {} = {}", n2, n1, sum));
             }
             SubI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let diff = n2 - n1;
                 self.push_stack(diff)?;
-                self.debug_log(LogEval, &format!("{}", diff));
+                self.debug_log(LogEval, &format!("{} - {} = {}", n2, n1, diff));
             }
             MulI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let prod = n2 * n1;
                 self.push_stack(prod)?;
-                self.debug_log(LogEval, &format!("{}", prod));
+                self.debug_log(LogEval, &format!("{} * {} = {}", n2, n1, prod));
             }
             DivI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let kvote = n2 / n1;
                 self.push_stack(kvote)?;
-                self.debug_log(LogEval, &format!("{}", kvote));
+                self.debug_log(LogEval, &format!("{} / {} = {}", n2, n1, kvote));
             }
             SStore(offset) => {
                 let value = self.pop_stack()?;
-                self.stack[self.frame_pointer + *offset] = value;
+                let index = self.frame_pointer as i64 + *offset;
+                assert!(index >= 0);
+                self.stack[index as usize] = value;
             }
             SLoad(offset) => {
-                let value = self.stack[self.frame_pointer + *offset];
+                let index = self.frame_pointer as i64 + *offset;
+                assert!(index >= 0);
+                let value = self.stack[index as usize];
                 self.push_stack(value)?;
                 self.debug_log(LogEval, &format!("{}", value));
             }
-            PushImmediate(primitive) => self.push_stack(*primitive)?,
+            PushImmediate(primitive, _) => self.push_stack(*primitive)?,
             Pop => {self.pop_stack()?;}
-            CallForeign(addr) => {
-                let function =&self.foreign_functions[*addr as usize].function;
-                function(self, code)?;
+            CallForeign(addr, _) => {
+                let function = &self.foreign_functions[*addr as usize];
+                let function_call = &function.function;
+                let mut args = self.get_foreign_function_arguments()?;
+                if let Some(args_count) = function.arguments {
+                    assert_eq!(args_count, args.len())
+                }
+                let return_values = function_call(&mut args)?;
+                assert_eq!(function.returns, return_values.len())
             },
             PushPc(offset) => {
                 self.push_stack((offset + self.program_counter) as i64)?;
             }
+            IncrementPc(pc) => {
+                self.program_counter = self.program_counter + *pc;
+            }
             PopPc => {
                 self.program_counter = self.pop_stack()? as usize;
             }
-            Call(addr) => {
+            Call(addr, _) => {
                 self.program_counter = code.procedure_address + *addr;
             }
             PushStackFrame => {
@@ -148,6 +162,7 @@ impl<'a> Interpreter<'a> {
             PopStackFrame => {
                 self.frame_pointer = self.pop_stack()? as usize;
             }
+            NoOp => {}
             _ => panic!("Instruction not implemented: {:?}", cmd)
         }
         Ok(())

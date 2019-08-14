@@ -20,6 +20,7 @@ pub enum Token {
     StaticDeclaration,
     Declaration,
     Assignment,
+    ReturnTypes,
     Name(String),
     KeyName(String),
     String(String),
@@ -68,7 +69,8 @@ impl<'a> Tokenizer<'a> {
         let ch = self.peek_ignore_whitespace()?;
         match ch {
             '0'...'9' => self.parse_number(),
-            '-' | '+' | '*' => self.parse_arithmetic_op(),
+            '+' | '*' => self.parse_arithmetic_op(),
+            '-'  => self.parse_return_type(),
             '/' => self.parse_comment(),
             'a'...'z'|'A'...'Z' => self.parse_name(),
             ':' => self.parse_declaration(),
@@ -81,6 +83,17 @@ impl<'a> Tokenizer<'a> {
             ';' => {self.next(); Some(Token::EndStatement)},
             '"' => self.parse_string(),
             _ => panic!("Encountered invalid character in global scope '{}'", ch)
+        }
+    }
+
+    fn parse_return_type(&mut self) -> Option<Token> {
+        assert_eq!(self.next()?, '-');
+        match self.peek()? {
+            '>' => {
+                self.next()?;
+                Some(Token::ReturnTypes)
+            },
+            _ => self.parse_arithmetic_op(),
         }
     }
 

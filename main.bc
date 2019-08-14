@@ -1,12 +1,15 @@
 c :: 10;
 
-log_three :: fn (a,b,d) {
-    log(a,b);
-    log(b,d);
+split :: fn (num) {
+    return num, num;
 }
 
-log_two :: fn (a,b,d) {
-    log_three(a,b,d);
+main :: fn (a,b,d) {
+    assert(a,1);
+    assert(b,2);
+    assert(d,10);
+    print(a);
 }
 
-log_two(1,2,c);
+print(c);
+//main(1,2,c);
