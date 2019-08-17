@@ -1,7 +1,7 @@
 c :: 10;
 
-split :: fn (num) {
-    return num, num;
+split :: fn (num) -> int{
+    return num;
 }
 
 main :: fn (a,b,d) {

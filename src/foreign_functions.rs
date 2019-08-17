@@ -1,16 +1,26 @@
-use crate::interpreter::{ForeignInterpResult};
+use crate::interpreter::ForeignInterpResult;
 
 pub struct ForeignFunction {
     pub name: String,
     pub arguments: Option<usize>,
     pub returns: usize,
-    pub function: &'static Fn(&mut Vec<i64>) -> ForeignInterpResult
+    pub function: &'static dyn Fn(&mut Vec<i64>) -> ForeignInterpResult,
 }
 
 pub fn load_foreign_functions() -> Vec<ForeignFunction> {
     return vec![
-        ForeignFunction {name: "log".to_string(), arguments: None, returns: 0, function: &log},
-        ForeignFunction {name: "assert".to_string(), arguments: Some(2), returns: 0, function: &assert}
+        ForeignFunction {
+            name: "log".to_string(),
+            arguments: None,
+            returns: 0,
+            function: &log,
+        },
+        ForeignFunction {
+            name: "assert".to_string(),
+            arguments: Some(2),
+            returns: 0,
+            function: &assert,
+        },
     ];
 }
 

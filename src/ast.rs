@@ -1,18 +1,19 @@
-use crate::token::Token;
 use crate::token::ArithmeticOp;
+use crate::token::Token;
 use std::iter::Peekable;
 use std::mem;
 use std::vec::IntoIter;
-use crate::token::Token::EndStatement;
 
 #[derive(Debug)]
 struct AstError {
-    details: String
+    details: String,
 }
 
 impl AstError {
     fn new(details: &str) -> AstError {
-        AstError { details: details.to_string() }
+        AstError {
+            details: details.to_string(),
+        }
     }
 }
 
@@ -37,12 +38,12 @@ pub enum AstNode {
     Return(Option<Box<AstNode>>),
     Call(String, Vec<AstNode>),
     String(String),
-    If(Box<AstNode>, Box<AstNode>)
+    If(Box<AstNode>, Box<AstNode>),
 }
 
 #[derive(Debug)]
 pub struct Ast {
-    pub root: AstNode
+    pub root: AstNode,
 }
 
 impl Ast {
@@ -66,9 +67,9 @@ fn get_precedence(token: &Token) -> usize {
         Token::Op(op) => match op {
             Eq => 0,
             Add | Sub => 1,
-            Mul | Div => 2
+            Mul | Div => 2,
         },
-        _ => 0
+        _ => 0,
     }
 }
 
@@ -81,20 +82,25 @@ impl<'a> TopDownAstParser<'a> {
         let stack = Vec::new();
         let scope = Vec::new();
         let statement_tokens = Vec::new();
-        TopDownAstParser { stack, scope, iter, statement_tokens }
+        TopDownAstParser {
+            stack,
+            scope,
+            iter,
+            statement_tokens,
+        }
     }
 
     fn next_token(&mut self) -> Result<Token, AstError> {
         match self.iter.next() {
             Some(val) => Ok(val),
-            None => Err(ast_error("No more tokens"))
+            None => Err(ast_error("No more tokens")),
         }
     }
 
     fn peek_token(&mut self) -> Result<&Token, AstError> {
         match self.iter.peek() {
             Some(val) => Ok(val),
-            None => Err(ast_error("No more tokens when peeking"))
+            None => Err(ast_error("No more tokens when peeking")),
         }
     }
 
@@ -105,7 +111,7 @@ impl<'a> TopDownAstParser<'a> {
     fn pop_stack(&mut self) -> AstResult {
         match self.stack.pop() {
             Some(val) => Ok(val),
-            None => Err(AstError::new("Stack empty, can not pop"))
+            None => Err(AstError::new("Stack empty, can not pop")),
         }
     }
 
@@ -120,7 +126,7 @@ impl<'a> TopDownAstParser<'a> {
                 assert_eq!(self.stack.len(), 0);
                 Ast { root }
             }
-            Err(e) => panic!("Ast error: {}", e.details)
+            Err(e) => panic!("Ast error: {}", e.details),
         }
     }
 
@@ -136,7 +142,9 @@ impl<'a> TopDownAstParser<'a> {
         let old_stack = mem::replace(&mut self.stack, Vec::new());
 
         while self.has_token() {
-            if *self.peek_token()? == Token::RightCurlyBrace { break; }
+            if *self.peek_token()? == Token::RightCurlyBrace {
+                break;
+            }
 
             let statement = self.do_statement()?;
 
@@ -144,8 +152,11 @@ impl<'a> TopDownAstParser<'a> {
                 Scope(..) | ProcedureDeclaration(..) | If(..) => (),
                 _ => match self.next_token()? {
                     Token::EndStatement => (),
-                    token => panic!("Token after statement was '{:?}', expecting ';'. The statement is {:?}", token, statement)
-                }
+                    token => panic!(
+                        "Token after statement was '{:?}', expecting ';'. The statement is {:?}",
+                        token, statement
+                    ),
+                },
             }
 
             self.stack.push(statement);
@@ -175,7 +186,7 @@ impl<'a> TopDownAstParser<'a> {
                     panic!("Can not have keyword '{:?}' here", keyword)
                 }
             }
-            other => panic!("Unkown token {:?}", other)
+            other => panic!("Unkown token {:?}", other),
         };
 
         self.statement_tokens.clear();
@@ -190,16 +201,14 @@ impl<'a> TopDownAstParser<'a> {
             Int(value) => AstNode::Primitive(value),
             Op(op) => self.do_operation(token, op)?,
             String(string) => AstNode::String(string),
-            Name(symbol) => {
-                self.do_expression_symbol(&symbol)?
-            },
+            Name(symbol) => self.do_expression_symbol(&symbol)?,
             LeftCurlyBrace => self.do_scope()?,
             LeftBrace => {
                 let node = self.do_expression()?;
                 assert_eq!(self.next_token()?, RightBrace);
                 node
             }
-            other => panic!("Unkown token {:?}", other)
+            other => panic!("Unkown token {:?}", other),
         };
 
         match self.peek_token()? {
@@ -209,7 +218,7 @@ impl<'a> TopDownAstParser<'a> {
                 let token = self.next_token()?;
                 Ok(self.do_operation(token, op)?)
             }
-            _ => Ok(node)
+            _ => Ok(node),
         }
     }
 
@@ -226,7 +235,7 @@ impl<'a> TopDownAstParser<'a> {
     fn do_operation(&mut self, token: Token, op: ArithmeticOp) -> AstResult {
         match token {
             Token::Op(_) => (),
-            _ => panic!("An opperation was not passed")
+            _ => panic!("An opperation was not passed"),
         }
         let node = {
             if let Ok(lhs) = self.pop_stack() {
@@ -250,7 +259,7 @@ impl<'a> TopDownAstParser<'a> {
                         let rhs = self.do_expression()?;
                         AstNode::PrefixOp(op, Box::new(rhs))
                     }
-                    _ => panic!("Can only use prefix operations for addition and subtraction")
+                    _ => panic!("Can only use prefix operations for addition and subtraction"),
                 }
             }
         };
@@ -258,7 +267,9 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_procedure(&mut self, symbol: &str) -> AstResult {
-        if Token::KeyName("fn".to_string()) != self.next_token()? { panic!("This is not a procedure declaration") }
+        if Token::KeyName("fn".to_string()) != self.next_token()? {
+            panic!("This is not a procedure declaration")
+        }
 
         assert_eq!(self.next_token()?, Token::LeftBrace);
         let mut arguments = Vec::new();
@@ -295,7 +306,12 @@ impl<'a> TopDownAstParser<'a> {
         let scope = self.do_scope();
 
         if let AstNode::Scope(children) = scope? {
-            Ok(AstNode::ProcedureDeclaration(symbol.to_string(), arguments, return_type, children))
+            Ok(AstNode::ProcedureDeclaration(
+                symbol.to_string(),
+                arguments,
+                return_type,
+                children,
+            ))
         } else {
             panic!("Result of scope evaluation was not a scope");
         }
@@ -306,32 +322,45 @@ impl<'a> TopDownAstParser<'a> {
 
         let token = self.peek_token()?;
         let node = match token {
-            LeftBrace => {
-                match symbol.as_ref() {
-                    "if" => self.do_if()?,
-                    symbol => self.do_function_call(symbol)?
-                }
-            }
+            LeftBrace => match symbol.as_ref() {
+                "if" => self.do_if()?,
+                symbol => self.do_function_call(symbol)?,
+            },
             StaticDeclaration => {
                 self.next_token()?;
                 if let Token::KeyName(name) = self.peek_token()? {
                     match name.as_ref() {
                         "fn" => self.do_procedure(symbol)?,
-                        key => panic!("Unknown key name '{:?}'", key)
+                        key => panic!("Unknown key name '{:?}'", key),
                     }
                 } else {
-                    AstNode::Assignment(AssignmentType::ConstDeclaration, symbol.to_string(), Box::new(self.do_expression()?))
+                    AstNode::Assignment(
+                        AssignmentType::ConstDeclaration,
+                        symbol.to_string(),
+                        Box::new(self.do_expression()?),
+                    )
                 }
             }
             Declaration => {
                 self.next_token()?;
-                AstNode::Assignment(AssignmentType::Declaration, symbol.to_string(), Box::new(self.do_expression()?))
+                AstNode::Assignment(
+                    AssignmentType::Declaration,
+                    symbol.to_string(),
+                    Box::new(self.do_expression()?),
+                )
             }
             Assignment => {
                 self.next_token()?;
-                AstNode::Assignment(AssignmentType::Assignment, symbol.to_string(), Box::new(self.do_expression()?))
+                AstNode::Assignment(
+                    AssignmentType::Assignment,
+                    symbol.to_string(),
+                    Box::new(self.do_expression()?),
+                )
             }
-            _ => panic!("Unknown token: {:?} when parsing symbol with name {:?}", token, symbol)
+            _ => panic!(
+                "Unknown token: {:?} when parsing symbol with name {:?}",
+                token, symbol
+            ),
         };
         Ok(node)
     }
@@ -341,13 +370,14 @@ impl<'a> TopDownAstParser<'a> {
 
         let token = self.peek_token()?;
         match token {
-            LeftBrace => {
-                self.do_function_call(symbol)
-            }
+            LeftBrace => self.do_function_call(symbol),
             Op(_) | RightBrace | EndStatement | ListSeparator => {
                 Ok(AstNode::GetVariable(symbol.to_string()))
             }
-            _ => panic!("Unkown token: {:?} when parsing symbol with name {:?}", token, symbol)
+            _ => panic!(
+                "Unkown token: {:?} when parsing symbol with name {:?}",
+                token, symbol
+            ),
         }
     }
 
@@ -369,7 +399,7 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_return(&mut self) -> AstResult {
-        if self.peek_token()? != &EndStatement {
+        if self.peek_token()? != &Token::EndStatement {
             let node = self.do_expression()?;
             Ok(AstNode::Return(Some(Box::new(node))))
         } else {

@@ -1,13 +1,9 @@
 [package]
 edition = "2018"
-name = "hello-bc"
+name = "legge-vm"
 version = "0.1.0"
 authors = ["Rikard Legge <rikard.legge@gmail.com>"]
 
-[profile.bench]
-lto = true
-
 [dependencies]
-serde = "1.0.98"
-serde_derive = "1.0.98"
+serde = { version = "1.0.98", features = ["derive"] }
 bincode = "1.1.4"

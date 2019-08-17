@@ -1,23 +1,17 @@
-#[macro_use]
-extern crate serde_derive;
-extern crate bincode;
-
-use std::io::prelude::*;
+use ast::Ast;
+use bincode::{deserialize, serialize};
+use bytecode::Bytecode;
+use foreign_functions::load_foreign_functions;
+use interpreter::Interpreter;
 use std::fs::File;
+use std::io::prelude::*;
+use token::Tokenizer;
 
-mod token;
 mod ast;
 mod bytecode;
-mod interpreter;
 mod foreign_functions;
-
-use token::Tokenizer;
-use ast::Ast;
-use bytecode::Bytecode;
-use interpreter::Interpreter;
-use foreign_functions::load_foreign_functions;
-use bincode::{serialize, deserialize};
-
+mod interpreter;
+mod token;
 
 fn main() {
     let filename = "main.bc";
@@ -33,7 +27,7 @@ fn main() {
 fn run_code(code: String) {
     let functions = load_foreign_functions();
 
-    let tokens = Tokenizer::parse(&mut code.chars().peekable().into_iter());
+    let tokens = Tokenizer::parse(&mut code.chars().into_iter().peekable());
     dbg!(&tokens);
 
     let ast = Ast::from_tokens(&mut tokens.into_iter().peekable());
@@ -55,203 +49,257 @@ mod tests {
 
     #[test]
     fn test_assert_true() {
-        run_code("
+        run_code(
+            "
             a :: 1;
             assert(a, 1);
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     #[should_panic]
     fn test_assert_false() {
-        run_code("
+        run_code(
+            "
             a :: 1;
             assert(a, 2);
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     fn single_argument_function_call() {
-        run_code("
+        run_code(
+            "
             main :: fn(a) {
                 assert(a, 1);
             }
             main(1);
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     #[should_panic]
     fn wrong_argument_function_call() {
-        run_code("
+        run_code(
+            "
             main :: fn(a) {}
             main(1,2);
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     fn function_early_return() {
-        run_code("
+        run_code(
+            "
             main :: fn() {
                 return;
                 assert(1,2);
             }
             main();
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     fn function_void_return_value_ok() {
-        run_code("
+        run_code(
+            "
             main :: fn() {
                 assert(1,1);
                 return;
             }
             main();
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     #[should_panic]
     fn function_void_return_value_err() {
-        run_code("
+        run_code(
+            "
             main :: fn() {
                 assert(1,2);
                 return;
             }
             main();
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     fn function_return_value_ok() {
-        run_code("
+        run_code(
+            "
             main :: fn() -> int {
                 return 1;
             }
             a :: main();
             assert(a, 1);
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     #[should_panic]
     fn function_return_value_err() {
-        run_code("
+        run_code(
+            "
             main :: fn() -> int {
                 return 1;
             }
             a :: main();
             assert(a, 2);
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     fn function_return_value_as_argument_ok() {
-        run_code("
+        run_code(
+            "
             main :: fn() -> int {
                 return 1;
             }
             assert(main(), 1);
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     #[should_panic]
     fn function_return_value_as_argument_err() {
-        run_code("
+        run_code(
+            "
             main :: fn() -> int {
                 return 1;
             }
             assert(main(), 2);
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     #[should_panic]
     fn function_return_value_without_location() {
-        run_code("
+        run_code(
+            "
             main :: fn() -> int {
                 return 1;
             }
             main();
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     fn if_ok() {
-        run_code("
+        run_code(
+            "
             if (1 == 1) {
                 assert(1,1);
             }
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     #[should_panic]
     fn if_err() {
-        run_code("
+        run_code(
+            "
             if (1 == 1) {
                 assert(1,2);
             }
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     fn if_not_ok() {
-        run_code("
+        run_code(
+            "
             if (1 == 2) {
                 assert(1,2);
             }
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     #[should_panic]
     fn if_not_err() {
-        run_code("
+        run_code(
+            "
             if (1 == 2) {
                 assert(1,2);
             }
             assert(1,2);
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     fn if_nested_ok() {
-        run_code("
+        run_code(
+            "
             if (1 == 1) {
                 if (1 == 2) {
                     assert(1,2);
                 }
             }
-        ".into());
+        "
+            .into(),
+        );
     }
 
     #[test]
     #[should_panic]
     fn if_nested_err() {
-        run_code("
+        run_code(
+            "
             if (1 == 1) {
                 if (1 == 1) {
                     assert(1,2);
                 }
             }
-        ".into());
+        "
+            .into(),
+        );
     }
 
-//    #[test]
-//    fn recursion() {
-//        run_code("
-//            loop :: fn(n) {
-//                if (n == 0) {
-//                    return 1;
-//                }
-//                return loop(n+1) + 1;
-//            }
-//            assert(loop(10),10);
-//        ".into());
-//    }
+    //    #[test]
+    //    fn recursion() {
+    //        run_code("
+    //            loop :: fn(n) {
+    //                if (n == 0) {
+    //                    return 1;
+    //                }
+    //                return loop(n+1) + 1;
+    //            }
+    //            assert(loop(10),10);
+    //        ".into());
+    //    }
 }
 
 //    use test::Bencher;

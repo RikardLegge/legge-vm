@@ -8,7 +8,7 @@ pub struct Interpreter<'a> {
     pub stack: Vec<i64>,
     pub foreign_functions: &'a [ForeignFunction],
     pub log_level: InterpLogLevel,
-    pub stack_max: usize
+    pub stack_max: usize,
 }
 
 #[allow(dead_code)]
@@ -21,12 +21,14 @@ pub enum InterpLogLevel {
 
 #[derive(Debug)]
 pub struct InterpError {
-    details: String
+    details: String,
 }
 
 impl InterpError {
     pub fn new(details: &str) -> InterpError {
-        InterpError { details: details.to_string() }
+        InterpError {
+            details: details.to_string(),
+        }
     }
 }
 
@@ -43,7 +45,7 @@ impl<'a> Interpreter<'a> {
             heap: Vec::with_capacity(1000),
             foreign_functions,
             log_level: InterpLogLevel::LogDebug,
-            stack_max: 20
+            stack_max: 20,
         }
     }
 
@@ -56,7 +58,7 @@ impl<'a> Interpreter<'a> {
     pub fn pop_stack(&mut self) -> InterpPrimitiveResult {
         match self.stack.pop() {
             Some(val) => Ok(val),
-            None => Err(InterpError::new("Stack empty, can not pop"))
+            None => Err(InterpError::new("Stack empty, can not pop")),
         }
     }
 
@@ -84,7 +86,15 @@ impl<'a> Interpreter<'a> {
         use self::Instruction::*;
         use self::InterpLogLevel::*;
 
-        self.debug_log(LogDebug, &format!("PC: {} \t SP: {} \t Inst: {:?}", self.program_counter, self.stack.len(), cmd));
+        self.debug_log(
+            LogDebug,
+            &format!(
+                "PC: {} \t SP: {} \t Inst: {:?}",
+                self.program_counter,
+                self.stack.len(),
+                cmd
+            ),
+        );
         self.program_counter += 1;
         match cmd {
             AddI => {
@@ -136,7 +146,9 @@ impl<'a> Interpreter<'a> {
                 self.debug_log(LogEval, &format!("{}", value));
             }
             PushImmediate(primitive, _) => self.push_stack(*primitive)?,
-            Pop => { self.pop_stack()?; }
+            Pop => {
+                self.pop_stack()?;
+            }
             CallForeign(addr, _) => {
                 let function = &self.foreign_functions[*addr as usize];
                 let function_call = &function.function;
@@ -176,7 +188,7 @@ impl<'a> Interpreter<'a> {
                 self.frame_pointer = self.pop_stack()? as usize;
             }
             NoOp => {}
-            _ => panic!("Instruction not implemented: {:?}", cmd)
+            _ => panic!("Instruction not implemented: {:?}", cmd),
         }
         Ok(())
     }
@@ -193,7 +205,9 @@ impl<'a> Interpreter<'a> {
         self.setup(code);
 
         while let Some(cmd) = code.code.get(self.program_counter) {
-            if cmd == &Instruction::Halt { break; }
+            if cmd == &Instruction::Halt {
+                break;
+            }
             if let Err(err) = self.run_command(cmd, code) {
                 panic!("{:?}", err);
             }
