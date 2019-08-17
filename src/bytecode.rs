@@ -42,8 +42,8 @@ pub enum Instruction {
     SLoad(i64),
     SStore(i64),
 
-    Branch(usize),
-    BranchIf(usize),
+    Branch(isize),
+    BranchIf(isize),
     PushPc(usize),
     PopPc,
 
@@ -310,7 +310,8 @@ impl<'a> BytecodeGenerator<'a> {
             panic!("The body of an if statement must be a scope");
         }
         let end = self.scope.code.len();
-        self.scope.code[jump_index] = Instruction::BranchIf(end - start);
+        let end_of_if = (end - start) as isize;
+        self.scope.code[jump_index] = Instruction::BranchIf(end_of_if);
 
         StackUsage {
             popped: 0,
@@ -383,7 +384,7 @@ impl<'a> BytecodeGenerator<'a> {
                     if return_pc == 0 {
                         self.procedures.push(Instruction::NoOp);
                     } else {
-                        self.procedures.push(Instruction::Branch(return_pc));
+                        self.procedures.push(Instruction::Branch(return_pc as isize));
                     }
                 } else {
                     self.procedures.push(instruction)

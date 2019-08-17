@@ -163,12 +163,12 @@ impl<'a> Interpreter<'a> {
                 self.push_stack((offset + self.program_counter) as i64)?;
             }
             Branch(pc) => {
-                self.program_counter = self.program_counter + *pc;
+                self.program_counter = (self.program_counter as isize + *pc) as usize;
             }
             BranchIf(pc) => {
                 let value = self.pop_stack()?;
                 if value != 0 {
-                    self.program_counter = self.program_counter + *pc;
+                    self.program_counter = (self.program_counter as isize + *pc) as usize;
                 }
             }
             PopPc => {
