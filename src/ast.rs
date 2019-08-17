@@ -37,6 +37,7 @@ pub enum AstNode {
     Return(Option<Box<AstNode>>),
     Call(String, Vec<AstNode>),
     String(String),
+    If(Box<AstNode>, Box<AstNode>)
 }
 
 #[derive(Debug)]
@@ -63,6 +64,7 @@ fn get_precedence(token: &Token) -> usize {
     use crate::token::ArithmeticOp::*;
     match token {
         Token::Op(op) => match op {
+            Eq => 0,
             Add | Sub => 1,
             Mul | Div => 2
         },
@@ -129,20 +131,19 @@ impl<'a> TopDownAstParser<'a> {
     }
 
     fn do_scope_content(&mut self) -> AstResult {
-        use crate::token::Token::*;
+        use AstNode::*;
 
         let old_stack = mem::replace(&mut self.stack, Vec::new());
 
         while self.has_token() {
-            if *self.peek_token()? == RightCurlyBrace { break; }
+            if *self.peek_token()? == Token::RightCurlyBrace { break; }
 
             let statement = self.do_statement()?;
 
             match statement {
-                AstNode::Scope(..) => (),
-                AstNode::ProcedureDeclaration(..) => (),
+                Scope(..) | ProcedureDeclaration(..) | If(..) => (),
                 _ => match self.next_token()? {
-                    EndStatement => (),
+                    Token::EndStatement => (),
                     token => panic!("Token after statement was '{:?}', expecting ';'. The statement is {:?}", token, statement)
                 }
             }
@@ -151,7 +152,7 @@ impl<'a> TopDownAstParser<'a> {
         }
 
         let stack = mem::replace(&mut self.stack, old_stack);
-        let scope = AstNode::Scope(stack);
+        let scope = Scope(stack);
         Ok(scope)
     }
 
@@ -189,7 +190,9 @@ impl<'a> TopDownAstParser<'a> {
             Int(value) => AstNode::Primitive(value),
             Op(op) => self.do_operation(token, op)?,
             String(string) => AstNode::String(string),
-            Name(symbol) => self.do_expression_symbol(&symbol)?,
+            Name(symbol) => {
+                self.do_expression_symbol(&symbol)?
+            },
             LeftCurlyBrace => self.do_scope()?,
             LeftBrace => {
                 let node = self.do_expression()?;
@@ -208,6 +211,16 @@ impl<'a> TopDownAstParser<'a> {
             }
             _ => Ok(node)
         }
+    }
+
+    fn do_if(&mut self) -> AstResult {
+        assert_eq!(self.next_token()?, Token::LeftBrace);
+        let expr = self.do_expression()?;
+        assert_eq!(self.next_token()?, Token::RightBrace);
+
+        assert_eq!(self.next_token()?, Token::LeftCurlyBrace);
+        let body = self.do_scope()?;
+        Ok(AstNode::If(Box::new(expr), Box::new(body)))
     }
 
     fn do_operation(&mut self, token: Token, op: ArithmeticOp) -> AstResult {
@@ -231,9 +244,14 @@ impl<'a> TopDownAstParser<'a> {
                     AstNode::Op(op, Box::new(lhs), Box::new(rhs))
                 }
             } else {
-                // Prefix operation of single node
-                let rhs = self.do_expression()?;
-                AstNode::PrefixOp(op, Box::new(rhs))
+                match op {
+                    ArithmeticOp::Add | ArithmeticOp::Sub => {
+                        // Prefix operation of single node
+                        let rhs = self.do_expression()?;
+                        AstNode::PrefixOp(op, Box::new(rhs))
+                    }
+                    _ => panic!("Can only use prefix operations for addition and subtraction")
+                }
             }
         };
         Ok(node)
@@ -289,7 +307,10 @@ impl<'a> TopDownAstParser<'a> {
         let token = self.peek_token()?;
         let node = match token {
             LeftBrace => {
-                self.do_function_call(symbol)?
+                match symbol.as_ref() {
+                    "if" => self.do_if()?,
+                    symbol => self.do_function_call(symbol)?
+                }
             }
             StaticDeclaration => {
                 self.next_token()?;

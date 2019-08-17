@@ -16,6 +16,9 @@ impl Bytecode {
     pub fn from_ast(ast: &Ast, foreign_functions: &[ForeignFunction]) -> Self {
         let mut bc = BytecodeGenerator::new(foreign_functions);
         assert_eq!(StackUsage { pushed: 0, popped: 0 }, bc.ev_node(&ast.root));
+        let global_scope = mem::replace(&mut bc.scope, Scope::new());
+        assert_eq!(bc.code.len(), 0);
+        bc.code = global_scope.code;
         bc.optimize();
         bc.get_bytecode()
     }
@@ -27,11 +30,13 @@ pub enum Instruction {
     SubI,
     MulI,
     DivI,
+    EqI,
 
     SLoad(i64),
     SStore(i64),
 
-    IncrementPc(usize),
+    Branch(usize),
+    BranchIf(usize),
     PushPc(usize),
     PopPc,
 
@@ -132,7 +137,7 @@ impl<'a> BytecodeGenerator<'a> {
                         }
                     }
                 },
-                Instruction::IncrementPc(offset) => {
+                Instruction::Branch(offset) => {
                     if offset == 0 {
                         self.code[i] = Instruction::NoOp;
                     }
@@ -204,7 +209,7 @@ impl<'a> BytecodeGenerator<'a> {
                 if scope.is_stack_frame {
                     parent = &None
                 } else {
-                    parent = &scope.parent;
+                    parent = &scope.parent
                 }
             };
         }
@@ -251,8 +256,30 @@ impl<'a> BytecodeGenerator<'a> {
             }
             ProcedureDeclaration(name, args, return_values, body) => self.ev_procedure(name, &args, &return_values, body),
             Return(return_value) => self.ev_return(return_value),
+            If(condition, body) => self.ev_if(condition, body),
             _ => panic!("Unsupported node here {:?}", node)
         }
+    }
+
+    fn ev_if(&mut self, condition: &Box<AstNode>, body: &Box<AstNode>) -> StackUsage {
+        let usage = self.ev_expression(condition);
+        assert_eq!(usage.pushed - usage.popped, 1);
+        self.scope.code.push(Instruction::PushImmediate(0, "Invert increment condition".into()));
+        self.scope.code.push(Instruction::EqI);
+        let jump_index = self.scope.code.len();
+        self.scope.code.push(Instruction::NoOp);
+
+        let start = self.scope.code.len();
+        if let AstNode::Scope(children) = &**body {
+            let usage = self.ev_scope(children);
+            assert_eq!(usage.pushed, usage.popped);
+        } else {
+            panic!("The body of an if statement must be a scope");
+        }
+        let end = self.scope.code.len();
+        self.scope.code[jump_index] = Instruction::BranchIf(end-start);
+
+        StackUsage{popped: 0, pushed: 0}
     }
 
     fn ev_return(&mut self, return_value: &Option<Box<AstNode>>) -> StackUsage {
@@ -303,7 +330,7 @@ impl<'a> BytecodeGenerator<'a> {
                     if return_pc == 0 {
                         self.procedures.push(Instruction::NoOp);
                     } else {
-                        self.procedures.push(Instruction::IncrementPc(return_pc));
+                        self.procedures.push(Instruction::Branch(return_pc));
                     }
                 } else {
                     self.procedures.push(instruction)
@@ -443,15 +470,15 @@ impl<'a> BytecodeGenerator<'a> {
         let scope = self.pop_scope();
 
         for i in 0..scope.allocations {
-            self.code.push(Instruction::PushImmediate(0, format!("Scope allocation {}", i)));
+            self.scope.code.push(Instruction::PushImmediate(0, format!("Scope allocation {}", i)));
         }
 
         for instruction in scope.code {
-            self.code.push(instruction)
+            self.scope.code.push(instruction)
         }
 
         for _ in 0..scope.allocations {
-            self.code.push(Instruction::Pop);
+            self.scope.code.push(Instruction::Pop);
         }
 
         StackUsage::new(0, 0)
@@ -479,7 +506,8 @@ impl<'a> BytecodeGenerator<'a> {
             ArithmeticOp::Add => self.push_instruction(Instruction::AddI),
             ArithmeticOp::Sub => self.push_instruction(Instruction::SubI),
             ArithmeticOp::Mul => self.push_instruction(Instruction::MulI),
-            ArithmeticOp::Div => self.push_instruction(Instruction::DivI)
+            ArithmeticOp::Div => self.push_instruction(Instruction::DivI),
+            ArithmeticOp::Eq => self.push_instruction(Instruction::EqI)
         };
         StackUsage::new(diff1.popped + diff2.popped, 1)
     }

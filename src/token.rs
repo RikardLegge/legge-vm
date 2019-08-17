@@ -7,6 +7,7 @@ pub enum ArithmeticOp {
     Sub,
     Mul,
     Div,
+    Eq
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -25,7 +26,7 @@ pub enum Token {
     KeyName(String),
     String(String),
     Int(i64),
-    Op(ArithmeticOp),
+    Op(ArithmeticOp)
 }
 
 pub struct Tokenizer<'a> {
@@ -110,7 +111,10 @@ impl<'a> Tokenizer<'a> {
     fn parse_assignment(&mut self) -> Option<Token> {
         assert_eq!(self.next()?, '=');
         match self.peek()? {
-            '=' => panic!("== not yet implemented"),
+            '=' => {
+                self.next()?;
+                Some(Token::Op(ArithmeticOp::Eq))
+            },
             _ => Some(Token::Assignment)
         }
     }

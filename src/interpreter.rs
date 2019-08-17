@@ -115,6 +115,13 @@ impl<'a> Interpreter<'a> {
                 self.push_stack(kvote)?;
                 self.debug_log(LogEval, &format!("{} / {} = {}", n2, n1, kvote));
             }
+            EqI => {
+                let n1 = self.pop_stack()?;
+                let n2 = self.pop_stack()?;
+                let eq = if n2 == n1 { 1 } else { 0 };
+                self.push_stack(eq)?;
+                self.debug_log(LogEval, &format!("({} == {}) = {}", n2, n1, eq));
+            }
             SStore(offset) => {
                 let value = self.pop_stack()?;
                 let index = self.frame_pointer as i64 + *offset;
@@ -129,7 +136,7 @@ impl<'a> Interpreter<'a> {
                 self.debug_log(LogEval, &format!("{}", value));
             }
             PushImmediate(primitive, _) => self.push_stack(*primitive)?,
-            Pop => {self.pop_stack()?;}
+            Pop => { self.pop_stack()?; }
             CallForeign(addr, _) => {
                 let function = &self.foreign_functions[*addr as usize];
                 let function_call = &function.function;
@@ -139,12 +146,18 @@ impl<'a> Interpreter<'a> {
                 }
                 let return_values = function_call(&mut args)?;
                 assert_eq!(function.returns, return_values.len())
-            },
+            }
             PushPc(offset) => {
                 self.push_stack((offset + self.program_counter) as i64)?;
             }
-            IncrementPc(pc) => {
+            Branch(pc) => {
                 self.program_counter = self.program_counter + *pc;
+            }
+            BranchIf(pc) => {
+                let value = self.pop_stack()?;
+                if value != 0 {
+                    self.program_counter = self.program_counter + *pc;
+                }
             }
             PopPc => {
                 self.program_counter = self.pop_stack()? as usize;
@@ -180,7 +193,7 @@ impl<'a> Interpreter<'a> {
         self.setup(code);
 
         while let Some(cmd) = code.code.get(self.program_counter) {
-            if cmd == &Instruction::Halt {break;}
+            if cmd == &Instruction::Halt { break; }
             if let Err(err) = self.run_command(cmd, code) {
                 panic!("{:?}", err);
             }

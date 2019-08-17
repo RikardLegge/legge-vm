@@ -178,6 +178,80 @@ mod tests {
         ".into());
     }
 
+    #[test]
+    fn if_ok() {
+        run_code("
+            if (1 == 1) {
+                assert(1,1);
+            }
+        ".into());
+    }
+
+    #[test]
+    #[should_panic]
+    fn if_err() {
+        run_code("
+            if (1 == 1) {
+                assert(1,2);
+            }
+        ".into());
+    }
+
+    #[test]
+    fn if_not_ok() {
+        run_code("
+            if (1 == 2) {
+                assert(1,2);
+            }
+        ".into());
+    }
+
+    #[test]
+    #[should_panic]
+    fn if_not_err() {
+        run_code("
+            if (1 == 2) {
+                assert(1,2);
+            }
+            assert(1,2);
+        ".into());
+    }
+
+    #[test]
+    fn if_nested_ok() {
+        run_code("
+            if (1 == 1) {
+                if (1 == 2) {
+                    assert(1,2);
+                }
+            }
+        ".into());
+    }
+
+    #[test]
+    #[should_panic]
+    fn if_nested_err() {
+        run_code("
+            if (1 == 1) {
+                if (1 == 1) {
+                    assert(1,2);
+                }
+            }
+        ".into());
+    }
+
+//    #[test]
+//    fn recursion() {
+//        run_code("
+//            loop :: fn(n) {
+//                if (n == 0) {
+//                    return 1;
+//                }
+//                return loop(n+1) + 1;
+//            }
+//            assert(loop(10),10);
+//        ".into());
+//    }
 }
 
 //    use test::Bencher;
