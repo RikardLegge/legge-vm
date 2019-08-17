@@ -28,13 +28,13 @@ fn run_code(code: String) {
     let functions = load_foreign_functions();
 
     let tokens = Tokenizer::parse(&mut code.chars().into_iter().peekable());
-    dbg!(&tokens);
+    //    dbg!(&tokens);
 
     let ast = Ast::from_tokens(&mut tokens.into_iter().peekable());
-    dbg!(&ast);
+    //    dbg!(&ast);
 
     let bytecode = Bytecode::from_ast(&ast, &functions);
-    dbg!(&bytecode);
+    //    dbg!(&bytecode);
 
     let encoded = serialize(&bytecode).unwrap();
     let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
@@ -283,6 +283,23 @@ mod tests {
                     assert(1,2);
                 }
             }
+        "
+            .into(),
+        );
+    }
+
+    #[test]
+    fn loop_ok() {
+        run_code(
+            "
+            n := 0;
+            loop {
+                if (n == 10) {
+                    break;
+                }
+                n = n + 1;
+            }
+            assert(n, 10);
         "
             .into(),
         );

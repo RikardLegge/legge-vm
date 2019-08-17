@@ -36,9 +36,11 @@ pub enum AstNode {
     PrefixOp(ArithmeticOp, Box<AstNode>),
     Scope(Vec<AstNode>),
     Return(Option<Box<AstNode>>),
+    Break,
     Call(String, Vec<AstNode>),
     String(String),
     If(Box<AstNode>, Box<AstNode>),
+    Loop(Box<AstNode>),
 }
 
 #[derive(Debug)]
@@ -57,7 +59,6 @@ impl Ast {
 pub struct TopDownAstParser<'a> {
     stack: Vec<AstNode>,
     scope: Vec<AstNode>,
-    statement_tokens: Vec<Token>,
     iter: &'a mut Peekable<IntoIter<Token>>,
 }
 
@@ -81,13 +82,7 @@ impl<'a> TopDownAstParser<'a> {
     fn new(iter: &'a mut Peekable<IntoIter<Token>>) -> Self {
         let stack = Vec::new();
         let scope = Vec::new();
-        let statement_tokens = Vec::new();
-        TopDownAstParser {
-            stack,
-            scope,
-            iter,
-            statement_tokens,
-        }
+        TopDownAstParser { stack, scope, iter }
     }
 
     fn next_token(&mut self) -> Result<Token, AstError> {
@@ -149,7 +144,7 @@ impl<'a> TopDownAstParser<'a> {
             let statement = self.do_statement()?;
 
             match statement {
-                Scope(..) | ProcedureDeclaration(..) | If(..) => (),
+                Scope(..) | ProcedureDeclaration(..) | If(..) | Loop(..) => (),
                 _ => match self.next_token()? {
                     Token::EndStatement => (),
                     token => panic!(
@@ -169,28 +164,24 @@ impl<'a> TopDownAstParser<'a> {
 
     fn do_statement(&mut self) -> AstResult {
         use crate::token::Token::*;
-        assert_eq!(0, self.statement_tokens.len());
 
         let token = self.next_token()?;
-
-        let node = match token {
-            Int(value) => AstNode::Primitive(value),
-            Op(op) => self.do_operation(token, op)?,
-            String(string) => AstNode::String(string),
-            Name(symbol) => self.do_statement_symbol(&symbol)?,
-            LeftCurlyBrace => self.do_scope()?,
-            KeyName(keyword) => {
-                if &keyword == "return" {
-                    self.do_return()?
-                } else {
-                    panic!("Can not have keyword '{:?}' here", keyword)
-                }
-            }
-            other => panic!("Unkown token {:?}", other),
-        };
-
-        self.statement_tokens.clear();
-        Ok(node)
+        match token {
+            Int(value) => Ok(AstNode::Primitive(value)),
+            Op(op) => self.do_operation(token, op),
+            String(string) => Ok(AstNode::String(string)),
+            Name(symbol) => self.do_statement_symbol(&symbol),
+            LeftCurlyBrace => self.do_scope(),
+            KeyName(keyword) => match keyword.as_ref() {
+                "return" => self.do_return(),
+                "if" => self.do_if(),
+                "loop" => self.do_loop(),
+                "break" => Ok(AstNode::Break),
+                "continue" => unimplemented!(),
+                keyword => panic!("Unknown keyword '{:?}'", keyword),
+            },
+            other => panic!("Unknown token {:?}", other),
+        }
     }
 
     fn do_expression(&mut self) -> AstResult {
@@ -232,10 +223,16 @@ impl<'a> TopDownAstParser<'a> {
         Ok(AstNode::If(Box::new(expr), Box::new(body)))
     }
 
+    fn do_loop(&mut self) -> AstResult {
+        assert_eq!(self.next_token()?, Token::LeftCurlyBrace);
+        let body = self.do_scope()?;
+        Ok(AstNode::Loop(Box::new(body)))
+    }
+
     fn do_operation(&mut self, token: Token, op: ArithmeticOp) -> AstResult {
         match token {
             Token::Op(_) => (),
-            _ => panic!("An opperation was not passed"),
+            _ => panic!("An operation was not passed"),
         }
         let node = {
             if let Ok(lhs) = self.pop_stack() {
@@ -322,10 +319,7 @@ impl<'a> TopDownAstParser<'a> {
 
         let token = self.peek_token()?;
         let node = match token {
-            LeftBrace => match symbol.as_ref() {
-                "if" => self.do_if()?,
-                symbol => self.do_function_call(symbol)?,
-            },
+            LeftBrace => self.do_function_call(symbol)?,
             StaticDeclaration => {
                 self.next_token()?;
                 if let Token::KeyName(name) = self.peek_token()? {

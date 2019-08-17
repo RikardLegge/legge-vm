@@ -159,7 +159,7 @@ impl<'a> Tokenizer<'a> {
         }
 
         let token = match name.as_ref() {
-            "fn" | "return" => Token::KeyName(name),
+            "fn" | "return" | "if" | "loop" | "break" | "continue" => Token::KeyName(name),
             _ => Token::Name(name),
         };
         Some(token)

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::mem;
 use std::ops::AddAssign;
+use crate::bytecode::ScopeType::StackFrame;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bytecode {
@@ -82,11 +83,19 @@ enum AddressKind {
     ConstStackValue,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+enum ScopeType {
+    Scope,
+    Function,
+    Loop,
+    StackFrame
+}
+
 struct Scope {
     parent: Option<Box<Scope>>,
     variables: HashMap<String, Address>,
     allocations: usize,
-    is_stack_frame: bool,
+    tp: ScopeType,
     code: Vec<Instruction>,
 }
 
@@ -97,7 +106,7 @@ impl Scope {
             variables: HashMap::new(),
             allocations: 0,
             code: Vec::new(),
-            is_stack_frame: false,
+            tp: ScopeType::Scope,
         }
     }
 }
@@ -211,7 +220,7 @@ impl<'a> BytecodeGenerator<'a> {
     ) -> Option<Address> {
         if let Some(val) = scope.variables.get(symbol) {
             return Some(*val);
-        } else if !scope.is_stack_frame || recurse_frames {
+        } else if !(scope.tp == ScopeType::StackFrame) || recurse_frames {
             if let Some(parent) = &scope.parent {
                 return self.find_address_in_scope(symbol, &*parent, recurse_frames);
             }
@@ -230,11 +239,11 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn get_stack_allocation_offset(&self) -> usize {
         let mut offset = self.scope.allocations;
-        if !self.scope.is_stack_frame {
+        if !(self.scope.tp == StackFrame) {
             let mut parent = &self.scope.parent;
             while let Some(scope) = parent {
                 offset += scope.allocations;
-                if scope.is_stack_frame {
+                if scope.tp == StackFrame {
                     parent = &None
                 } else {
                     parent = &scope.parent
@@ -246,24 +255,25 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn push_stack_frame(&mut self) {
         let mut scope = Scope::new();
-        scope.is_stack_frame = true;
+        scope.tp = StackFrame;
         let parent = mem::replace(&mut self.scope, scope);
         self.scope.parent = Some(Box::new(parent));
     }
 
     fn pop_stack_frame(&mut self) -> Scope {
-        assert!(self.scope.is_stack_frame);
+        assert_eq!(self.scope.tp, StackFrame);
         let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
         mem::replace(&mut self.scope, parent)
     }
 
-    fn push_scope(&mut self) {
+    fn push_scope(&mut self, tp: ScopeType) {
         let parent = mem::replace(&mut self.scope, Scope::new());
         self.scope.parent = Some(Box::new(parent));
+        self.scope.tp = tp;
     }
 
-    fn pop_scope(&mut self) -> Scope {
-        assert!(!self.scope.is_stack_frame);
+    fn pop_scope(&mut self, tp:ScopeType) -> Scope {
+        assert_eq!(self.scope.tp, tp);
         let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
         mem::replace(&mut self.scope, parent)
     }
@@ -287,7 +297,31 @@ impl<'a> BytecodeGenerator<'a> {
             }
             Return(return_value) => self.ev_return(return_value),
             If(condition, body) => self.ev_if(condition, body),
+            Loop(body) => self.ev_loop(body),
             _ => panic!("Unsupported node here {:?}", node),
+        }
+    }
+
+    fn ev_loop(&mut self, body: &Box<AstNode>) -> StackUsage {
+        self.push_scope(ScopeType::Loop);
+        self.scope.tp = ScopeType::Loop;
+
+        let start = self.scope.code.len();
+        if let AstNode::Scope(children) = &**body {
+            let usage = self.ev_scope(children);
+            assert_eq!(usage.pushed, usage.popped);
+        } else {
+            panic!("The body of a loop statement must be a scope");
+        }
+        let end = self.scope.code.len();
+        let start_of_loop = (start - end) as isize;
+        self.scope.code.push(Instruction::Branch(start_of_loop));
+
+        self.pop_scope(ScopeType::Loop);
+
+        StackUsage {
+            popped: 0,
+            pushed: 0,
         }
     }
 
@@ -355,7 +389,7 @@ impl<'a> BytecodeGenerator<'a> {
             }
 
             let scope = {
-                self.push_scope();
+                self.push_scope(ScopeType::Scope);
 
                 let mut stack_usage = StackUsage::new(0, 0);
                 for node in body {
@@ -366,7 +400,7 @@ impl<'a> BytecodeGenerator<'a> {
                     stack_usage += self.ev_node(node);
                 }
                 assert_eq!(stack_usage.popped, stack_usage.pushed);
-                self.pop_scope()
+                self.pop_scope(ScopeType::Scope)
             };
 
             for i in 0..scope.allocations {
@@ -384,7 +418,8 @@ impl<'a> BytecodeGenerator<'a> {
                     if return_pc == 0 {
                         self.procedures.push(Instruction::NoOp);
                     } else {
-                        self.procedures.push(Instruction::Branch(return_pc as isize));
+                        self.procedures
+                            .push(Instruction::Branch(return_pc as isize));
                     }
                 } else {
                     self.procedures.push(instruction)
@@ -556,7 +591,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_scope(&mut self, children: &Vec<AstNode>) -> StackUsage {
-        self.push_scope();
+        self.push_scope(ScopeType::Scope);
 
         let mut stack_usage = StackUsage::new(0, 0);
         for node in children {
@@ -564,7 +599,7 @@ impl<'a> BytecodeGenerator<'a> {
         }
         assert_eq!(stack_usage.popped, stack_usage.pushed);
 
-        let scope = self.pop_scope();
+        let scope = self.pop_scope(ScopeType::Scope);
 
         for i in 0..scope.allocations {
             self.scope.code.push(Instruction::PushImmediate(
