@@ -55,6 +55,17 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    pub fn pop_stack_count(&mut self, count: usize) -> InterpResult {
+        if self.stack.len() >= count {
+            for _ in 0..count {
+                self.stack.pop();
+            }
+            Ok(())
+        } else {
+            Err(InterpError::new("Stack empty, can not pop"))
+        }
+    }
+
     pub fn pop_stack(&mut self) -> InterpPrimitiveResult {
         match self.stack.pop() {
             Some(val) => Ok(val),
@@ -146,8 +157,8 @@ impl<'a> Interpreter<'a> {
                 self.debug_log(LogEval, &format!("{}", value));
             }
             PushImmediate(primitive, _) => self.push_stack(*primitive)?,
-            Pop => {
-                self.pop_stack()?;
+            PopStack(count) => {
+                self.pop_stack_count(*count)?;
             }
             CallForeign(addr, _) => {
                 let function = &self.foreign_functions[*addr as usize];

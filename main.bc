@@ -8,8 +8,8 @@ main :: fn (a,b,d) {
     assert(a,1);
     assert(b,2);
     assert(d,10);
-    print(a);
+    //print(a);
 }
 
-print(c);
-//main(1,2,c);
+//print(c);
+main(1,2,c);

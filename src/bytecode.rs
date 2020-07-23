@@ -1,11 +1,13 @@
 use crate::ast::{AssignmentType, Ast, AstNode};
+use crate::bytecode::ScopeType::StackFrame;
 use crate::foreign_functions::ForeignFunction;
 use crate::token::ArithmeticOp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::mem;
 use std::ops::AddAssign;
-use crate::bytecode::ScopeType::StackFrame;
+
+const CALL_INSTRUCTION_COUNT: usize = 3; // PushPC, PushStackFrame, SetStackFrame
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bytecode {
@@ -49,7 +51,7 @@ pub enum Instruction {
     PopPc,
 
     PushImmediate(i64, String),
-    Pop,
+    PopStack(usize),
 
     SetStackFrame(i64),
     PushStackFrame,
@@ -61,7 +63,6 @@ pub enum Instruction {
     CallForeign(usize, String),
 
     NoOp,
-    Return(bool),
 
     Halt,
 }
@@ -86,9 +87,8 @@ enum AddressKind {
 #[derive(Copy, Clone, Debug, PartialEq)]
 enum ScopeType {
     Scope,
-    Function,
     Loop,
-    StackFrame
+    StackFrame,
 }
 
 struct Scope {
@@ -108,6 +108,15 @@ impl Scope {
             code: Vec::new(),
             tp: ScopeType::Scope,
         }
+    }
+
+    fn get_parent_allocations(&self, break_on_scope: ScopeType) -> usize {
+        if let Some(p) = &self.parent {
+            if p.tp != break_on_scope {
+                return self.allocations + p.get_parent_allocations(break_on_scope);
+            }
+        }
+        return self.allocations;
     }
 }
 
@@ -142,7 +151,7 @@ impl<'a> BytecodeGenerator<'a> {
     fn optimize(&mut self) {
         let mut i = 1;
         while i < self.code.len() {
-            match self.code[i] {
+            match &self.code[i] {
                 // Remove consecutive store-load instructions
                 // Ex:
                 // Inst::SStore(n)
@@ -150,14 +159,14 @@ impl<'a> BytecodeGenerator<'a> {
                 // -> NoOp
                 Instruction::SLoad(load_offset) => {
                     if let Instruction::SStore(store_offset) = self.code[i - 1] {
-                        if load_offset == store_offset {
+                        if *load_offset == store_offset {
                             self.code[i - 1] = Instruction::NoOp;
                             self.code[i] = Instruction::NoOp;
                         }
                     }
                 }
                 Instruction::Branch(offset) => {
-                    if offset == 0 {
+                    if *offset == 0 {
                         self.code[i] = Instruction::NoOp;
                     }
                 }
@@ -253,27 +262,18 @@ impl<'a> BytecodeGenerator<'a> {
         offset
     }
 
-    fn push_stack_frame(&mut self) {
-        let mut scope = Scope::new();
-        scope.tp = StackFrame;
-        let parent = mem::replace(&mut self.scope, scope);
-        self.scope.parent = Some(Box::new(parent));
-    }
-
-    fn pop_stack_frame(&mut self) -> Scope {
-        assert_eq!(self.scope.tp, StackFrame);
-        let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
-        mem::replace(&mut self.scope, parent)
-    }
-
     fn push_scope(&mut self, tp: ScopeType) {
         let parent = mem::replace(&mut self.scope, Scope::new());
         self.scope.parent = Some(Box::new(parent));
         self.scope.tp = tp;
     }
 
-    fn pop_scope(&mut self, tp:ScopeType) -> Scope {
+    fn pop_scope(&mut self, tp: ScopeType) -> Scope {
         assert_eq!(self.scope.tp, tp);
+        self.pop_scope_unsafe()
+    }
+
+    fn pop_scope_unsafe(&mut self) -> Scope {
         let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
         mem::replace(&mut self.scope, parent)
     }
@@ -354,15 +354,40 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_return(&mut self, return_value: &Option<Box<AstNode>>) -> StackUsage {
+        let parent_alloc = self.scope.get_parent_allocations(ScopeType::StackFrame);
         if let Some(val) = return_value {
             let usage = self.ev_expression(val);
             assert_eq!(usage.pushed - usage.popped, 1);
-            self.scope.code.push(Instruction::SStore(-3)); // Immediately store the value found on the stack
+            // Immediately store the value found on the stack
+            // the
+            let return_value_offset = -(CALL_INSTRUCTION_COUNT as i64) - parent_alloc as i64
+                + self.scope.allocations as i64;
+            self.scope
+                .code
+                .push(Instruction::SStore(return_value_offset));
         }
-        self.scope
-            .code
-            .push(Instruction::Return(return_value.is_some()));
+
+        self.scope.code.push(Instruction::PopStack(parent_alloc));
+        self.scope.code.push(Instruction::PopStackFrame);
+        self.scope.code.push(Instruction::PopPc);
+
         StackUsage::new(0, 0)
+    }
+
+    fn ev_procedure_scope(&mut self, body: &[AstNode]) {
+        use self::Instruction::*;
+        let scope = self.ev_scope_body(body);
+
+        for i in 0..scope.allocations {
+            self.procedures
+                .push(PushImmediate(0, format!("Stack allocation {}", i)));
+        }
+
+        for instruction in scope.code {
+            self.procedures.push(instruction)
+        }
+
+        self.procedures.push(PopStack(scope.allocations));
     }
 
     fn ev_procedure(
@@ -374,72 +399,23 @@ impl<'a> BytecodeGenerator<'a> {
     ) -> StackUsage {
         let proc_address = self.procedures.len();
 
-        let stack_frame = {
-            self.push_stack_frame();
-            for arg in args.iter() {
-                let offset = self.get_stack_allocation_offset();
-                self.scope.allocations += 1;
-                self.scope.variables.insert(
-                    arg.to_string(),
-                    Address {
-                        addr: offset,
-                        kind: AddressKind::StackValue,
-                    },
-                );
-            }
-
-            let scope = {
-                self.push_scope(ScopeType::Scope);
-
-                let mut stack_usage = StackUsage::new(0, 0);
-                for node in body {
-                    // @BUG
-                    // Does currently not handle nested method declarations
-                    // Evaluation of child nodes of type procedure must be
-                    // delayed until all the current procedure code is generated
-                    stack_usage += self.ev_node(node);
-                }
-                assert_eq!(stack_usage.popped, stack_usage.pushed);
-                self.pop_scope(ScopeType::Scope)
-            };
-
-            for i in 0..scope.allocations {
-                self.procedures.push(Instruction::PushImmediate(
-                    0,
-                    format!("Stack allocation {}", i),
-                ));
-            }
-
-            let code_len = scope.code.len();
-            for (i, instruction) in scope.code.into_iter().enumerate() {
-                if let Instruction::Return(has_return) = instruction {
-                    assert_eq!(return_value.is_some(), has_return);
-                    let return_pc = code_len - i - 1;
-                    if return_pc == 0 {
-                        self.procedures.push(Instruction::NoOp);
-                    } else {
-                        self.procedures
-                            .push(Instruction::Branch(return_pc as isize));
-                    }
-                } else {
-                    self.procedures.push(instruction)
-                }
-            }
-
-            for _ in 0..scope.allocations {
-                self.procedures.push(Instruction::Pop);
-            }
-
-            self.pop_stack_frame()
-        };
-
-        for _ in 0..stack_frame.allocations {
-            self.procedures.push(Instruction::Pop);
+        self.push_scope(ScopeType::StackFrame);
+        for arg in args.iter() {
+            let offset = self.get_stack_allocation_offset();
+            self.scope.allocations += 1;
+            self.scope.variables.insert(
+                arg.to_string(),
+                Address {
+                    addr: offset,
+                    kind: AddressKind::StackValue,
+                },
+            );
         }
+        self.ev_procedure_scope(body);
+        self.ev_return(&None);
+        self.pop_scope(ScopeType::StackFrame);
 
-        self.procedures.push(Instruction::PopStackFrame);
-        self.procedures.push(Instruction::PopPc);
-
+        // Register function
         self.scope.variables.insert(
             symbol.to_string(),
             Address {
@@ -568,8 +544,7 @@ impl<'a> BytecodeGenerator<'a> {
                 ));
 
                 // The number of instructions required to make a function call
-                let call_instruction_count = 3; // PushPC, PushStackFrame, SetStackFrame
-                self.push_instruction(Instruction::PushPc(args.len() + call_instruction_count));
+                self.push_instruction(Instruction::PushPc(args.len() + CALL_INSTRUCTION_COUNT));
                 self.push_instruction(Instruction::PushStackFrame);
 
                 let mut popped = 0;
@@ -590,7 +565,7 @@ impl<'a> BytecodeGenerator<'a> {
         }
     }
 
-    fn ev_scope(&mut self, children: &Vec<AstNode>) -> StackUsage {
+    fn ev_scope_body(&mut self, children: &[AstNode]) -> Scope {
         self.push_scope(ScopeType::Scope);
 
         let mut stack_usage = StackUsage::new(0, 0);
@@ -599,22 +574,24 @@ impl<'a> BytecodeGenerator<'a> {
         }
         assert_eq!(stack_usage.popped, stack_usage.pushed);
 
-        let scope = self.pop_scope(ScopeType::Scope);
+        self.pop_scope(ScopeType::Scope)
+    }
 
-        for i in 0..scope.allocations {
-            self.scope.code.push(Instruction::PushImmediate(
-                0,
-                format!("Scope allocation {}", i),
-            ));
+    fn ev_scope(&mut self, children: &[AstNode]) -> StackUsage {
+        use self::Instruction::*;
+        let child_scope = self.ev_scope_body(children);
+
+        for i in 0..child_scope.allocations {
+            self.scope
+                .code
+                .push(PushImmediate(0, format!("Scope allocation {}", i)));
         }
 
-        for instruction in scope.code {
+        for instruction in child_scope.code {
             self.scope.code.push(instruction)
         }
 
-        for _ in 0..scope.allocations {
-            self.scope.code.push(Instruction::Pop);
-        }
+        self.scope.code.push(PopStack(child_scope.allocations));
 
         StackUsage::new(0, 0)
     }

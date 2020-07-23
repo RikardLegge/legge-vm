@@ -34,7 +34,7 @@ fn run_code(code: String) {
     //    dbg!(&ast);
 
     let bytecode = Bytecode::from_ast(&ast, &functions);
-    //    dbg!(&bytecode);
+    dbg!(&bytecode.code);
 
     let encoded = serialize(&bytecode).unwrap();
     let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
@@ -175,6 +175,24 @@ mod tests {
                 return 1;
             }
             assert(main(), 1);
+        "
+            .into(),
+        );
+    }
+
+    #[test]
+    fn function_nested_scopes() {
+        run_code(
+            "
+            main :: fn() {
+                a := 1;
+                {
+                    b := 2;
+                    return;
+                }
+                c := 3;
+            }
+            main();
         "
             .into(),
         );

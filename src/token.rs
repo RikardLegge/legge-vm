@@ -69,11 +69,11 @@ impl<'a> Tokenizer<'a> {
     fn parse_global(&mut self) -> Option<Token> {
         let ch = self.peek_ignore_whitespace()?;
         match ch {
-            '0'...'9' => self.parse_number(),
+            '0'..='9' => self.parse_number(),
             '+' | '*' => self.parse_arithmetic_op(),
             '-' => self.parse_return_type(),
             '/' => self.parse_comment(),
-            'a'...'z' | 'A'...'Z' => self.parse_name(),
+            'a'..='z' | 'A'..='Z' => self.parse_name(),
             ':' => self.parse_declaration(),
             '=' => self.parse_assignment(),
             '(' => {
@@ -153,7 +153,7 @@ impl<'a> Tokenizer<'a> {
         let mut name = String::new();
         while let Some(ch) = self.peek() {
             match ch {
-                'a'...'z' | 'A'...'Z' | '0'...'9' | '_' => name.push(self.next().unwrap()),
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '_' => name.push(self.next().unwrap()),
                 _ => break,
             };
         }
@@ -191,7 +191,7 @@ impl<'a> Tokenizer<'a> {
         let mut num = 0 as i64;
         while let Some(ch) = self.peek() {
             match ch {
-                '0'...'9' => {
+                '0'..='9' => {
                     num *= 10;
                     num += self.next().unwrap().to_digit(10)? as i64
                 }
