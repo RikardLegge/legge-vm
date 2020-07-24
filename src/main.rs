@@ -1,3 +1,4 @@
+use crate::interpreter::InterpLogLevel;
 use ast::Ast;
 use bincode::{deserialize, serialize};
 use bytecode::Bytecode;
@@ -5,6 +6,7 @@ use foreign_functions::load_foreign_functions;
 use interpreter::Interpreter;
 use std::fs::File;
 use std::io::prelude::*;
+use std::time::{Duration, SystemTime};
 use token::Tokenizer;
 
 mod ast;
@@ -24,23 +26,42 @@ fn main() {
     run_code(contents)
 }
 
+#[derive(Default, Debug)]
+struct Timing {
+    token: Duration,
+    ast: Duration,
+    bytecode: Duration,
+    interpreter: Duration,
+    instructions: usize,
+}
+
 fn run_code(code: String) {
     let functions = load_foreign_functions();
+    let mut timing = Timing::default();
 
+    let start = SystemTime::now();
     let tokens = Tokenizer::parse(code.chars());
-    //    dbg!(&tokens);
+    timing.token = SystemTime::now().duration_since(start).unwrap();
 
+    let start = SystemTime::now();
     let ast = Ast::from_tokens(&mut tokens.into_iter().peekable());
-    //    dbg!(&ast);
+    timing.ast = SystemTime::now().duration_since(start).unwrap();
 
+    let start = SystemTime::now();
     let bytecode = Bytecode::from_ast(&ast, &functions);
-    dbg!(&bytecode.code);
+    timing.bytecode = SystemTime::now().duration_since(start).unwrap();
 
     let encoded = serialize(&bytecode).unwrap();
     let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
 
     let mut interpreter = Interpreter::new(&functions);
-    interpreter.run(&bytecode);
+    interpreter.set_log_level(InterpLogLevel::LogNone);
+
+    let start = SystemTime::now();
+    timing.instructions = interpreter.run(&bytecode);
+    timing.interpreter = SystemTime::now().duration_since(start).unwrap();
+
+    dbg!(timing);
 }
 
 fn run_test(code: &str) {

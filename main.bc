@@ -1,9 +1,8 @@
 c :: 5;
 
 main :: fn (a,b,c) {
-    i := 5;
+    i := 1000000;
     loop {
-        log(i);
         if(i == 0) {
             break;
         }
@@ -14,10 +13,10 @@ main :: fn (a,b,c) {
 main(1,2,c);
 
 rec :: fn (i) {
-    log(i);
+    //log(i);
     if(i == 0) {
         return;
     }
     rec(i - 1);
 }
-rec(5);
+rec(500);

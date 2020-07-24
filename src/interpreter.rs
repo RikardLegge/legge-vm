@@ -14,9 +14,9 @@ pub struct Interpreter<'a> {
 #[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq)]
 pub enum InterpLogLevel {
-    LogNone,
-    LogDebug,
-    LogEval,
+    LogNone = 0,
+    LogDebug = 1,
+    LogEval = 2,
 }
 
 #[derive(Debug)]
@@ -45,8 +45,12 @@ impl<'a> Interpreter<'a> {
             heap: Vec::with_capacity(1000),
             foreign_functions,
             log_level: InterpLogLevel::LogDebug,
-            stack_max: 40,
+            stack_max: 10000,
         }
+    }
+
+    pub fn set_log_level(&mut self, level: InterpLogLevel) {
+        self.log_level = level;
     }
 
     fn debug_log(&self, level: InterpLogLevel, info: &str) {
@@ -97,13 +101,15 @@ impl<'a> Interpreter<'a> {
         use self::Instruction::*;
         use self::InterpLogLevel::*;
 
-        self.debug_log(
-            LogDebug,
-            &format!(
-                "PC: {} \t SP: {} \t Stack: {:?} \t Inst: {:?}",
-                self.pc, self.frame_pointer, self.stack, cmd
-            ),
-        );
+        if self.log_level >= LogDebug {
+            self.debug_log(
+                LogDebug,
+                &format!(
+                    "PC: {} \t SP: {} \t Stack: {:?} \t Inst: {:?}",
+                    self.pc, self.frame_pointer, self.stack, cmd
+                ),
+            );
+        }
         self.pc += 1;
         match cmd {
             AddI => {
@@ -111,35 +117,35 @@ impl<'a> Interpreter<'a> {
                 let n2 = self.pop_stack()?;
                 let sum = n2 + n1;
                 self.push_stack(sum)?;
-                self.debug_log(LogEval, &format!("{} + {} = {}", n2, n1, sum));
+                // self.debug_log(LogEval, &format!("{} + {} = {}", n2, n1, sum));
             }
             SubI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let diff = n2 - n1;
                 self.push_stack(diff)?;
-                self.debug_log(LogEval, &format!("{} - {} = {}", n2, n1, diff));
+                // self.debug_log(LogEval, &format!("{} - {} = {}", n2, n1, diff));
             }
             MulI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let prod = n2 * n1;
                 self.push_stack(prod)?;
-                self.debug_log(LogEval, &format!("{} * {} = {}", n2, n1, prod));
+                // self.debug_log(LogEval, &format!("{} * {} = {}", n2, n1, prod));
             }
             DivI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let kvote = n2 / n1;
                 self.push_stack(kvote)?;
-                self.debug_log(LogEval, &format!("{} / {} = {}", n2, n1, kvote));
+                // self.debug_log(LogEval, &format!("{} / {} = {}", n2, n1, kvote));
             }
             EqI => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let eq = if n2 == n1 { 1 } else { 0 };
                 self.push_stack(eq)?;
-                self.debug_log(LogEval, &format!("({} == {}) = {}", n2, n1, eq));
+                // self.debug_log(LogEval, &format!("({} == {}) = {}", n2, n1, eq));
             }
             SStore(offset) => {
                 let value = self.pop_stack()?;
@@ -151,7 +157,7 @@ impl<'a> Interpreter<'a> {
                 let index = self.frame_pointer as i64 + *offset;
                 let value = self.stack[index as usize];
                 self.push_stack(value)?;
-                self.debug_log(LogEval, &format!("{}", value));
+                // self.debug_log(LogEval, &format!("{}", value));
             }
             PushImmediate(primitive, _) => self.push_stack(*primitive)?,
             PopStack(count) => {
@@ -209,16 +215,13 @@ impl<'a> Interpreter<'a> {
         self.heap.append(&mut code.data.clone());
     }
 
-    pub fn run(&mut self, code: &Bytecode) {
+    pub fn run(&mut self, code: &Bytecode) -> usize {
         self.setup(code);
 
-        let mut i = 10000;
+        let mut instructions = 0;
 
         while let Some(cmd) = code.code.get(self.pc) {
-            if i == 0 {
-                break;
-            }
-            i -= 1;
+            instructions += 1;
             if cmd == &Instruction::Halt {
                 self.debug_log(
                     InterpLogLevel::LogDebug,
@@ -235,6 +238,10 @@ impl<'a> Interpreter<'a> {
                 panic!("{:?}", err);
             }
         }
-        dbg!(&self.stack);
+        if self.stack.len() > 0 {
+            dbg!(&self.stack);
+            panic!("Interpreter stopped without an empty stack")
+        }
+        instructions
     }
 }
