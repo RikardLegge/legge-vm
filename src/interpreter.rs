@@ -2,7 +2,7 @@ use crate::bytecode::{Bytecode, Instruction};
 use crate::foreign_functions::ForeignFunction;
 
 pub struct Interpreter<'a> {
-    program_counter: usize,
+    pc: usize,
     frame_pointer: usize,
     pub heap: Vec<i64>,
     pub stack: Vec<i64>,
@@ -40,12 +40,12 @@ impl<'a> Interpreter<'a> {
     pub fn new(foreign_functions: &'a [ForeignFunction]) -> Self {
         Interpreter {
             frame_pointer: 0,
-            program_counter: 0,
+            pc: 0,
             stack: Vec::with_capacity(1000),
             heap: Vec::with_capacity(1000),
             foreign_functions,
             log_level: InterpLogLevel::LogDebug,
-            stack_max: 20,
+            stack_max: 40,
         }
     }
 
@@ -100,13 +100,11 @@ impl<'a> Interpreter<'a> {
         self.debug_log(
             LogDebug,
             &format!(
-                "PC: {} \t SP: {} \t Inst: {:?}",
-                self.program_counter,
-                self.stack.len(),
-                cmd
+                "PC: {} \t SP: {} \t Stack: {:?} \t Inst: {:?}",
+                self.pc, self.frame_pointer, self.stack, cmd
             ),
         );
-        self.program_counter += 1;
+        self.pc += 1;
         match cmd {
             AddI => {
                 let n1 = self.pop_stack()?;
@@ -151,7 +149,6 @@ impl<'a> Interpreter<'a> {
             }
             SLoad(offset) => {
                 let index = self.frame_pointer as i64 + *offset;
-                assert!(index >= 0);
                 let value = self.stack[index as usize];
                 self.push_stack(value)?;
                 self.debug_log(LogEval, &format!("{}", value));
@@ -171,22 +168,22 @@ impl<'a> Interpreter<'a> {
                 assert_eq!(function.returns, return_values.len())
             }
             PushPc(offset) => {
-                self.push_stack((offset + self.program_counter) as i64)?;
+                self.push_stack((offset + self.pc) as i64)?;
             }
             Branch(pc) => {
-                self.program_counter = (self.program_counter as isize + *pc) as usize;
+                self.pc = (self.pc as isize + *pc) as usize;
             }
             BranchIf(pc) => {
                 let value = self.pop_stack()?;
                 if value != 0 {
-                    self.program_counter = (self.program_counter as isize + *pc) as usize;
+                    self.pc = (self.pc as isize + *pc) as usize;
                 }
             }
             PopPc => {
-                self.program_counter = self.pop_stack()? as usize;
+                self.pc = self.pop_stack()? as usize;
             }
             Call(addr, _) => {
-                self.program_counter = code.procedure_address + *addr;
+                self.pc = code.procedure_address + *addr;
             }
             PushStackFrame => {
                 self.push_stack(self.frame_pointer as i64)?;
@@ -205,7 +202,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn setup(&mut self, code: &Bytecode) {
-        self.program_counter = 0;
+        self.pc = 0;
         self.frame_pointer = 0;
         self.stack.clear();
         self.heap.clear();
@@ -215,8 +212,23 @@ impl<'a> Interpreter<'a> {
     pub fn run(&mut self, code: &Bytecode) {
         self.setup(code);
 
-        while let Some(cmd) = code.code.get(self.program_counter) {
+        let mut i = 10000;
+
+        while let Some(cmd) = code.code.get(self.pc) {
+            if i == 0 {
+                break;
+            }
+            i -= 1;
             if cmd == &Instruction::Halt {
+                self.debug_log(
+                    InterpLogLevel::LogDebug,
+                    &format!(
+                        "PC: {} \t SP: {} \t Inst: {:?}",
+                        self.pc,
+                        self.stack.len(),
+                        cmd
+                    ),
+                );
                 break;
             }
             if let Err(err) = self.run_command(cmd, code) {

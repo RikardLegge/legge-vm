@@ -1,15 +1,23 @@
-c :: 10;
+c :: 5;
 
-split :: fn (num) -> int{
-    return num;
+main :: fn (a,b,c) {
+    i := 5;
+    loop {
+        log(i);
+        if(i == 0) {
+            break;
+        }
+        i = i - 1;
+    }
+    return;
 }
-
-main :: fn (a,b,d) {
-    assert(a,1);
-    assert(b,2);
-    assert(d,10);
-    //print(a);
-}
-
-//print(c);
 main(1,2,c);
+
+rec :: fn (i) {
+    log(i);
+    if(i == 0) {
+        return;
+    }
+    rec(i - 1);
+}
+rec(5);

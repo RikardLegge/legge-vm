@@ -27,7 +27,7 @@ fn main() {
 fn run_code(code: String) {
     let functions = load_foreign_functions();
 
-    let tokens = Tokenizer::parse(&mut code.chars().into_iter().peekable());
+    let tokens = Tokenizer::parse(code.chars());
     //    dbg!(&tokens);
 
     let ast = Ast::from_tokens(&mut tokens.into_iter().peekable());
@@ -43,146 +43,129 @@ fn run_code(code: String) {
     interpreter.run(&bytecode);
 }
 
+fn run_test(code: &str) {
+    run_code(code.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_assert_true() {
-        run_code(
+        run_test(
             "
             a :: 1;
             assert(a, 1);
-        "
-            .into(),
+        ",
+        );
+    }
+
+    #[test]
+    fn test_recursion() {
+        run_test(
+            "
+            rec :: fn (i) {
+                if(i == 0) {
+                    return;
+                }
+                rec(i - 1);
+            }
+            rec(5);
+        ",
         );
     }
 
     #[test]
     #[should_panic]
     fn test_assert_false() {
-        run_code(
+        run_test(
             "
             a :: 1;
             assert(a, 2);
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     fn single_argument_function_call() {
-        run_code(
+        run_test(
             "
             main :: fn(a) {
                 assert(a, 1);
             }
             main(1);
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     #[should_panic]
     fn wrong_argument_function_call() {
-        run_code(
+        run_test(
             "
             main :: fn(a) {}
             main(1,2);
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     fn function_early_return() {
-        run_code(
+        run_test(
             "
             main :: fn() {
                 return;
                 assert(1,2);
             }
             main();
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     fn function_void_return_value_ok() {
-        run_code(
+        run_test(
             "
             main :: fn() {
                 assert(1,1);
                 return;
             }
             main();
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     #[should_panic]
     fn function_void_return_value_err() {
-        run_code(
+        run_test(
             "
             main :: fn() {
                 assert(1,2);
                 return;
             }
             main();
-        "
-            .into(),
-        );
-    }
-
-    #[test]
-    fn function_return_value_ok() {
-        run_code(
-            "
-            main :: fn() -> int {
-                return 1;
-            }
-            a :: main();
-            assert(a, 1);
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     #[should_panic]
-    fn function_return_value_err() {
-        run_code(
+    fn turn_value_err() {
+        run_test(
             "
             main :: fn() -> int {
                 return 1;
             }
             a :: main();
-            assert(a, 2);
-        "
-            .into(),
-        );
-    }
-
-    #[test]
-    fn function_return_value_as_argument_ok() {
-        run_code(
-            "
-            main :: fn() -> int {
-                return 1;
-            }
-            assert(main(), 1);
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     fn function_nested_scopes() {
-        run_code(
+        run_test(
             "
             main :: fn() {
                 a := 1;
@@ -193,122 +176,87 @@ mod tests {
                 c := 3;
             }
             main();
-        "
-            .into(),
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn function_return_value_as_argument_err() {
-        run_code(
-            "
-            main :: fn() -> int {
-                return 1;
-            }
-            assert(main(), 2);
-        "
-            .into(),
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn function_return_value_without_location() {
-        run_code(
-            "
-            main :: fn() -> int {
-                return 1;
-            }
-            main();
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     fn if_ok() {
-        run_code(
+        run_test(
             "
             if (1 == 1) {
                 assert(1,1);
             }
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     #[should_panic]
     fn if_err() {
-        run_code(
+        run_test(
             "
             if (1 == 1) {
                 assert(1,2);
             }
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     fn if_not_ok() {
-        run_code(
+        run_test(
             "
             if (1 == 2) {
                 assert(1,2);
             }
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     #[should_panic]
     fn if_not_err() {
-        run_code(
+        run_test(
             "
             if (1 == 2) {
                 assert(1,2);
             }
             assert(1,2);
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     fn if_nested_ok() {
-        run_code(
+        run_test(
             "
             if (1 == 1) {
                 if (1 == 2) {
                     assert(1,2);
                 }
             }
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
     #[should_panic]
     fn if_nested_err() {
-        run_code(
+        run_test(
             "
             if (1 == 1) {
                 if (1 == 1) {
                     assert(1,2);
                 }
             }
-        "
-            .into(),
+        ",
         );
     }
 
     #[test]
-    fn loop_ok() {
-        run_code(
+    fn loop_break_ok() {
+        run_test(
             "
             n := 0;
             loop {
@@ -318,14 +266,13 @@ mod tests {
                 n = n + 1;
             }
             assert(n, 10);
-        "
-            .into(),
+        ",
         );
     }
 
     //    #[test]
     //    fn recursion() {
-    //        run_code("
+    //        run_test("
     //            loop :: fn(n) {
     //                if (n == 0) {
     //                    return 1;
@@ -333,7 +280,7 @@ mod tests {
     //                return loop(n+1) + 1;
     //            }
     //            assert(loop(10),10);
-    //        ".into());
+    //        ");
     //    }
 }
 

@@ -1,4 +1,4 @@
-use std::iter::Peekable;
+use std::iter::{Enumerate, Peekable};
 use std::str::Chars;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -10,8 +10,16 @@ pub enum ArithmeticOp {
     Eq,
 }
 
+#[derive(Debug)]
+pub struct Token {
+    start: usize,
+    end: usize,
+    pub tp: TokenType,
+}
+
 #[derive(Debug, PartialEq, Clone)]
-pub enum Token {
+pub enum TokenType {
+    Comment(String),
     LeftCurlyBrace,
     RightCurlyBrace,
     ListSeparator,
@@ -30,12 +38,19 @@ pub enum Token {
 }
 
 pub struct Tokenizer<'a> {
-    iter: &'a mut Peekable<Chars<'a>>,
+    iter: &'a mut Peekable<Enumerate<Chars<'a>>>,
+    token_start_index: usize,
+    current_index: usize,
 }
 
 impl<'a> Tokenizer<'a> {
-    pub fn parse(iter: &'a mut Peekable<Chars<'a>>) -> Vec<Token> {
-        let mut parser = Tokenizer { iter };
+    pub fn parse(iter: Chars<'a>) -> Vec<Token> {
+        let mut iter = iter.enumerate().peekable();
+        let mut parser = Tokenizer {
+            iter: &mut iter,
+            token_start_index: 0,
+            current_index: 0,
+        };
         let mut tokens = Vec::new();
 
         while parser.peek().is_some() {
@@ -48,7 +63,7 @@ impl<'a> Tokenizer<'a> {
 
     fn peek(&mut self) -> Option<char> {
         match self.iter.peek() {
-            Some(ch) => Some(*ch),
+            Some((_, ch)) => Some(*ch),
             None => None,
         }
     }
@@ -63,85 +78,102 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn next(&mut self) -> Option<char> {
-        self.iter.next()
+        let (i, c) = self.iter.next()?;
+        self.current_index = i;
+        Some(c)
+    }
+
+    fn start_token(&mut self) {
+        self.token_start_index = self.current_index
+    }
+
+    fn end_token(&mut self, tp: TokenType) -> Token {
+        Token {
+            tp,
+            start: self.token_start_index,
+            end: self.current_index,
+        }
     }
 
     fn parse_global(&mut self) -> Option<Token> {
         let ch = self.peek_ignore_whitespace()?;
-        match ch {
-            '0'..='9' => self.parse_number(),
-            '+' | '*' => self.parse_arithmetic_op(),
-            '-' => self.parse_return_type(),
-            '/' => self.parse_comment(),
-            'a'..='z' | 'A'..='Z' => self.parse_name(),
-            ':' => self.parse_declaration(),
-            '=' => self.parse_assignment(),
+        self.start_token();
+        let token_tp = match ch {
+            '0'..='9' => self.parse_number()?,
+            '+' | '*' => self.parse_arithmetic_op()?,
+            '-' => self.parse_return_type_or_subtract()?,
+            '/' => self.parse_comment_or_div()?,
+            'a'..='z' | 'A'..='Z' => self.parse_name()?,
+            ':' => self.parse_declaration()?,
+            '=' => self.parse_assignment_or_eq()?,
             '(' => {
-                self.next();
-                Some(Token::LeftBrace)
+                self.next()?;
+                TokenType::LeftBrace
             }
             ')' => {
-                self.next();
-                Some(Token::RightBrace)
+                self.next()?;
+                TokenType::RightBrace
             }
             '{' => {
-                self.next();
-                Some(Token::LeftCurlyBrace)
+                self.next()?;
+                TokenType::LeftCurlyBrace
             }
             '}' => {
-                self.next();
-                Some(Token::RightCurlyBrace)
+                self.next()?;
+                TokenType::RightCurlyBrace
             }
             ',' => {
-                self.next();
-                Some(Token::ListSeparator)
+                self.next()?;
+                TokenType::ListSeparator
             }
             ';' => {
-                self.next();
-                Some(Token::EndStatement)
+                self.next()?;
+                TokenType::EndStatement
             }
-            '"' => self.parse_string(),
+            '"' => self.parse_string()?,
             _ => panic!("Encountered invalid character in global scope '{}'", ch),
-        }
+        };
+        Some(self.end_token(token_tp))
     }
 
-    fn parse_return_type(&mut self) -> Option<Token> {
+    fn parse_return_type_or_subtract(&mut self) -> Option<TokenType> {
         assert_eq!(self.next()?, '-');
-        match self.peek()? {
+        let token = match self.peek()? {
             '>' => {
                 self.next()?;
-                Some(Token::ReturnTypes)
+                TokenType::ReturnTypes
             }
-            _ => self.parse_arithmetic_op(),
-        }
+            _ => TokenType::Op(ArithmeticOp::Sub),
+        };
+        Some(token)
     }
 
-    fn parse_string(&mut self) -> Option<Token> {
+    fn parse_string(&mut self) -> Option<TokenType> {
         let mut string = String::new();
         assert_eq!(self.next()?, '"');
         while self.peek()? != '"' {
             string.push(self.next()?);
         }
         assert_eq!(self.next()?, '"');
-        Some(Token::String(string))
+        Some(TokenType::String(string))
     }
 
-    fn parse_assignment(&mut self) -> Option<Token> {
+    fn parse_assignment_or_eq(&mut self) -> Option<TokenType> {
         assert_eq!(self.next()?, '=');
         match self.peek()? {
             '=' => {
                 self.next()?;
-                Some(Token::Op(ArithmeticOp::Eq))
+                Some(TokenType::Op(ArithmeticOp::Eq))
             }
-            _ => Some(Token::Assignment),
+            _ => Some(TokenType::Assignment),
         }
     }
 
-    fn parse_declaration(&mut self) -> Option<Token> {
+    fn parse_declaration(&mut self) -> Option<TokenType> {
         assert_eq!(self.next()?, ':');
         match self.next()? {
-            ':' => Some(Token::StaticDeclaration),
-            '=' => Some(Token::Declaration),
+            ':' => Some(TokenType::StaticDeclaration),
+            '=' => Some(TokenType::Declaration),
             ch => panic!(
                 "Encountered invalid character when parsing declaration: {:?}",
                 ch
@@ -149,7 +181,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    fn parse_name(&mut self) -> Option<Token> {
+    fn parse_name(&mut self) -> Option<TokenType> {
         let mut name = String::new();
         while let Some(ch) = self.peek() {
             match ch {
@@ -158,25 +190,29 @@ impl<'a> Tokenizer<'a> {
             };
         }
 
-        let token = match name.as_ref() {
-            "fn" | "return" | "if" | "loop" | "break" | "continue" => Token::KeyName(name),
-            _ => Token::Name(name),
-        };
-        Some(token)
-    }
-
-    fn parse_comment(&mut self) -> Option<Token> {
-        assert_eq!(self.next()?, '/');
-        match self.next()? {
-            '/' => {
-                while self.next()? != '\n' {}
-                None
+        match name.as_ref() {
+            "fn" | "return" | "if" | "loop" | "break" | "continue" => {
+                Some(TokenType::KeyName(name))
             }
-            _ => Some(Token::Op(ArithmeticOp::Div)),
+            _ => Some(TokenType::Name(name)),
         }
     }
 
-    fn parse_arithmetic_op(&mut self) -> Option<Token> {
+    fn parse_comment_or_div(&mut self) -> Option<TokenType> {
+        assert_eq!(self.next()?, '/');
+        match self.next()? {
+            '/' => {
+                let mut comment = String::new();
+                while self.peek()? != '\n' {
+                    comment.push(self.next().unwrap())
+                }
+                Some(TokenType::Comment(comment))
+            }
+            _ => Some(TokenType::Op(ArithmeticOp::Div)),
+        }
+    }
+
+    fn parse_arithmetic_op(&mut self) -> Option<TokenType> {
         let op = match self.next()? {
             '+' => ArithmeticOp::Add,
             '-' => ArithmeticOp::Sub,
@@ -184,10 +220,10 @@ impl<'a> Tokenizer<'a> {
             '/' => ArithmeticOp::Div,
             ch => panic!("Encountered invalid character in number scope '{}'", ch),
         };
-        Some(Token::Op(op))
+        Some(TokenType::Op(op))
     }
 
-    fn parse_number(&mut self) -> Option<Token> {
+    fn parse_number(&mut self) -> Option<TokenType> {
         let mut num = 0 as i64;
         while let Some(ch) = self.peek() {
             match ch {
@@ -199,6 +235,6 @@ impl<'a> Tokenizer<'a> {
             };
         }
 
-        Some(Token::Int(num))
+        Some(TokenType::Int(num))
     }
 }
