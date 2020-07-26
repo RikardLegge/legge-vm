@@ -11,7 +11,11 @@ pub enum ArithmeticOP {
 }
 
 #[derive(Debug)]
+pub struct TokenID(usize);
+
+#[derive(Debug)]
 pub struct Token {
+    id: TokenID,
     start: usize,
     end: usize,
     pub tp: TokenType,
@@ -39,6 +43,7 @@ pub enum TokenType {
 
 pub struct Tokenizer<'a> {
     iter: &'a mut Peekable<Enumerate<Chars<'a>>>,
+    last_id: usize,
     index: usize,
 }
 
@@ -47,6 +52,7 @@ impl<'a> Tokenizer<'a> {
         let mut iter = iter.enumerate().peekable();
         let mut parser = Tokenizer {
             iter: &mut iter,
+            last_id: 0,
             index: 0,
         };
         let mut tokens = Vec::new();
@@ -122,7 +128,9 @@ impl<'a> Tokenizer<'a> {
             _ => panic!("Encountered invalid character in global scope '{}'", ch),
         };
         let end = self.index;
-        Some(Token { tp, start, end })
+        self.last_id += 1;
+        let id = TokenID(self.last_id);
+        Some(Token { tp, id, start, end })
     }
 
     fn parse_return_type_or_subtract(&mut self) -> Option<TokenType> {

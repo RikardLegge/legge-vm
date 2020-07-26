@@ -11,8 +11,7 @@ pub struct AstError {
 impl AstError {
     fn new(details: &str) -> Self {
         let details = format!("Ast Error: {}", details);
-        panic!(details);
-        // AstError { details }
+        AstError { details }
     }
 }
 
@@ -25,13 +24,22 @@ pub struct NodeID(usize);
 pub struct AstNode {
     pub id: NodeID,
     pub tokens: Vec<Token>,
-    pub body: Option<AstNodeBody>,
+    pub body: AstNodeBody,
 }
 
-impl AstNode {
-    fn with_body(mut self, body: AstNodeBody) -> Self {
-        self.body = Some(body);
-        self
+#[derive(Debug)]
+pub struct PendingAstNode {
+    pub id: NodeID,
+    pub tokens: Vec<Token>,
+}
+
+impl PendingAstNode {
+    fn with_body(self, body: AstNodeBody) -> AstNode {
+        AstNode {
+            id: self.id,
+            tokens: self.tokens,
+            body,
+        }
     }
 }
 
@@ -100,18 +108,30 @@ impl<'a> TopDownAstParser<'a> {
         TopDownAstParser { last_id, iter }
     }
 
-    fn ensure_next_token(&mut self, node: &mut AstNode, tp: TokenType) -> Result<(), AstError> {
-        let token = self.next_token(node)?;
+    fn ensure_next_token(
+        &mut self,
+        node: &mut PendingAstNode,
+        tp: TokenType,
+    ) -> Result<(), AstError> {
+        let token = self.next_token(node);
+        if token.is_err() {
+            return Err(AstError::new(&format!(
+                "Expected token {:?} but got to the end of the file",
+                tp
+            )));
+        }
+        let token = token.unwrap();
         match token == tp {
             true => Ok(()),
             false => Err(AstError::new(&format!(
-                "Expected token '{:?}', found {:?}",
-                tp, token
+                "Expected token {:?}, found {:?}",
+                tp,
+                node.tokens.last().unwrap()
             ))),
         }
     }
 
-    fn next_token(&mut self, node: &mut AstNode) -> Result<TokenType, AstError> {
+    fn next_token(&mut self, node: &mut PendingAstNode) -> Result<TokenType, AstError> {
         match self.iter.next() {
             Some(token) => {
                 let tp = token.tp.clone();
@@ -125,7 +145,7 @@ impl<'a> TopDownAstParser<'a> {
     fn peek_token(&mut self) -> Result<&TokenType, AstError> {
         match self.iter.peek() {
             Some(val) => Ok(&val.tp),
-            None => Err(ast_error("No more tokens when peeking")),
+            None => Err(AstError::new("No more tokens when peeking")),
         }
     }
 
@@ -135,11 +155,10 @@ impl<'a> TopDownAstParser<'a> {
         id
     }
 
-    fn node(&mut self) -> AstNode {
+    fn node(&mut self) -> PendingAstNode {
         let id = NodeID(self.next_id());
         let tokens = Vec::new();
-        let body = None;
-        return AstNode { id, tokens, body };
+        return PendingAstNode { id, tokens };
     }
 
     fn parse(mut self) -> Result<Ast, AstError> {
@@ -154,38 +173,25 @@ impl<'a> TopDownAstParser<'a> {
         Ok(Ast { root })
     }
 
-    fn do_block(&mut self, node: AstNode) -> AstResult {
-        let mut node = self.do_block_content(node)?;
-        self.ensure_next_token(&mut node, TokenType::RightCurlyBrace)?;
-        Ok(node)
-    }
-
-    fn do_block_content(&mut self, node: AstNode) -> AstResult {
+    fn do_block(&mut self, mut node: PendingAstNode) -> AstResult {
         let mut statements = Vec::new();
-        while *self.peek_token("expecting }")? != TokenType::RightCurlyBrace {
+        while *self.peek_token()? != TokenType::RightCurlyBrace {
             let statement = self.do_statement()?;
             statements.push(statement);
         }
+        self.ensure_next_token(&mut node, TokenType::RightCurlyBrace)?;
         Ok(node.with_body(AstNodeBody::Block(statements)))
     }
 
-    fn should_terminate_statement(&mut self, node: &mut AstNode) -> Result<bool, AstError> {
+    fn should_terminate_statement(&mut self, node: &mut AstNode) -> bool {
         use AstNodeBody::*;
 
-        if let Some(body) = &mut node.body {
-            match body {
-                Block(..) | ProcedureDeclaration(..) | If(..) | Loop(..) | Comment(..) => Ok(false),
-                ConstDeclaration(_, Some(child_node))
-                | VariableDeclaration(_, Some(child_node)) => {
-                    self.should_terminate_statement(&mut *child_node)
-                }
-                _ => match self.peek_token("expecting ;")? {
-                    TokenType::EndStatement => Ok(true),
-                    _ => Ok(false),
-                },
+        match &mut node.body {
+            ConstDeclaration(_, Some(child_node)) | VariableDeclaration(_, Some(child_node)) => {
+                self.should_terminate_statement(&mut *child_node)
             }
-        } else {
-            Err(AstError::new(&format!("Statement is missing body")))
+            Block(..) | ProcedureDeclaration(..) | If(..) | Loop(..) | Comment(..) => false,
+            _ => true,
         }
     }
 
@@ -209,8 +215,12 @@ impl<'a> TopDownAstParser<'a> {
             Comment(comment) => Ok(node.with_body(AstNodeBody::Comment(comment))),
             other => Err(AstError::new(&format!("Unknown token {:?}", other))),
         }?;
-        if self.should_terminate_statement(&mut node)? {
-            self.ensure_next_token(&mut node, EndStatement)?;
+        if self.should_terminate_statement(&mut node) {
+            // This is hacky but since this type of token patching is only needed
+            // at the end of statements, this will do.
+            let mut tmp_node = self.node();
+            self.ensure_next_token(&mut tmp_node, EndStatement)?;
+            node.tokens.append(&mut tmp_node.tokens);
         }
         Ok(node)
     }
@@ -234,7 +244,7 @@ impl<'a> TopDownAstParser<'a> {
         };
 
         match self.peek_token() {
-            Some(TokenType::Op(op)) => {
+            Ok(TokenType::Op(op)) => {
                 let op = *op;
                 let mut op_node = self.node();
                 self.next_token(&mut op_node)?;
@@ -244,7 +254,7 @@ impl<'a> TopDownAstParser<'a> {
         }
     }
 
-    fn do_if(&mut self, mut node: AstNode) -> AstResult {
+    fn do_if(&mut self, mut node: PendingAstNode) -> AstResult {
         self.ensure_next_token(&mut node, TokenType::LeftBrace)?;
         let expr = self.do_expression()?;
         self.ensure_next_token(&mut node, TokenType::RightBrace)?;
@@ -255,20 +265,20 @@ impl<'a> TopDownAstParser<'a> {
         Ok(node.with_body(AstNodeBody::If(Box::new(expr), Box::new(body))))
     }
 
-    fn do_loop(&mut self, node: AstNode) -> AstResult {
+    fn do_loop(&mut self, node: PendingAstNode) -> AstResult {
         let mut body_node = self.node();
         self.ensure_next_token(&mut body_node, TokenType::LeftCurlyBrace)?;
         let body = self.do_block(body_node)?;
         Ok(node.with_body(AstNodeBody::Loop(Box::new(body))))
     }
 
-    fn do_break(&mut self, node: AstNode) -> AstResult {
+    fn do_break(&mut self, node: PendingAstNode) -> AstResult {
         Ok(node.with_body(AstNodeBody::Break))
     }
 
     fn do_operation(
         &mut self,
-        node: AstNode,
+        node: PendingAstNode,
         op: ArithmeticOP,
         pending_node: Option<AstNode>,
     ) -> AstResult {
@@ -306,7 +316,7 @@ impl<'a> TopDownAstParser<'a> {
         Ok(node.with_body(body))
     }
 
-    fn do_procedure(&mut self, mut node: AstNode) -> AstResult {
+    fn do_procedure(&mut self, mut node: PendingAstNode) -> AstResult {
         self.ensure_next_token(&mut node, TokenType::LeftBrace)?;
         let mut arguments = Vec::new();
         while self.peek_token()? != &TokenType::RightBrace {
@@ -338,7 +348,7 @@ impl<'a> TopDownAstParser<'a> {
         )))
     }
 
-    fn do_statement_symbol(&mut self, mut node: AstNode, symbol: &str) -> AstResult {
+    fn do_statement_symbol(&mut self, mut node: PendingAstNode, symbol: &str) -> AstResult {
         use crate::token::TokenType::*;
 
         let token = self.peek_token()?;
@@ -378,7 +388,7 @@ impl<'a> TopDownAstParser<'a> {
         }
     }
 
-    fn do_expression_symbol(&mut self, node: AstNode, symbol: &str) -> AstResult {
+    fn do_expression_symbol(&mut self, node: PendingAstNode, symbol: &str) -> AstResult {
         use crate::token::TokenType::*;
 
         let token = self.peek_token()?;
@@ -394,7 +404,7 @@ impl<'a> TopDownAstParser<'a> {
         }
     }
 
-    fn do_function_call(&mut self, mut node: AstNode, symbol: &str) -> AstResult {
+    fn do_function_call(&mut self, mut node: PendingAstNode, symbol: &str) -> AstResult {
         use crate::token::TokenType::*;
 
         self.ensure_next_token(&mut node, LeftBrace)?;
@@ -410,7 +420,7 @@ impl<'a> TopDownAstParser<'a> {
         Ok(node.with_body(AstNodeBody::Call(symbol.into(), args)))
     }
 
-    fn do_return(&mut self, node: AstNode) -> AstResult {
+    fn do_return(&mut self, node: PendingAstNode) -> AstResult {
         Ok(node.with_body(AstNodeBody::Return))
     }
 }
