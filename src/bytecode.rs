@@ -1,9 +1,8 @@
-use crate::ast::{AssignmentType, Ast, AstNode, AstNodeBody, NodeID};
-use crate::bytecode::Instruction::Branch;
+use crate::ast::{Ast, AstNode, AstNodeBody, NodeID, VariableType};
+use crate::bytecode::OP::Branch;
 use crate::foreign_functions::ForeignFunction;
-use crate::token::ArithmeticOp;
+use crate::token::ArithmeticOP;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::mem;
 use std::ops::AddAssign;
 
@@ -22,103 +21,115 @@ impl Bytecode {
                 pushed: 0,
                 popped: 0
             },
-            bc.ev_node(&ast.root)
+            bc.ev_node(&ast.root).stack_usage
         );
         let global_scope = mem::replace(&mut bc.scope, Scope::new(0));
         assert_eq!(bc.code.len(), 0);
-        bc.code = global_scope.code;
+        bc.code = global_scope.instructions;
         // bc.optimize();
         bc.get_bytecode()
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Instruction {
+    pub node_id: NodeID,
+    pub op: OP,
+}
+
+#[derive(Debug)]
+struct GeneratorInstruction {
+    node_id: NodeID,
+    op: GeneratorOP,
+}
+
+#[derive(Debug)]
+enum GeneratorOP {
+    Linked(OP),
+    Unlinked(UnlinkedOP),
+}
+
+pub type OPOffset = isize;
+pub type OPAddress = usize;
+
+#[derive(Debug)]
+enum UnlinkedOP {
+    Panic(String),
+    Branch(LinkTarget),
+    BranchIf(LinkTarget),
+    SLoad(String),
+    SStore(String),
+    PopStack(NodeID, NodeID),
+    Call(String),
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum Instruction {
+pub enum OP {
     AddI,
     SubI,
     MulI,
     DivI,
-    EqI,
+    CmpI,
 
-    SLoad(i64),
-    SStore(i64),
+    SLoad(OPOffset),
+    SStore(OPOffset),
 
-    BranchUnlinked(LinkTarget),
-    Branch(isize),
-    BranchIfUnlinked(LinkTarget),
-    BranchIf(isize),
-    PushPc(usize),
+    Branch(OPOffset),
+    BranchIf(OPOffset),
+    PushPc(OPOffset),
     PopPc,
 
-    PushImmediate(i64, String),
+    PushImmediate(Value),
     PopStack(usize),
 
-    SetStackFrame(i64),
+    SetStackFrame(OPOffset),
     PushStackFrame,
     PopStackFrame,
 
-    CreateClosure,
-
-    Call(usize, String),
-    CallForeign(usize, String),
+    Jump(OPAddress),
+    CallForeign(OPAddress),
 
     NoOp,
-
     Halt,
-
-    Panic(String),
+    Panic,
+}
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+enum LinkTarget {
+    If(NodeID, LinkTargetPosition),
+    Loop(NodeID, LinkTargetPosition),
+    Return(NodeID, LinkTargetPosition),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-enum LoopTarget {
+enum LinkTargetPosition {
     Start,
-    End,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-enum IfTarget {
     Else,
     End,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-enum LinkTarget {
-    If(NodeID, IfTarget),
-    Loop(NodeID, LoopTarget),
-    Return(NodeID),
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+pub enum Value {
+    Unset,
+    Int(isize),
+    FunctionPointer(usize),
+    RuntimePointer(usize),
 }
 
-#[derive(Copy, Clone, Debug)]
-struct Address {
-    addr: usize,
-    kind: AddressKind,
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-enum AddressKind {
-    ForeignFunction,
-    Function {
-        argument_count: usize,
-        return_value: bool,
-    },
-    StackValue,
-    ConstStackValue,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum ScopeType {
+#[derive(Clone, Debug, PartialEq)]
+enum ScopeValue {
+    Expression,
+    StackFrame,
+    Body,
+    Variable(String, bool),
     Block,
     Loop,
-    StackFrame,
 }
 
 struct Scope {
     node_id: NodeID,
     parent: Option<Box<Scope>>,
-    variables: HashMap<String, Address>,
-    allocations: usize,
-    tp: ScopeType,
-    code: Vec<Instruction>,
+    value: ScopeValue,
+    instructions: Vec<GeneratorInstruction>,
 }
 
 impl Scope {
@@ -126,21 +137,9 @@ impl Scope {
         Scope {
             node_id,
             parent: None,
-            variables: HashMap::new(),
-            allocations: 0,
-            code: Vec::new(),
-            tp: ScopeType::Block,
+            instructions: Vec::new(),
+            value: ScopeValue::Block,
         }
-    }
-
-    fn get_parent_allocations(&self, node_id: NodeID, tp: ScopeType) -> usize {
-        if self.node_id == node_id && self.tp == tp {
-            return self.allocations;
-        }
-        if let Some(p) = &self.parent {
-            return self.allocations + p.get_parent_allocations(node_id, tp);
-        }
-        panic!("Parent not found");
     }
 }
 
@@ -164,23 +163,45 @@ impl StackUsage {
 }
 
 struct BytecodeGenerator<'a> {
-    code: Vec<Instruction>,
+    node_id: NodeID,
+    code: Vec<GeneratorInstruction>,
     heap: Vec<i64>,
     scope: Scope,
-    procedures: Vec<Instruction>,
+    procedures: Vec<GeneratorInstruction>,
     foreign_functions: &'a [ForeignFunction],
+}
+
+struct ScopeEvaluation {
+    stack_usage: StackUsage,
+    scope: Scope,
 }
 
 impl<'a> BytecodeGenerator<'a> {
     fn get_bytecode(self) -> Bytecode {
         let data = self.heap;
 
-        let mut code = self.code;
-        code.push(Instruction::Halt);
-        let procedure_address = code.len();
+        let mut generator_code = self.code;
+        generator_code.push(GeneratorInstruction {
+            node_id: 0,
+            op: GeneratorOP::Linked(OP::Halt),
+        });
+        let procedure_address = generator_code.len();
 
         let mut procedures = self.procedures;
-        code.append(&mut procedures);
+        generator_code.append(&mut procedures);
+
+        let mut code = Vec::with_capacity(generator_code.len());
+        for inst in generator_code {
+            let op = match inst.op {
+                GeneratorOP::Linked(op) => op,
+                GeneratorOP::Unlinked(op) => panic!(
+                    "Found Unlinked instruction after bytecode generation completed: {:?}",
+                    op
+                ),
+            };
+            let node_id = inst.node_id;
+            code.push(Instruction { node_id, op });
+        }
 
         Bytecode {
             code,
@@ -196,460 +217,376 @@ impl<'a> BytecodeGenerator<'a> {
         let procedures = Vec::new();
 
         let mut gen = BytecodeGenerator {
+            node_id: 0,
             code,
             scope,
             foreign_functions,
             heap,
             procedures,
         };
-        for (addr, function) in foreign_functions.iter().enumerate() {
-            let name = function.name.to_string();
-            let address = Address {
-                addr,
-                kind: AddressKind::ForeignFunction,
-            };
-            gen.scope.variables.insert(name, address);
+        for (_, function) in foreign_functions.iter().enumerate() {
+            gen.push_scope(0, ScopeValue::Variable(function.name.clone().into(), true));
         }
         gen
     }
 
-    fn push_instruction(&mut self, instruction: Instruction) {
-        self.scope.code.push(instruction);
+    fn add_child_ops(&mut self, scope: &mut Scope) {
+        self.scope.instructions.append(&mut scope.instructions);
     }
 
-    fn find_address_in_scope(
-        &self,
-        symbol: &str,
-        scope: &Scope,
-        recurse_frames: bool,
-    ) -> Option<Address> {
-        if let Some(val) = scope.variables.get(symbol) {
-            return Some(*val);
-        } else if !(scope.tp == ScopeType::StackFrame) || recurse_frames {
-            if let Some(parent) = &scope.parent {
-                return self.find_address_in_scope(symbol, &*parent, recurse_frames);
-            }
-        }
-
-        None
+    fn add_op(&mut self, op: OP) {
+        let linked_op = GeneratorOP::Linked(op);
+        self.scope.instructions.push(GeneratorInstruction {
+            node_id: self.node_id,
+            op: linked_op,
+        });
     }
 
-    fn find_fn_address(&self, symbol: &str) -> Option<Address> {
-        self.find_address_in_scope(symbol, &self.scope, true)
+    fn add_op_unlinked(&mut self, op: UnlinkedOP) {
+        let unlinked_op = GeneratorOP::Unlinked(op);
+        self.scope.instructions.push(GeneratorInstruction {
+            node_id: self.node_id,
+            op: unlinked_op,
+        });
     }
 
-    fn find_var_address(&self, symbol: &str) -> Option<Address> {
-        self.find_address_in_scope(symbol, &self.scope, false)
+    fn with_scope<'b>(
+        &mut self,
+        node_id: NodeID,
+        value: ScopeValue,
+        func: &'b dyn Fn(&mut Self) -> StackUsage,
+    ) -> ScopeEvaluation {
+        self.push_scope(node_id, value.clone());
+        let stack_usage = func(self);
+        let scope = self.pop_scope(node_id, value);
+        return ScopeEvaluation { stack_usage, scope };
     }
 
-    fn next_stack_allocation_offset(&mut self) -> usize {
-        let mut offset = self.scope.allocations;
-        if !(self.scope.tp == ScopeType::StackFrame) {
-            let mut parent = &self.scope.parent;
-            while let Some(scope) = parent {
-                offset += scope.allocations;
-                if scope.tp == ScopeType::StackFrame {
-                    parent = &None
-                } else {
-                    parent = &scope.parent
-                }
-            }
-        }
-        self.scope.allocations += 1;
-        offset
-    }
-
-    fn push_scope(&mut self, node_id: NodeID, tp: ScopeType) {
+    fn push_scope(&mut self, node_id: NodeID, value: ScopeValue) {
         let parent = mem::replace(&mut self.scope, Scope::new(node_id));
         self.scope.parent = Some(Box::new(parent));
-        self.scope.tp = tp;
+        self.scope.value = value;
     }
 
-    fn pop_scope(&mut self, id: NodeID) -> Scope {
-        assert_eq!(self.scope.node_id, id);
-        self.pop_scope_unsafe()
+    fn pop_scope(&mut self, node_id: NodeID, value: ScopeValue) -> Scope {
+        assert_eq!(self.scope.node_id, node_id);
+        assert_eq!(self.scope.value, value);
+        self.pop_top_scope()
     }
 
-    fn pop_scope_unsafe(&mut self) -> Scope {
+    fn pop_top_scope(&mut self) -> Scope {
         let parent = *mem::replace(&mut self.scope.parent, None).unwrap();
         mem::replace(&mut self.scope, parent)
     }
 
-    fn ev_node(&mut self, node: &AstNode) -> StackUsage {
+    fn ev_node(&mut self, node: &AstNode) -> ScopeEvaluation {
         use crate::ast::AstNodeBody::*;
         match &node.body {
-            Op(op, expr1, expr2) => self.ev_operation(*op, &expr1, &expr2),
-            PrefixOp(op, expr1) => self.ev_prefix_operation(*op, &expr1),
-            Block(children) => self.ev_scope(node.id, children),
-            Call(name, args) => self.ev_call(&name, args),
-            GetVariable(name) => self.ev_variable_value(&name),
-            Assignment(tp, name, expr) => match tp {
-                AssignmentType::Assignment => self.ev_assignment(&name, expr, false),
-                AssignmentType::Declaration => self.ev_declaration(&name, expr, false),
-                AssignmentType::ConstDeclaration => self.ev_declaration(&name, expr, true),
+            Op(op, expr1, expr2) => self.ev_operation(node.id, *op, &expr1, &expr2),
+            PrefixOp(op, expr1) => self.ev_prefix_operation(node.id, *op, &expr1),
+            Block(children) => self.ev_block(node.id, children),
+            Call(name, args) => self.ev_call(node.id, &name, args),
+            VariableValue(name) => self.ev_variable_value(node.id, &name),
+            VariableAssignment(tp, name, expr1) => match tp {
+                VariableType::Assignment => self.ev_assignment(node.id, &name, expr1),
+                VariableType::Declaration => self.ev_declaration(node.id, &name, expr1, false),
+                VariableType::ConstDeclaration => self.ev_declaration(node.id, &name, expr1, true),
             },
-            ProcedureDeclaration(name, args, return_values, body) => {
-                self.ev_procedure(node.id, name, &args, &return_values, body)
+            ProcedureDeclaration(args, return_values, body) => {
+                self.ev_procedure(node.id, &args, &return_values, body)
             }
-            Return(proc_id, return_value) => self.ev_return(*proc_id, return_value),
-            If(condition, body) => self.ev_if(condition, body),
+            Return(proc_id, _) => self.ev_return(node.id, *proc_id),
+            If(condition, body) => self.ev_if(node.id, condition, body),
             Loop(body) => self.ev_loop(node.id, body),
-            Break(id) => self.ev_break(*id),
-            Comment(_) => StackUsage::new(0, 0),
+            Break(id) => self.ev_break(node.id, *id),
+            Comment(_) => ScopeEvaluation {
+                stack_usage: StackUsage::new(0, 0),
+                scope: Scope::new(node.id),
+            },
             _ => panic!("Unsupported node here {:?}", node),
         }
     }
 
-    fn ev_break(&mut self, loop_id: NodeID) -> StackUsage {
-        let parent_alloc = self.scope.get_parent_allocations(loop_id, ScopeType::Loop);
-        self.scope.code.push(Instruction::PopStack(parent_alloc));
-        self.scope
-            .code
-            .push(Instruction::BranchUnlinked(LinkTarget::Loop(
+    fn ev_break(&mut self, node_id: NodeID, loop_id: NodeID) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            bc.add_op_unlinked(UnlinkedOP::PopStack(node_id, loop_id));
+            bc.add_op_unlinked(UnlinkedOP::Branch(LinkTarget::Loop(
                 loop_id,
-                LoopTarget::End,
+                LinkTargetPosition::End,
             )));
-
-        StackUsage {
-            popped: 0,
-            pushed: 0,
-        }
+            StackUsage::new(0, 0)
+        })
     }
 
-    fn ev_loop(&mut self, node_id: NodeID, body_node: &Box<AstNode>) -> StackUsage {
-        self.push_scope(node_id, ScopeType::Loop);
-        self.scope.tp = ScopeType::Loop;
+    fn ev_loop(&mut self, node_id: NodeID, body_node: &Box<AstNode>) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Loop, &|bc| {
+            let start = bc.scope.instructions.len();
+            let mut body = match &body_node.body {
+                AstNodeBody::Block(children) => {
+                    let body = bc.ev_block(body_node.id, children);
+                    let usage = body.stack_usage;
+                    assert_eq!(usage.pushed, usage.popped);
+                    body.scope
+                }
+                _ => panic!("The body of a loop statement must be a scope"),
+            };
+            let end = bc.scope.instructions.len();
+            let start_of_loop = start as isize - end as isize - 1;
+            bc.add_op(OP::Branch(start_of_loop));
 
-        let start = self.scope.code.len();
-        if let AstNodeBody::Block(children) = &body_node.body {
-            let usage = self.ev_scope(body_node.id, children);
-            assert_eq!(usage.pushed, usage.popped);
-        } else {
-            panic!("The body of a loop statement must be a scope");
-        }
-        let end = self.scope.code.len();
-        let start_of_loop = start as isize - end as isize - 1;
-        self.scope.code.push(Instruction::Branch(start_of_loop));
-
-        let mut scope = self.pop_scope(node_id);
-
-        for i in 0..scope.code.len() {
-            let inst = &scope.code[i];
-            if let &Instruction::BranchUnlinked(t) = inst {
-                if let LinkTarget::Loop(id, target) = t {
-                    if id == node_id {
-                        match target {
-                            LoopTarget::Start => scope.code[i] = Branch(-(i as isize) - 1),
-                            LoopTarget::End => {
-                                scope.code[i] = Branch((scope.code.len() - i) as isize - 1)
+            for i in 0..body.instructions.len() {
+                match &body.instructions[i].op {
+                    GeneratorOP::Unlinked(UnlinkedOP::Branch(LinkTarget::Loop(id, target)))
+                        if *id == node_id =>
+                    {
+                        body.instructions[i].op = match target {
+                            LinkTargetPosition::Start => {
+                                GeneratorOP::Linked(Branch(-(i as isize) - 1))
                             }
+                            LinkTargetPosition::End => GeneratorOP::Linked(Branch(
+                                (body.instructions.len() - i) as isize - 1,
+                            )),
+                            _ => panic!("Unable to link loop return to else"),
                         }
                     }
+                    _ => {}
                 }
             }
-        }
 
-        self.scope.code.append(&mut scope.code);
+            bc.scope.instructions.append(&mut body.instructions);
 
-        StackUsage {
-            popped: 0,
-            pushed: 0,
-        }
+            StackUsage {
+                popped: 0,
+                pushed: 0,
+            }
+        })
     }
 
-    fn ev_if(&mut self, condition: &Box<AstNode>, node: &Box<AstNode>) -> StackUsage {
-        let usage = self.ev_expression(condition);
-        assert_eq!(usage.pushed - usage.popped, 1);
-        self.scope.code.push(Instruction::PushImmediate(
-            0,
-            "Invert increment condition".into(),
-        ));
-        self.scope.code.push(Instruction::EqI);
-        let jump_index = self.scope.code.len();
-        self.scope
-            .code
-            .push(Instruction::BranchIfUnlinked(LinkTarget::If(
+    fn ev_if(
+        &mut self,
+        node_id: NodeID,
+        condition: &Box<AstNode>,
+        node: &Box<AstNode>,
+    ) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            let usage = bc.ev_expression(condition).stack_usage;
+            assert_eq!(usage.pushed - usage.popped, 1);
+            bc.add_op(OP::PushImmediate(Value::Unset));
+            bc.add_op(OP::CmpI);
+            let jump_index = bc.scope.instructions.len();
+            bc.add_op_unlinked(UnlinkedOP::BranchIf(LinkTarget::If(
                 0,
-                IfTarget::Else,
+                LinkTargetPosition::Else,
             )));
 
-        let start = self.scope.code.len();
-        if let AstNodeBody::Block(children) = &node.body {
-            let usage = self.ev_scope(node.id, children);
-            assert_eq!(usage.pushed, usage.popped);
-        } else {
-            panic!("The body of an if statement must be a scope");
-        }
-        let end = self.scope.code.len();
-        let end_of_if = (end - start) as isize;
-        self.scope.code[jump_index] = Instruction::BranchIf(end_of_if);
+            let start = bc.scope.instructions.len();
+            if let AstNodeBody::Block(children) = &node.body {
+                bc.ev_block(node.id, children);
+            } else {
+                panic!("The body of an if statement must be a Block");
+            }
+            let end = bc.scope.instructions.len();
+            let end_of_if = (end - start) as isize;
+            bc.scope.instructions[jump_index].op = GeneratorOP::Linked(OP::BranchIf(end_of_if));
 
-        StackUsage {
-            popped: 0,
-            pushed: 0,
-        }
+            StackUsage {
+                popped: 0,
+                pushed: 0,
+            }
+        })
     }
 
-    fn ev_return(&mut self, proc_id: NodeID, return_value: &Option<Box<AstNode>>) -> StackUsage {
-        let parent_alloc = self
-            .scope
-            .get_parent_allocations(proc_id, ScopeType::StackFrame);
-
-        self.scope.code.push(Instruction::PopStack(parent_alloc));
-        self.scope.code.push(Instruction::PopStackFrame);
-        self.scope.code.push(Instruction::PopPc);
-
-        StackUsage::new(0, 0)
-    }
-
-    fn ev_procedure_scope(&mut self, node_id: NodeID, body: &[AstNode]) -> Scope {
-        use self::Instruction::*;
-        let mut scope = self.ev_scope_body(node_id, body);
-
-        for i in 0..scope.allocations {
-            self.scope
-                .code
-                .push(PushImmediate(0, format!("Stack allocation {}", i)));
-        }
-
-        self.scope.code.append(&mut scope.code);
-        scope
+    fn ev_return(&mut self, node_id: NodeID, proc_id: NodeID) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            bc.add_op_unlinked(UnlinkedOP::PopStack(node_id, proc_id));
+            bc.add_op(OP::PopStackFrame);
+            bc.add_op(OP::PopPc);
+            StackUsage::new(0, 0)
+        })
     }
 
     fn ev_procedure(
         &mut self,
         node_id: NodeID,
-        symbol: &str,
         args: &[String],
-        return_value: &Option<String>,
-        body: &[AstNode],
-    ) -> StackUsage {
-        let proc_offset = self.procedures.len();
-        let proc_address = Address {
-            addr: proc_offset,
-            kind: AddressKind::Function {
-                argument_count: args.len(),
-                return_value: return_value.is_some(),
-            },
-        };
-
-        // Register function globally
-        self.scope
-            .variables
-            .insert(symbol.to_string(), proc_address);
-        self.push_scope(node_id, ScopeType::StackFrame);
-        // Register function locally
-        self.scope
-            .variables
-            .insert(symbol.to_string(), proc_address);
-
-        for arg in args.iter() {
-            let offset = self.next_stack_allocation_offset();
-            self.scope.variables.insert(
-                arg.to_string(),
-                Address {
-                    addr: offset,
-                    kind: AddressKind::StackValue,
-                },
-            );
-        }
-        self.ev_procedure_scope(node_id, body);
-        if self.scope.code.len() == 0 || Some(&Instruction::PopPc) != self.scope.code.last() {
-            self.ev_return(node_id, &None);
-        }
-        let mut scope = self.pop_scope(node_id);
-
-        self.procedures.append(&mut scope.code);
-
-        StackUsage::new(0, 0)
-    }
-
-    fn ev_variable_value(&mut self, symbol: &str) -> StackUsage {
-        use self::AddressKind::*;
-        let address = self.find_var_address(symbol).expect(&format!(
-            "Variable symbol '{}' not found in the current scope",
-            symbol
-        ));
-        match address.kind {
-            StackValue | ConstStackValue => {
-                let offset = address.addr;
-                self.push_instruction(Instruction::SLoad(offset as i64));
-                StackUsage::new(0, 1)
-            }
-            _ => panic!("{:?}", address),
-        }
-    }
-
-    fn ev_assignment(&mut self, symbol: &str, expr: &AstNode, is_declaration: bool) -> StackUsage {
-        use crate::ast::AstNodeBody::*;
-
-        let address = self.find_var_address(symbol).expect(&format!(
-            "Variable symbol '{}' not found in the current scope",
-            symbol
-        ));
-        if address.kind == AddressKind::ConstStackValue && !is_declaration {
-            panic!("Can not assign to constant value");
-        }
-
-        let stack_usage = match expr.body {
-            Primitive(val) => self.ev_intermediate(val),
-            _ => self.ev_node(expr),
-        };
-        assert_eq!(stack_usage.pushed, 1);
-
-        self.push_instruction(Instruction::SStore(address.addr as i64));
-        StackUsage::new(stack_usage.popped, 0)
-    }
-
-    fn ev_declaration(&mut self, symbol: &str, expr: &AstNode, is_constant: bool) -> StackUsage {
-        let offset = self.next_stack_allocation_offset();
-        if is_constant {
-            self.scope.variables.insert(
-                symbol.to_string(),
-                Address {
-                    addr: offset,
-                    kind: AddressKind::ConstStackValue,
-                },
-            );
-        } else {
-            self.scope.variables.insert(
-                symbol.to_string(),
-                Address {
-                    addr: offset,
-                    kind: AddressKind::StackValue,
-                },
-            );
-        }
-
-        self.ev_assignment(symbol, expr, true)
-    }
-
-    fn ev_call(&mut self, symbol: &str, args: &[AstNode]) -> StackUsage {
-        let address = self.find_fn_address(symbol).expect(&format!(
-            "Function symbol '{}' not found in the current scope",
-            symbol
-        ));
-
-        match address.kind {
-            AddressKind::ForeignFunction => {
-                let mut popped = 0;
-                for arg in args {
-                    let usage = self.ev_expression(arg);
-                    assert_eq!(1, usage.pushed);
-                    popped += usage.popped;
+        _: &Option<String>,
+        children: &[AstNode],
+    ) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            let mut body = bc.with_scope(node_id, ScopeValue::StackFrame, &|bc| {
+                for arg in args.iter() {
+                    bc.push_scope(node_id, ScopeValue::Variable(arg.into(), true));
                 }
-                self.push_instruction(Instruction::PushImmediate(
-                    args.len() as i64,
-                    format!("Foreign function argument count"),
-                ));
-                self.push_instruction(Instruction::CallForeign(address.addr, symbol.to_string()));
-                let pushed = self.foreign_functions[address.addr].returns;
-                StackUsage::new(popped, pushed)
-            }
-            AddressKind::Function {
-                argument_count,
-                return_value,
-            } => {
-                assert_eq!(
-                    args.len(),
-                    argument_count,
-                    "Wong number of arguments passed to function"
-                );
+                let usage = bc.ev_block(node_id, children).stack_usage;
+                assert_eq!(usage.pushed, usage.popped);
 
-                let pc_index = self.scope.code.len();
-                self.push_instruction(Instruction::Panic(
-                    "PushPC instruction offset not written correctly".to_string(),
-                ));
-                self.push_instruction(Instruction::PushStackFrame);
-
-                let mut popped = 0;
-                for arg in args {
-                    let usage = self.ev_expression(arg);
-                    assert_eq!(1, usage.pushed);
-                    popped += usage.popped;
+                if let Some(inst) = bc.scope.instructions.last() {
+                    if let GeneratorOP::Linked(OP::PopPc) = inst.op {
+                        bc.ev_return(node_id, node_id);
+                    }
                 }
-                self.push_instruction(Instruction::SetStackFrame(-(args.len() as i64)));
-                self.push_instruction(Instruction::Call(address.addr, symbol.to_string()));
-                let offset = self.scope.code.len() - pc_index - 1;
-                self.scope.code[pc_index] = Instruction::PushPc(offset);
-                StackUsage::new(popped, 0)
+                StackUsage::new(0, 0)
+            });
+
+            let proc_offset = bc.procedures.len();
+            bc.procedures.append(&mut body.scope.instructions);
+
+            let value = Value::FunctionPointer(proc_offset);
+            bc.add_op(OP::PushImmediate(value));
+
+            StackUsage::new(0, 1)
+        })
+    }
+
+    fn ev_variable_value(&mut self, node_id: NodeID, symbol: &str) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            bc.add_op_unlinked(UnlinkedOP::SLoad(symbol.into()));
+            StackUsage::new(0, 1)
+        })
+    }
+
+    fn ev_assignment(&mut self, node_id: NodeID, symbol: &str, expr: &AstNode) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            let usage = match expr.body {
+                AstNodeBody::Int(val) => bc.ev_intermediate(expr.id, Value::Int(val)),
+                _ => bc.ev_node(expr),
             }
-            _ => unimplemented!(),
-        }
+            .stack_usage;
+            assert_eq!(usage.pushed, 1);
+
+            bc.add_op_unlinked(UnlinkedOP::SStore(symbol.into()));
+            StackUsage::new(usage.popped, 0)
+        })
     }
 
-    fn ev_scope_body(&mut self, node_id: NodeID, children: &[AstNode]) -> Scope {
-        self.push_scope(node_id, ScopeType::Block);
-
-        let mut stack_usage = StackUsage::new(0, 0);
-        for node in children {
-            stack_usage += self.ev_node(node);
-        }
-        assert_eq!(stack_usage.popped, stack_usage.pushed);
-
-        self.pop_scope(node_id)
+    fn ev_declaration(
+        &mut self,
+        node_id: NodeID,
+        symbol: &str,
+        expr: &AstNode,
+        is_constant: bool,
+    ) -> ScopeEvaluation {
+        let value = ScopeValue::Variable(symbol.into(), is_constant);
+        self.with_scope(node_id, value, &|bc| {
+            bc.ev_assignment(node_id, symbol, expr).stack_usage
+        })
     }
 
-    fn ev_scope(&mut self, node_id: NodeID, children: &[AstNode]) -> StackUsage {
-        use self::Instruction::*;
-        let mut child_scope = self.ev_scope_body(node_id, children);
+    fn ev_call(&mut self, node_id: NodeID, symbol: &str, args: &[AstNode]) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            let pc_index = bc.scope.instructions.len();
+            bc.add_op_unlinked(UnlinkedOP::Panic(
+                "PushPC instruction offset not written correctly".into(),
+            ));
+            bc.add_op(OP::PushStackFrame);
+            let mut popped = 0;
+            for arg in args {
+                let usage = bc.ev_expression(arg).stack_usage;
+                assert_eq!(1, usage.pushed);
+                popped += usage.popped;
+            }
 
-        for i in 0..child_scope.allocations {
-            self.scope
-                .code
-                .push(PushImmediate(0, format!("Scope allocation {}", i)));
-        }
+            bc.add_op(OP::SetStackFrame(-(args.len() as isize)));
+            bc.add_op_unlinked(UnlinkedOP::Call(symbol.into()));
+            let offset = bc.scope.instructions.len() - pc_index - 1;
+            bc.scope.instructions[pc_index].op = GeneratorOP::Linked(OP::PushPc(offset as isize));
 
-        self.scope.code.append(&mut child_scope.code);
-        self.scope.code.push(PopStack(child_scope.allocations));
-
-        StackUsage::new(0, 0)
+            StackUsage::new(popped, 0)
+        })
     }
 
-    fn ev_prefix_operation(&mut self, op: ArithmeticOp, expr1: &AstNode) -> StackUsage {
-        self.push_instruction(Instruction::PushImmediate(
-            0,
-            format!("Prefix operation return value"),
-        ));
-        let diff = self.ev_expression(expr1);
-        assert_eq!(1, diff.pushed);
-        match op {
-            ArithmeticOp::Add => self.push_instruction(Instruction::AddI),
-            ArithmeticOp::Sub => self.push_instruction(Instruction::SubI),
-            _ => panic!("Invalid prefix operation: {:?}", op),
-        };
-        StackUsage::new(diff.popped, 1)
+    fn ev_block(&mut self, node_id: NodeID, children: &[AstNode]) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Block, &|bc| {
+            bc.push_scope(node_id, ScopeValue::Body);
+            let mut stack_usage = StackUsage::new(0, 0);
+            for node in children {
+                stack_usage += bc.ev_node(node).stack_usage;
+                if stack_usage.popped > stack_usage.pushed {
+                    panic!("More elements have been popped than pushed");
+                }
+            }
+            assert_eq!(stack_usage.pushed, stack_usage.popped);
+
+            let mut allocations = 0;
+            while bc.scope.node_id != node_id {
+                let scope = bc.pop_top_scope();
+                match scope.value {
+                    ScopeValue::Variable(_, _) => (),
+                    _ => panic!(
+                        "Invalid scope type when calculating block allocations {:?}",
+                        scope.value
+                    ),
+                }
+
+                bc.add_op(OP::PushImmediate(Value::Unset));
+                allocations += 1;
+            }
+            let mut body = bc.pop_scope(node_id, ScopeValue::Body);
+
+            bc.add_child_ops(&mut body);
+            bc.add_op(OP::PopStack(allocations));
+            return StackUsage::new(0, 0);
+        })
     }
 
-    fn ev_operation(&mut self, op: ArithmeticOp, expr1: &AstNode, expr2: &AstNode) -> StackUsage {
-        let diff1 = self.ev_expression(expr1);
-        let diff2 = self.ev_expression(expr2);
-        assert_eq!(1, diff1.pushed);
-        assert_eq!(1, diff2.pushed);
-
-        match op {
-            ArithmeticOp::Add => self.push_instruction(Instruction::AddI),
-            ArithmeticOp::Sub => self.push_instruction(Instruction::SubI),
-            ArithmeticOp::Mul => self.push_instruction(Instruction::MulI),
-            ArithmeticOp::Div => self.push_instruction(Instruction::DivI),
-            ArithmeticOp::Eq => self.push_instruction(Instruction::EqI),
-        };
-        StackUsage::new(diff1.popped + diff2.popped, 1)
+    fn ev_prefix_operation(
+        &mut self,
+        node_id: NodeID,
+        op: ArithmeticOP,
+        expr1: &AstNode,
+    ) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            bc.add_op(OP::PushImmediate(Value::Int(0)));
+            let usage = bc.ev_expression(expr1).stack_usage;
+            assert_eq!(1, usage.pushed);
+            match op {
+                ArithmeticOP::Add => bc.add_op(OP::AddI),
+                ArithmeticOP::Sub => bc.add_op(OP::SubI),
+                _ => panic!("Invalid prefix operation: {:?}", op),
+            };
+            StackUsage::new(usage.popped, 1)
+        })
     }
 
-    fn ev_expression(&mut self, expr: &AstNode) -> StackUsage {
+    fn ev_operation(
+        &mut self,
+        node_id: NodeID,
+        op: ArithmeticOP,
+        expr1: &AstNode,
+        expr2: &AstNode,
+    ) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            let usage1 = bc.ev_expression(expr1).stack_usage;
+            assert_eq!(usage1.pushed, 1);
+            let usage2 = bc.ev_expression(expr2).stack_usage;
+            assert_eq!(usage2.pushed, 1);
+
+            match op {
+                ArithmeticOP::Add => bc.add_op(OP::AddI),
+                ArithmeticOP::Sub => bc.add_op(OP::SubI),
+                ArithmeticOP::Mul => bc.add_op(OP::MulI),
+                ArithmeticOP::Div => bc.add_op(OP::DivI),
+                ArithmeticOP::Eq => bc.add_op(OP::CmpI),
+            };
+            StackUsage::new(usage1.popped + usage2.popped, 1)
+        })
+    }
+
+    fn ev_expression(&mut self, expr: &AstNode) -> ScopeEvaluation {
         use crate::ast::AstNodeBody::*;
         match &expr.body {
-            Op(op, expr1, expr2) => self.ev_operation(*op, &expr1, &expr2),
-            Primitive(primitive) => self.ev_intermediate(*primitive),
-            GetVariable(symbol) => self.ev_variable_value(symbol),
-            Call(symbol, args) => self.ev_call(symbol, args),
-            _ => panic!("Unsupported node here {:?}", expr),
+            Op(op, expr1, expr2) => self.ev_operation(expr.id, *op, &expr1, &expr2),
+            Int(primitive) => self.ev_intermediate(expr.id, Value::Int(*primitive)),
+            VariableValue(symbol) => self.ev_variable_value(expr.id, symbol),
+            Call(symbol, args) => self.ev_call(expr.id, symbol, args),
+            _ => panic!("Unsupported node {:?} used as expression", expr),
         }
     }
 
-    fn ev_intermediate(&mut self, value: i64) -> StackUsage {
-        self.push_instruction(Instruction::PushImmediate(value, format!("Constant value")));
-        StackUsage::new(0, 1)
+    fn ev_intermediate(&mut self, node_id: NodeID, value: Value) -> ScopeEvaluation {
+        self.with_scope(node_id, ScopeValue::Expression, &|bc| {
+            bc.add_op(OP::PushImmediate(value.clone()));
+            StackUsage::new(0, 1)
+        })
     }
 }

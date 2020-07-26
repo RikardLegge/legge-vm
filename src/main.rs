@@ -1,18 +1,18 @@
-use crate::interpreter::InterpLogLevel;
+// use crate::interpreter::InterpLogLevel;
 use ast::Ast;
-use bincode::{deserialize, serialize};
-use bytecode::Bytecode;
-use foreign_functions::load_foreign_functions;
-use interpreter::Interpreter;
+// use bincode::{deserialize, serialize};
+// use bytecode::Bytecode;
+// use foreign_functions::load_foreign_functions;
+// use interpreter::Interpreter;
 use std::fs::File;
 use std::io::prelude::*;
 use std::time::{Duration, SystemTime};
 use token::Tokenizer;
 
 mod ast;
-mod bytecode;
-mod foreign_functions;
-mod interpreter;
+// mod bytecode;
+// mod foreign_functions;
+// mod interpreter;
 mod token;
 
 fn main() {
@@ -36,7 +36,6 @@ struct Timing {
 }
 
 fn run_code(code: String) {
-    let functions = load_foreign_functions();
     let mut timing = Timing::default();
 
     let start = SystemTime::now();
@@ -44,33 +43,35 @@ fn run_code(code: String) {
     timing.token = SystemTime::now().duration_since(start).unwrap();
 
     let start = SystemTime::now();
-    let ast = Ast::from_tokens(&mut tokens.into_iter().peekable());
+    let ast = Ast::from_tokens(&mut tokens.into_iter().peekable()).unwrap();
     timing.ast = SystemTime::now().duration_since(start).unwrap();
+    dbg!(ast);
 
-    let start = SystemTime::now();
-    let bytecode = Bytecode::from_ast(&ast, &functions);
-    timing.bytecode = SystemTime::now().duration_since(start).unwrap();
-
-    let encoded = serialize(&bytecode).unwrap();
-    let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
-
-    let mut interpreter = Interpreter::new(&functions);
-    interpreter.set_log_level(InterpLogLevel::LogNone);
-
-    let start = SystemTime::now();
-    timing.instructions = interpreter.run(&bytecode);
-    timing.interpreter = SystemTime::now().duration_since(start).unwrap();
+    // let start = SystemTime::now();
+    // let functions = load_foreign_functions();
+    // let bytecode = Bytecode::from_ast(&ast, &functions);
+    // timing.bytecode = SystemTime::now().duration_since(start).unwrap();
+    //
+    // let encoded = serialize(&bytecode).unwrap();
+    // let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
+    //
+    // let mut interpreter = Interpreter::new(&functions);
+    // interpreter.set_log_level(InterpLogLevel::LogNone);
+    //
+    // let start = SystemTime::now();
+    // timing.instructions = interpreter.run(&bytecode);
+    // timing.interpreter = SystemTime::now().duration_since(start).unwrap();
 
     dbg!(timing);
-}
-
-fn run_test(code: &str) {
-    run_code(code.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run_test(code: &str) {
+        run_code(code.into())
+    }
 
     #[test]
     fn test_assert_true() {

@@ -2,7 +2,7 @@ use std::iter::{Enumerate, Peekable};
 use std::str::Chars;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub enum ArithmeticOp {
+pub enum ArithmeticOP {
     Add,
     Sub,
     Mul,
@@ -33,14 +33,13 @@ pub enum TokenType {
     Name(String),
     KeyName(String),
     String(String),
-    Int(i64),
-    Op(ArithmeticOp),
+    Int(isize),
+    Op(ArithmeticOP),
 }
 
 pub struct Tokenizer<'a> {
     iter: &'a mut Peekable<Enumerate<Chars<'a>>>,
-    token_start_index: usize,
-    current_index: usize,
+    index: usize,
 }
 
 impl<'a> Tokenizer<'a> {
@@ -48,8 +47,7 @@ impl<'a> Tokenizer<'a> {
         let mut iter = iter.enumerate().peekable();
         let mut parser = Tokenizer {
             iter: &mut iter,
-            token_start_index: 0,
-            current_index: 0,
+            index: 0,
         };
         let mut tokens = Vec::new();
 
@@ -62,43 +60,33 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn peek(&mut self) -> Option<char> {
-        match self.iter.peek() {
-            Some((_, ch)) => Some(*ch),
-            None => None,
-        }
+        let (_, ch) = self.iter.peek()?;
+        Some(*ch)
     }
 
     fn peek_ignore_whitespace(&mut self) -> Option<char> {
         loop {
-            match self.peek()? {
+            let (i, ch) = self.iter.peek()?;
+            match ch {
                 '\n' | ' ' | '\t' => self.next(),
-                ch => return Some(ch),
+                ch => {
+                    self.index = *i;
+                    break Some(*ch);
+                }
             };
         }
     }
 
     fn next(&mut self) -> Option<char> {
         let (i, c) = self.iter.next()?;
-        self.current_index = i;
+        self.index = i;
         Some(c)
-    }
-
-    fn start_token(&mut self) {
-        self.token_start_index = self.current_index
-    }
-
-    fn end_token(&mut self, tp: TokenType) -> Token {
-        Token {
-            tp,
-            start: self.token_start_index,
-            end: self.current_index,
-        }
     }
 
     fn parse_global(&mut self) -> Option<Token> {
         let ch = self.peek_ignore_whitespace()?;
-        self.start_token();
-        let token_tp = match ch {
+        let start = self.index;
+        let tp = match ch {
             '0'..='9' => self.parse_number()?,
             '+' | '*' => self.parse_arithmetic_op()?,
             '-' => self.parse_return_type_or_subtract()?,
@@ -133,7 +121,8 @@ impl<'a> Tokenizer<'a> {
             '"' => self.parse_string()?,
             _ => panic!("Encountered invalid character in global scope '{}'", ch),
         };
-        Some(self.end_token(token_tp))
+        let end = self.index;
+        Some(Token { tp, start, end })
     }
 
     fn parse_return_type_or_subtract(&mut self) -> Option<TokenType> {
@@ -143,7 +132,7 @@ impl<'a> Tokenizer<'a> {
                 self.next()?;
                 TokenType::ReturnTypes
             }
-            _ => TokenType::Op(ArithmeticOp::Sub),
+            _ => TokenType::Op(ArithmeticOP::Sub),
         };
         Some(token)
     }
@@ -163,7 +152,7 @@ impl<'a> Tokenizer<'a> {
         match self.peek()? {
             '=' => {
                 self.next()?;
-                Some(TokenType::Op(ArithmeticOp::Eq))
+                Some(TokenType::Op(ArithmeticOP::Eq))
             }
             _ => Some(TokenType::Assignment),
         }
@@ -208,28 +197,28 @@ impl<'a> Tokenizer<'a> {
                 }
                 Some(TokenType::Comment(comment))
             }
-            _ => Some(TokenType::Op(ArithmeticOp::Div)),
+            _ => Some(TokenType::Op(ArithmeticOP::Div)),
         }
     }
 
     fn parse_arithmetic_op(&mut self) -> Option<TokenType> {
         let op = match self.next()? {
-            '+' => ArithmeticOp::Add,
-            '-' => ArithmeticOp::Sub,
-            '*' => ArithmeticOp::Mul,
-            '/' => ArithmeticOp::Div,
+            '+' => ArithmeticOP::Add,
+            '-' => ArithmeticOP::Sub,
+            '*' => ArithmeticOP::Mul,
+            '/' => ArithmeticOP::Div,
             ch => panic!("Encountered invalid character in number scope '{}'", ch),
         };
         Some(TokenType::Op(op))
     }
 
     fn parse_number(&mut self) -> Option<TokenType> {
-        let mut num = 0 as i64;
+        let mut num = 0 as isize;
         while let Some(ch) = self.peek() {
             match ch {
                 '0'..='9' => {
                     num *= 10;
-                    num += self.next().unwrap().to_digit(10)? as i64
+                    num += self.next().unwrap().to_digit(10)? as isize
                 }
                 _ => break,
             };

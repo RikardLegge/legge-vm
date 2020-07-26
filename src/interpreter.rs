@@ -1,11 +1,10 @@
-use crate::bytecode::{Bytecode, Instruction};
+use crate::bytecode::{Bytecode, Value, OP};
 use crate::foreign_functions::ForeignFunction;
 
 pub struct Interpreter<'a> {
     pc: usize,
     frame_pointer: usize,
-    pub heap: Vec<i64>,
-    pub stack: Vec<i64>,
+    pub stack: Vec<Value>,
     pub foreign_functions: &'a [ForeignFunction],
     pub log_level: InterpLogLevel,
     pub stack_max: usize,
@@ -32,9 +31,8 @@ impl InterpError {
     }
 }
 
-pub type InterpResult = Result<(), InterpError>;
 pub type ForeignInterpResult = Result<Vec<i64>, InterpError>;
-pub type InterpPrimitiveResult = Result<i64, InterpError>;
+pub type InterpResult<V = Value> = Result<V, InterpError>;
 
 impl<'a> Interpreter<'a> {
     pub fn new(foreign_functions: &'a [ForeignFunction]) -> Self {
@@ -42,7 +40,6 @@ impl<'a> Interpreter<'a> {
             frame_pointer: 0,
             pc: 0,
             stack: Vec::with_capacity(1000),
-            heap: Vec::with_capacity(1000),
             foreign_functions,
             log_level: InterpLogLevel::LogDebug,
             stack_max: 10000,
@@ -59,7 +56,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn pop_stack_count(&mut self, count: usize) -> InterpResult {
+    pub fn pop_stack_count(&mut self, count: usize) -> InterpResult<()> {
         if self.stack.len() >= count {
             for _ in 0..count {
                 self.stack.pop();
@@ -70,14 +67,40 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn pop_stack(&mut self) -> InterpPrimitiveResult {
+    pub fn pop_stack(&mut self) -> InterpResult {
         match self.stack.pop() {
             Some(val) => Ok(val),
             None => Err(InterpError::new("Stack empty, can not pop")),
         }
     }
 
-    pub fn push_stack(&mut self, value: i64) -> InterpResult {
+    pub fn pop_stack_int(&mut self) -> InterpResult<isize> {
+        match self.pop_stack() {
+            Ok(val) => match val {
+                Value::Int(int) => Ok(int),
+                _ => Err(InterpError::new(&format!(
+                    "Stack value is not of type int {:?}",
+                    val
+                ))),
+            },
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn pop_stack_runtime_pointer(&mut self) -> InterpResult<usize> {
+        match self.pop_stack() {
+            Ok(val) => match val {
+                Value::RuntimePointer(int) => Ok(int),
+                _ => Err(InterpError::new(&format!(
+                    "Stack value is not of type int {:?}",
+                    val
+                ))),
+            },
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn push_stack(&mut self, value: Value) -> InterpResult<()> {
         if self.stack.len() < self.stack_max {
             self.stack.push(value);
             Ok(())
@@ -86,8 +109,8 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn get_foreign_function_arguments(&mut self) -> Result<Vec<i64>, InterpError> {
-        let count = self.pop_stack()? as usize;
+    pub fn get_foreign_function_arguments(&mut self) -> Result<Vec<Value>, InterpError> {
+        let count = self.stack.len() - self.frame_pointer;
         let mut arguments = Vec::with_capacity(count);
         for _ in 0..count {
             let argument = self.pop_stack()?;
@@ -97,9 +120,9 @@ impl<'a> Interpreter<'a> {
         Ok(arguments)
     }
 
-    fn run_command(&mut self, cmd: &Instruction, code: &Bytecode) -> InterpResult {
-        use self::Instruction::*;
+    fn run_command(&mut self, cmd: &OP) -> InterpResult<()> {
         use self::InterpLogLevel::*;
+        use self::OP::*;
 
         if self.log_level >= LogDebug {
             self.debug_log(
@@ -113,57 +136,68 @@ impl<'a> Interpreter<'a> {
         self.pc += 1;
         match cmd {
             AddI => {
-                let n1 = self.pop_stack()?;
-                let n2 = self.pop_stack()?;
+                let n1 = self.pop_stack_int()?;
+                let n2 = self.pop_stack_int()?;
                 let sum = n2 + n1;
-                self.push_stack(sum)?;
+                self.push_stack(Value::Int(sum))?;
                 // self.debug_log(LogEval, &format!("{} + {} = {}", n2, n1, sum));
             }
             SubI => {
-                let n1 = self.pop_stack()?;
-                let n2 = self.pop_stack()?;
+                let n1 = self.pop_stack_int()?;
+                let n2 = self.pop_stack_int()?;
                 let diff = n2 - n1;
-                self.push_stack(diff)?;
+                self.push_stack(Value::Int(diff))?;
                 // self.debug_log(LogEval, &format!("{} - {} = {}", n2, n1, diff));
             }
             MulI => {
-                let n1 = self.pop_stack()?;
-                let n2 = self.pop_stack()?;
+                let n1 = self.pop_stack_int()?;
+                let n2 = self.pop_stack_int()?;
                 let prod = n2 * n1;
-                self.push_stack(prod)?;
+                self.push_stack(Value::Int(prod))?;
                 // self.debug_log(LogEval, &format!("{} * {} = {}", n2, n1, prod));
             }
             DivI => {
-                let n1 = self.pop_stack()?;
-                let n2 = self.pop_stack()?;
+                let n1 = self.pop_stack_int()?;
+                let n2 = self.pop_stack_int()?;
                 let kvote = n2 / n1;
-                self.push_stack(kvote)?;
+                self.push_stack(Value::Int(kvote))?;
                 // self.debug_log(LogEval, &format!("{} / {} = {}", n2, n1, kvote));
             }
-            EqI => {
-                let n1 = self.pop_stack()?;
-                let n2 = self.pop_stack()?;
-                let eq = if n2 == n1 { 1 } else { 0 };
-                self.push_stack(eq)?;
+            CmpI => {
+                let n1 = self.pop_stack_int()?;
+                let n2 = self.pop_stack_int()?;
+                let cmp = if n2 == n1 {
+                    0
+                } else if n2 < n1 {
+                    -1
+                } else {
+                    1
+                };
+                self.push_stack(Value::Int(cmp))?;
                 // self.debug_log(LogEval, &format!("({} == {}) = {}", n2, n1, eq));
             }
             SStore(offset) => {
                 let value = self.pop_stack()?;
-                let index = self.frame_pointer as i64 + *offset;
+                let index = self.frame_pointer as isize + *offset;
                 assert!(index >= 0);
                 self.stack[index as usize] = value;
             }
             SLoad(offset) => {
-                let index = self.frame_pointer as i64 + *offset;
-                let value = self.stack[index as usize];
+                let index = self.frame_pointer as isize + *offset;
+                let value = self.stack[index as usize].clone();
                 self.push_stack(value)?;
                 // self.debug_log(LogEval, &format!("{}", value));
             }
-            PushImmediate(primitive, _) => self.push_stack(*primitive)?,
+            PushImmediate(primitive) => {
+                // We clone here since all immediate values are constants and
+                // should never change.
+                let value = (*primitive).clone();
+                self.push_stack(value)?;
+            }
             PopStack(count) => {
                 self.pop_stack_count(*count)?;
             }
-            CallForeign(addr, _) => {
+            CallForeign(addr) => {
                 let function = &self.foreign_functions[*addr as usize];
                 let function_call = &function.function;
                 let mut args = self.get_foreign_function_arguments()?;
@@ -174,32 +208,32 @@ impl<'a> Interpreter<'a> {
                 assert_eq!(function.returns, return_values.len())
             }
             PushPc(offset) => {
-                self.push_stack((offset + self.pc) as i64)?;
+                self.push_stack(Value::RuntimePointer((offset + self.pc as isize) as usize))?;
             }
             Branch(pc) => {
                 self.pc = (self.pc as isize + *pc) as usize;
             }
             BranchIf(pc) => {
-                let value = self.pop_stack()?;
+                let value = self.pop_stack_int()?;
                 if value != 0 {
                     self.pc = (self.pc as isize + *pc) as usize;
                 }
             }
             PopPc => {
-                self.pc = self.pop_stack()? as usize;
+                self.pc = self.pop_stack_runtime_pointer()?;
             }
-            Call(addr, _) => {
-                self.pc = code.procedure_address + *addr;
+            Jump(addr) => {
+                self.pc = *addr;
             }
             PushStackFrame => {
-                self.push_stack(self.frame_pointer as i64)?;
+                self.push_stack(Value::RuntimePointer(self.frame_pointer))?;
             }
             SetStackFrame(offset) => {
-                let end = self.stack.len() as i64;
+                let end = self.stack.len() as isize;
                 self.frame_pointer = (end + *offset) as usize;
             }
             PopStackFrame => {
-                self.frame_pointer = self.pop_stack()? as usize;
+                self.frame_pointer = self.pop_stack_runtime_pointer()?;
             }
             NoOp => {}
             _ => panic!("Instruction not implemented: {:?}", cmd),
@@ -207,22 +241,20 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
-    fn setup(&mut self, code: &Bytecode) {
+    fn setup(&mut self) {
         self.pc = 0;
         self.frame_pointer = 0;
         self.stack.clear();
-        self.heap.clear();
-        self.heap.append(&mut code.data.clone());
     }
 
     pub fn run(&mut self, code: &Bytecode) -> usize {
-        self.setup(code);
+        self.setup();
 
         let mut instructions = 0;
 
         while let Some(cmd) = code.code.get(self.pc) {
             instructions += 1;
-            if cmd == &Instruction::Halt {
+            if cmd.op == OP::Halt {
                 self.debug_log(
                     InterpLogLevel::LogDebug,
                     &format!(
@@ -234,7 +266,7 @@ impl<'a> Interpreter<'a> {
                 );
                 break;
             }
-            if let Err(err) = self.run_command(cmd, code) {
+            if let Err(err) = self.run_command(&cmd.op) {
                 panic!("{:?}", err);
             }
         }
