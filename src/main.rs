@@ -43,7 +43,7 @@ fn run_code(code: String) {
     timing.token = SystemTime::now().duration_since(start).unwrap();
 
     let start = SystemTime::now();
-    let _ast = Ast::from_tokens(&mut tokens.into_iter().peekable()).unwrap();
+    let _ast = Ast::from_tokens(tokens.into_iter()).unwrap();
     timing.ast = SystemTime::now().duration_since(start).unwrap();
     dbg!(_ast);
 

@@ -3,8 +3,7 @@ use crate::token::{ArithmeticOP, TokenType};
 use serde::export::Formatter;
 use std::collections::VecDeque;
 use std::iter::Peekable;
-use std::vec::IntoIter;
-use std::{fmt, result};
+use std::{fmt, mem, result};
 
 #[derive(Debug)]
 pub struct Error {
@@ -21,13 +20,13 @@ impl Error {
 
 type Result<N = NodeID> = result::Result<N, Error>;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct NodeID(usize);
 
 #[derive(Debug)]
 pub struct Node {
     pub id: NodeID,
-    pub parent_id: NodeID,
+    pub parent_id: Option<NodeID>,
     pub tp: Option<NodeType>,
     pub tokens: Vec<Token>,
     pub body: NodeBody,
@@ -42,7 +41,6 @@ pub enum NodeType {
 #[derive(Debug)]
 pub struct PendingNode {
     pub id: NodeID,
-    pub parent_id: NodeID,
 }
 
 #[derive(Debug)]
@@ -63,8 +61,8 @@ pub enum NodeBody {
     Expression(NodeID),
     Comment(String),
 
-    VariableDeclaration(Option<NodeID>),
-    ConstDeclaration(Option<NodeID>),
+    VariableDeclaration(String, Option<NodeID>),
+    ConstDeclaration(String, Option<NodeID>),
     VariableAssignment(NodeID, NodeID),
     VariableValue(NodeID),
     Return(NodeID),
@@ -74,43 +72,119 @@ pub enum NodeBody {
     Unlinked(UnlinkedNodeBody),
 }
 
-impl NodeBody {
-    fn children(&self) -> Vec<NodeID> {
-        use NodeBody::*;
-        match self {
-            Op(_, lhs, rhs) => vec![*lhs, *rhs],
-            ProcedureDeclaration(args, body) => {
-                let mut children = Vec::with_capacity(args.len() + 1);
-                children.append(&mut args.clone());
-                children.push(*body);
-                children
-            }
-            PrefixOp(_, op) => vec![*op],
-            Block(children) => children.clone(),
-            If(cond, body) => vec![*cond, *body],
-            Loop(body) => vec![*body],
-            Expression(expr) => vec![*expr],
-            VariableDeclaration(value) => match value {
-                Some(value) => vec![*value],
-                None => vec![],
-            },
-            ConstDeclaration(value) => match value {
-                Some(value) => vec![*value],
-                None => vec![],
-            },
-            VariableAssignment(_, value) => vec![*value],
-            Call(_, args) => args.clone(),
-            Unlinked(unlinked) => unlinked.children(),
+struct NodeBodyIterator<'a> {
+    index: usize,
+    body: &'a NodeBody,
+    unlinked: Option<UnlinkedNodeBodyIterator<'a>>,
+}
 
-            VariableValue(_) | Comment(_) | Return(_) | Break(_) | Value(_) | Empty => vec![],
+impl<'a> Iterator for NodeBodyIterator<'a> {
+    type Item = &'a NodeID;
+
+    fn next(&mut self) -> Option<&'a NodeID> {
+        use NodeBody::*;
+        let option = match self.body {
+            Op(_, lhs, rhs) => match self.index {
+                0 => Some(lhs),
+                1 => Some(rhs),
+                _ => None,
+            },
+            ProcedureDeclaration(args, body) => {
+                if self.index < args.len() {
+                    args.get(self.index)
+                } else if self.index == args.len() {
+                    Some(body)
+                } else {
+                    None
+                }
+            }
+            PrefixOp(_, op) => match self.index {
+                0 => Some(op),
+                _ => None,
+            },
+            Block(children) => children.get(self.index),
+            If(cond, body) => match self.index {
+                0 => Some(cond),
+                1 => Some(body),
+                _ => None,
+            },
+            Loop(body) => match self.index {
+                0 => Some(body),
+                _ => None,
+            },
+            Expression(expr) => match self.index {
+                0 => Some(expr),
+                _ => None,
+            },
+            VariableDeclaration(_, value) => match self.index {
+                0 => value.as_ref(),
+                _ => None,
+            },
+            ConstDeclaration(_, value) => match self.index {
+                0 => value.as_ref(),
+                _ => None,
+            },
+            VariableAssignment(_, value) => match self.index {
+                0 => Some(value),
+                _ => None,
+            },
+            Call(_, args) => args.get(self.index),
+
+            VariableValue(_) | Comment(_) | Return(_) | Break(_) | Value(_) | Empty => None,
+            Unlinked(body) => {
+                if let None = self.unlinked {
+                    self.unlinked = Some(body.children());
+                }
+                match &mut self.unlinked {
+                    Some(iter) => iter.next(),
+                    None => unreachable!(),
+                }
+            }
+        };
+        if option.is_some() {
+            self.index += 1;
+        }
+        option
+    }
+}
+
+struct UnlinkedNodeBodyIterator<'a> {
+    index: usize,
+    body: &'a UnlinkedNodeBody,
+}
+
+impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
+    type Item = &'a NodeID;
+
+    fn next(&mut self) -> Option<&'a NodeID> {
+        use UnlinkedNodeBody::*;
+        let option = match self.body {
+            VariableAssignment(_, value) => match self.index {
+                0 => Some(value),
+                _ => None,
+            },
+            Call(_, args) => args.get(self.index),
+            VariableValue(_) | Return | Break => None,
+        };
+        if option.is_some() {
+            self.index += 1;
+        }
+        option
+    }
+}
+
+impl NodeBody {
+    fn children(&self) -> NodeBodyIterator {
+        NodeBodyIterator {
+            index: 0,
+            body: self,
+            unlinked: None,
         }
     }
 }
 
 #[derive(Debug)]
 pub enum UnlinkedNodeBody {
-    VariableDeclaration(String, Option<NodeID>),
-    ConstDeclaration(String, Option<NodeID>),
     VariableAssignment(String, NodeID),
     VariableValue(String),
     Return,
@@ -119,20 +193,10 @@ pub enum UnlinkedNodeBody {
 }
 
 impl UnlinkedNodeBody {
-    fn children(&self) -> Vec<NodeID> {
-        use UnlinkedNodeBody::*;
-        match self {
-            VariableDeclaration(_, value) => match value {
-                Some(value) => vec![*value],
-                None => vec![],
-            },
-            ConstDeclaration(_, value) => match value {
-                Some(value) => vec![*value],
-                None => vec![],
-            },
-            VariableAssignment(_, value) => vec![*value],
-            Call(_, args) => args.clone(),
-            VariableValue(_) | Return | Break => vec![],
+    fn children(&self) -> UnlinkedNodeBodyIterator {
+        UnlinkedNodeBodyIterator {
+            index: 0,
+            body: self,
         }
     }
 }
@@ -144,69 +208,207 @@ pub struct Ast {
 
 impl fmt::Debug for Ast {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.print_node(f, 0, self.root)
+        self.fmt_debug_node(f, 0, self.root)
     }
 }
 
 impl Ast {
-    fn print_node(&self, f: &mut Formatter<'_>, level: usize, node_id: NodeID) -> fmt::Result {
+    fn fmt_debug_node(&self, f: &mut Formatter<'_>, level: usize, node_id: NodeID) -> fmt::Result {
         let node = &self.nodes[node_id.0];
         let pad = " ".repeat(level * 2);
-        let children = node.body.children();
-        write!(f, "{}", pad)?;
-        write!(f, "Node({}): {:?}", node.id.0, node.body)?;
-        if children.is_empty() {
-        } else {
-            write!(f, "{{\n")?;
-            for child in children {
-                self.print_node(f, level + 1, child)?;
+        let mut children = node.body.children().peekable();
+        write!(f, "{}Node({}): {:?}", pad, node.id.0, node.body)?;
+        if children.peek().is_some() {
+            write!(f, " [\n")?;
+            for &child in children {
+                self.fmt_debug_node(f, level + 1, child)?;
                 write!(f, "\n")?;
             }
-            write!(f, "{}}}", pad)?;
+            write!(f, "{}]", pad)?;
         }
         Ok(())
     }
 
-    pub fn from_tokens(iter: &mut Peekable<IntoIter<Token>>) -> Result<Self> {
-        let parser = Parser::new(iter);
+    pub fn from_tokens<I>(iter: I) -> Result<Self>
+    where
+        I: Iterator<Item = Token>,
+    {
+        let parser = Parser::new(iter.peekable());
         let mut ast = parser.parse()?;
         let linker = Linker::new(&mut ast);
         linker.link()?;
+        let typer = Typer::new(&mut ast);
+        typer.infer_types()?;
         Ok(ast)
     }
 
-    fn get_node(&self, node_id: NodeID) -> &Node {
-        &self.nodes[node_id.0]
+    pub fn get_node(&self, node_id: NodeID) -> &Node {
+        match self.nodes.get(node_id.0) {
+            Some(node) => node,
+            None => panic!("Could not find Node({}) in ast", node_id.0),
+        }
     }
 
-    fn get_node_mut(&mut self, node_id: NodeID) -> &mut Node {
-        &mut self.nodes[node_id.0]
+    pub fn get_node_mut(&mut self, node_id: NodeID) -> &mut Node {
+        match self.nodes.get_mut(node_id.0) {
+            Some(node) => node,
+            None => panic!("Could not find Node({}) in ast", node_id.0),
+        }
+    }
+
+    fn closest_fn(&self, node_id: NodeID) -> Result {
+        let closest = self.closest(node_id, &|node| match node.body {
+            NodeBody::ProcedureDeclaration(..) => Some(node.id),
+            _ => None,
+        });
+        match closest {
+            Some(id) => Ok(id),
+            _ => Err(Error::new(&format!(
+                "No function ancestor found starting at {:?}",
+                node_id
+            ))),
+        }
+    }
+
+    fn closest_loop(&self, node_id: NodeID) -> Result {
+        let closest = self.closest(node_id, &|node| match node.body {
+            NodeBody::Loop(..) => Some(node.id),
+            _ => None,
+        });
+        match closest {
+            Some(id) => Ok(id),
+            _ => Err(Error::new(&format!(
+                "No loop ancestor found starting at {:?}",
+                node_id
+            ))),
+        }
+    }
+
+    fn closest_variable(&self, node_id: NodeID, target_ident: &str) -> Result<NodeID> {
+        use NodeBody::*;
+        let closest = self.closest(node_id, &|node| {
+            for &child_id in node.body.children() {
+                let child = self.get_node(child_id);
+                match &child.body {
+                    VariableDeclaration(ident, _) | ConstDeclaration(ident, _) => {
+                        if ident == target_ident {
+                            return Some(child_id);
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            None
+        });
+        match closest {
+            Some(id) => Ok(id),
+            _ => Err(Error::new(&format!(
+                "Failed to find variable in scope starting at {:?}",
+                node_id
+            ))),
+        }
+    }
+
+    fn closest(
+        &self,
+        mut node_id: NodeID,
+        test: &dyn Fn(&Node) -> Option<NodeID>,
+    ) -> Option<NodeID> {
+        loop {
+            let node = self.get_node(node_id);
+            let result = test(node);
+            if result.is_some() {
+                break result;
+            } else if let Some(id) = node.parent_id {
+                node_id = id;
+            } else {
+                break None;
+            }
+        }
+    }
+}
+
+struct Typer<'a> {
+    queue: VecDeque<NodeID>,
+    ast: &'a mut Ast,
+}
+
+impl<'a> Typer<'a> {
+    fn new(ast: &'a mut Ast) -> Self {
+        let queue = VecDeque::from(vec![ast.root]);
+        Self { queue, ast }
+    }
+
+    fn infer_types(mut self) -> Result<()> {
+        while let Some(node_id) = self.queue.pop_front() {
+            let node = self.ast.get_node(node_id);
+            for &child_id in node.body.children() {
+                if let None = self.ast.get_node(child_id).tp {
+                    self.queue.push_back(child_id)
+                }
+            }
+        }
+        Ok(())
     }
 }
 
 struct Linker<'a> {
-    pending_nodes: VecDeque<NodeID>,
+    queue: VecDeque<NodeID>,
     ast: &'a mut Ast,
 }
 
 impl<'a> Linker<'a> {
     fn new(ast: &'a mut Ast) -> Self {
-        let mut pending_nodes = VecDeque::new();
-        pending_nodes.push_back(ast.root);
-        Linker { pending_nodes, ast }
+        let queue = VecDeque::from(vec![ast.root]);
+        Self { queue, ast }
+    }
+
+    fn next(&mut self) -> Option<NodeID> {
+        self.queue.pop_front()
     }
 
     fn link(mut self) -> Result<()> {
-        while let Some(node_id) = self.pending_nodes.pop_front() {
+        while let Some(node_id) = self.next() {
             let node = self.ast.get_node(node_id);
+            for &child in node.body.children() {
+                self.queue.push_back(child);
+            }
             match &node.body {
                 NodeBody::Unlinked(body) => {
-                    println!("{:?}", body);
+                    use UnlinkedNodeBody::*;
+                    let new_body = match body {
+                        VariableAssignment(ident, expr_id) => {
+                            let target_id = self.ast.closest_variable(node_id, &ident)?;
+                            NodeBody::VariableAssignment(target_id, *expr_id)
+                        }
+                        VariableValue(ident) => {
+                            let target_id = self.ast.closest_variable(node_id, &ident)?;
+                            NodeBody::VariableValue(target_id)
+                        }
+                        Return => {
+                            let target_id = self.ast.closest_fn(node_id)?;
+                            NodeBody::Return(target_id)
+                        }
+                        Break => {
+                            let target_id = self.ast.closest_loop(node_id)?;
+                            NodeBody::Break(target_id)
+                        }
+                        Call(ident, _) => {
+                            let target_id = self.ast.closest_variable(node_id, &ident)?;
+                            // We move the args out the old NodeBody so that we do not have to copy
+                            // the argument vec.
+                            let node = self.ast.get_node_mut(node_id);
+                            let args = match &mut node.body {
+                                NodeBody::Unlinked(Call(_, args)) => mem::replace(args, Vec::new()),
+                                _ => unreachable!(),
+                            };
+                            NodeBody::Call(target_id, args)
+                        }
+                    };
+                    let node = self.ast.get_node_mut(node_id);
+                    node.body = new_body;
                 }
-                _ => {}
-            }
-            for child in node.body.children() {
-                self.pending_nodes.push_back(child)
+                _ => (),
             }
         }
         Ok(())
@@ -214,36 +416,39 @@ impl<'a> Linker<'a> {
 }
 
 #[derive(Debug)]
-pub struct Parser<'a> {
+struct Parser<I: Iterator<Item = Token>> {
     next_id: usize,
     nodes: Vec<Node>,
-    iter: &'a mut Peekable<IntoIter<Token>>,
+    iter: Peekable<I>,
 }
 
-fn get_precedence(token: &TokenType) -> usize {
-    match token {
-        TokenType::Op(op) => get_op_precedence(*op),
-        _ => 0,
-    }
-}
-
-fn get_op_precedence(op: ArithmeticOP) -> usize {
-    use crate::token::ArithmeticOP::*;
-    match op {
-        Eq => 1,
-        Add | Sub => 2,
-        Mul | Div => 3,
-    }
-}
-
-impl<'a> Parser<'a> {
-    fn new(iter: &'a mut Peekable<IntoIter<Token>>) -> Self {
+impl<I> Parser<I>
+where
+    I: Iterator<Item = Token>,
+{
+    fn new(iter: Peekable<I>) -> Self {
         let next_id = 0;
         let nodes = Vec::new();
-        Parser {
+        Self {
             next_id,
             nodes,
             iter,
+        }
+    }
+
+    fn token_precedence(token: &TokenType) -> usize {
+        match token {
+            TokenType::Op(op) => Self::op_precedence(*op),
+            _ => 0,
+        }
+    }
+
+    fn op_precedence(op: ArithmeticOP) -> usize {
+        use crate::token::ArithmeticOP::*;
+        match op {
+            Eq => 1,
+            Add | Sub => 2,
+            Mul | Div => 3,
         }
     }
 
@@ -292,7 +497,22 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn peek_token_or_none(&mut self) -> Option<&TokenType> {
+        match self.iter.peek() {
+            Some(val) => Some(&val.tp),
+            None => None,
+        }
+    }
+
     fn node(&mut self, parent_id: NodeID) -> PendingNode {
+        self.any_node(Some(parent_id))
+    }
+
+    fn root_node(&mut self) -> PendingNode {
+        self.any_node(None)
+    }
+
+    fn any_node(&mut self, parent_id: Option<NodeID>) -> PendingNode {
         let id = NodeID(self.nodes.len());
         let empty = Node {
             id,
@@ -302,7 +522,7 @@ impl<'a> Parser<'a> {
             tokens: Vec::new(),
         };
         self.nodes.push(empty);
-        return PendingNode { id, parent_id };
+        return PendingNode { id };
     }
 
     fn add_node(&mut self, pending: PendingNode, body: NodeBody) -> NodeID {
@@ -316,7 +536,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse(mut self) -> Result<Ast> {
-        let node = self.node(NodeID(0));
+        let node = self.root_node();
 
         let mut statements = Vec::new();
         while self.iter.peek().is_some() {
@@ -334,8 +554,7 @@ impl<'a> Parser<'a> {
         use NodeBody::*;
 
         match self.nodes[node.0].body {
-            Unlinked(UnlinkedNodeBody::ConstDeclaration(_, Some(child_node)))
-            | Unlinked(UnlinkedNodeBody::VariableDeclaration(_, Some(child_node))) => {
+            ConstDeclaration(_, Some(child_node)) | VariableDeclaration(_, Some(child_node)) => {
                 self.should_terminate_statement(child_node)
             }
             Block(..) | ProcedureDeclaration(..) | If(..) | Loop(..) | Comment(..) => false,
@@ -353,7 +572,7 @@ impl<'a> Parser<'a> {
         Ok(self.add_node(node, NodeBody::Block(statements)))
     }
 
-    fn do_statement(&mut self, parent_id: NodeID) -> Result<NodeID> {
+    fn do_statement(&mut self, parent_id: NodeID) -> Result {
         use crate::token::TokenType::*;
         let mut node = self.node(parent_id);
 
@@ -374,10 +593,7 @@ impl<'a> Parser<'a> {
             other => Err(Error::new(&format!("Unknown token {:?}", other))),
         }?;
         if self.should_terminate_statement(node) {
-            let token = self.next_token_for_id(node)?;
-            if token != EndStatement {
-                return Err(Error::new("Expected end of statement"));
-            }
+            self.ensure_next_token_for_id(node, EndStatement)?;
         }
         Ok(node)
     }
@@ -400,8 +616,8 @@ impl<'a> Parser<'a> {
             other => Err(Error::new(&format!("Unkown token {:?}", other)))?,
         };
 
-        match self.peek_token() {
-            Ok(TokenType::Op(op)) => {
+        match self.peek_token_or_none() {
+            Some(TokenType::Op(op)) => {
                 let op = *op;
                 let mut op_node = self.node(node);
                 self.next_token(&mut op_node)?;
@@ -445,8 +661,8 @@ impl<'a> Parser<'a> {
                 let rhs = self.do_expression(node.id)?;
                 let next_token = self.peek_token()?;
 
-                let lhs_precedence = get_op_precedence(op);
-                let rhs_precedence = get_precedence(next_token);
+                let lhs_precedence = Self::op_precedence(op);
+                let rhs_precedence = Self::token_precedence(next_token);
                 if lhs_precedence >= rhs_precedence {
                     NodeBody::Op(op, lhs, rhs)
                 } else {
@@ -480,10 +696,7 @@ impl<'a> Parser<'a> {
             let mut arg_node = self.node(node.id);
             match self.next_token(&mut arg_node)? {
                 TokenType::Name(name) => {
-                    let body = self.add_uncomplete_node(
-                        arg_node,
-                        UnlinkedNodeBody::ConstDeclaration(name, None),
-                    );
+                    let body = self.add_node(arg_node, NodeBody::VariableDeclaration(name, None));
                     arguments.push(body)
                 }
                 _ => Err(Error::new(&format!(
@@ -515,18 +728,18 @@ impl<'a> Parser<'a> {
             StaticDeclaration => {
                 self.next_token(&mut node)?;
                 let expression = self.do_expression(node.id)?;
-                let node = self.add_uncomplete_node(
+                let node = self.add_node(
                     node,
-                    UnlinkedNodeBody::ConstDeclaration(symbol.into(), Some(expression)),
+                    NodeBody::ConstDeclaration(symbol.into(), Some(expression)),
                 );
                 Ok(node)
             }
             Declaration => {
                 self.next_token(&mut node)?;
                 let expression = self.do_expression(node.id)?;
-                let node = self.add_uncomplete_node(
+                let node = self.add_node(
                     node,
-                    UnlinkedNodeBody::VariableDeclaration(symbol.into(), Some(expression)),
+                    NodeBody::VariableDeclaration(symbol.into(), Some(expression)),
                 );
                 Ok(node)
             }
