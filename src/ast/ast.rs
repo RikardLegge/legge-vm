@@ -1,9 +1,10 @@
 use super::{Error, Result};
 use crate::token::{ArithmeticOP, Token};
+use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct NodeID(usize);
 
 impl NodeID {
@@ -20,15 +21,19 @@ impl NodeID {
 pub struct Node {
     pub id: NodeID,
     pub parent_id: Option<NodeID>,
+    pub referenced_by: HashSet<NodeID>,
     pub tp: Option<NodeType>,
     pub tokens: Vec<Token>,
     pub body: NodeBody,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
+    NotYetImplemented,
     Void,
     Int,
+    Tuple(Vec<NodeType>),
+    Fn,
 }
 
 #[derive(Debug)]
@@ -41,7 +46,7 @@ pub enum NodeBody {
     Empty,
     Value(NodeValue),
     Op(ArithmeticOP, NodeID, NodeID),
-    ProcedureDeclaration(Vec<NodeID>, NodeID),
+    ProcedureDeclaration(Vec<NodeID>, Option<String>, NodeID),
     PrefixOp(ArithmeticOP, NodeID),
     Block(Vec<NodeID>),
     If(NodeID, NodeID),
@@ -49,8 +54,8 @@ pub enum NodeBody {
     Expression(NodeID),
     Comment(String),
 
-    VariableDeclaration(String, Option<NodeID>),
-    ConstDeclaration(String, Option<NodeID>),
+    VariableDeclaration(String, Option<String>, Option<NodeID>),
+    ConstDeclaration(String, Option<String>, NodeID),
     VariableAssignment(NodeID, NodeID),
     VariableValue(NodeID),
     Return(NodeID),
@@ -59,6 +64,7 @@ pub enum NodeBody {
 
     Unlinked(UnlinkedNodeBody),
 }
+
 impl NodeBody {
     pub fn children(&self) -> NodeBodyIterator {
         NodeBodyIterator {
@@ -111,7 +117,11 @@ impl Ast {
         let node = &self.nodes[node_id.0];
         let pad = " ".repeat(level * 2);
         let mut children = node.body.children().peekable();
-        write!(f, "{}Node({}): {:?}", pad, node.id.0, node.body)?;
+        write!(
+            f,
+            "{}Node({}): {:?} = {:?}",
+            pad, node.id.0, node.tp, node.body
+        )?;
         if children.peek().is_some() {
             write!(f, " [\n")?;
             for &child in children {
@@ -171,7 +181,7 @@ impl Ast {
             for &child_id in node.body.children() {
                 let child = self.get_node(child_id);
                 match &child.body {
-                    VariableDeclaration(ident, _) | ConstDeclaration(ident, _) => {
+                    VariableDeclaration(ident, ..) | ConstDeclaration(ident, ..) => {
                         if ident == target_ident {
                             return Some(child_id);
                         }
@@ -226,7 +236,7 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
                 1 => Some(rhs),
                 _ => None,
             },
-            ProcedureDeclaration(args, body) => {
+            ProcedureDeclaration(args, _, body) => {
                 if self.index < args.len() {
                     args.get(self.index)
                 } else if self.index == args.len() {
@@ -253,12 +263,12 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
                 0 => Some(expr),
                 _ => None,
             },
-            VariableDeclaration(_, value) => match self.index {
+            VariableDeclaration(.., value) => match self.index {
                 0 => value.as_ref(),
                 _ => None,
             },
-            ConstDeclaration(_, value) => match self.index {
-                0 => value.as_ref(),
+            ConstDeclaration(.., value) => match self.index {
+                0 => Some(value),
                 _ => None,
             },
             VariableAssignment(_, value) => match self.index {

@@ -1,6 +1,7 @@
 c :: 5;
+d : int;
 
-main :: fn (a,b,c) {
+main :: fn (a: int,b: int,c: int) -> int {
     i := 1000000;
     loop {
         if(i == 0) {
@@ -8,11 +9,17 @@ main :: fn (a,b,c) {
         }
         i = i - 1;
     }
+    rec(10);
+
+    j :: fn() {
+        rec(10);
+    }
+
     return;
 }
 main(1,2,c);
 
-rec :: fn (i) {
+rec :: fn (i: int) {
     //log(i);
     if(i == 0) {
         return;

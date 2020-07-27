@@ -1,5 +1,6 @@
 use super::{Ast, Error, Node, NodeBody, NodeID, NodeValue, Result, UnlinkedNodeBody};
 use crate::token::{ArithmeticOP, Token, TokenType};
+use std::collections::HashSet;
 use std::iter::Peekable;
 
 pub fn ast_from_tokens<I>(iter: I) -> Result<Ast>
@@ -129,6 +130,7 @@ where
             id,
             parent_id,
             tp: None,
+            referenced_by: HashSet::new(),
             body: NodeBody::Empty,
             tokens: Vec::new(),
         };
@@ -150,7 +152,7 @@ where
         use self::NodeBody::*;
 
         match self.nodes[node.index()].body {
-            ConstDeclaration(_, Some(child_node)) | VariableDeclaration(_, Some(child_node)) => {
+            ConstDeclaration(.., child_node) | VariableDeclaration(.., Some(child_node)) => {
                 self.should_terminate_statement(child_node)
             }
             Block(..) | ProcedureDeclaration(..) | If(..) | Loop(..) | Comment(..) => false,
@@ -292,7 +294,20 @@ where
             let mut arg_node = self.node(node.id);
             match self.next_token(&mut arg_node)? {
                 TokenType::Name(name) => {
-                    let body = self.add_node(arg_node, NodeBody::VariableDeclaration(name, None));
+                    let tp = match self.peek_token()? {
+                        TokenType::TypeDeclaration => {
+                            self.next_token(&mut arg_node)?;
+                            match self.next_token(&mut arg_node)? {
+                                TokenType::Name(name) => Some(name),
+                                _ => Err(Error::new(
+                                    "A type name must come after ':' for procedure arguments",
+                                ))?,
+                            }
+                        }
+                        _ => None,
+                    };
+                    let body =
+                        self.add_node(arg_node, NodeBody::VariableDeclaration(name, tp, None));
                     arguments.push(body)
                 }
                 _ => Err(Error::new(&format!(
@@ -306,36 +321,93 @@ where
                 break;
             }
         }
+
         self.ensure_next_token(&mut node, TokenType::RightBrace)?;
+        let returns = match self.peek_token()? {
+            TokenType::ReturnTypes => {
+                self.next_token(&mut node)?;
+                let mut ret_node = self.node(node.id);
+                match self.next_token(&mut ret_node)? {
+                    TokenType::Name(ident) => Some(ident),
+                    token => panic!("Expected function type, found {:?}", token),
+                }
+            }
+            _ => None,
+        };
 
         let mut block_node = self.node(node.id);
         self.ensure_next_token(&mut block_node, TokenType::LeftCurlyBrace)?;
         let block_node = self.do_block(block_node)?;
 
-        Ok(self.add_node(node, NodeBody::ProcedureDeclaration(arguments, block_node)))
+        Ok(self.add_node(
+            node,
+            NodeBody::ProcedureDeclaration(arguments, returns, block_node),
+        ))
     }
 
-    fn do_statement_symbol(&mut self, mut node: PendingNode, symbol: &str) -> Result {
+    fn do_statement_symbol(&mut self, mut node: PendingNode, ident: &str) -> Result {
+        use crate::token::TokenType::*;
+
+        match self.peek_token()? {
+            LeftBrace => self.do_function_call(node, ident),
+            TypeDeclaration => {
+                self.next_token(&mut node)?;
+                let token = self.next_token(&mut node)?;
+                match token {
+                    Name(tp) => {
+                        let token = self.peek_token()?;
+                        match token {
+                        StaticDeclaration | VariableDeclaration => {
+                            self.do_variable_or_assignment(node, ident, Some(tp))
+                        }
+                        EndStatement => {
+                            let node=  self.add_node(
+                                node,
+                                NodeBody::VariableDeclaration(ident.into(), Some(tp), None),
+                            );
+                            Ok(node)
+                        },
+                        _ => Err(Error::new(&format!(
+                            "Unexpected token {:?} after parsing variable type '{:?}' for '{:?}'. '::', ':=', or ';' expected",
+                            token, tp, ident
+                        )))
+                    }
+                    }
+                    _ => Err(Error::new(&format!(
+                        "Unexpected token {:?} when parsing type name of ${:?}",
+                        token, ident
+                    ))),
+                }
+            }
+            _ => self.do_variable_or_assignment(node, ident, None),
+        }
+    }
+
+    fn do_variable_or_assignment(
+        &mut self,
+        mut node: PendingNode,
+        ident: &str,
+        tp: Option<String>,
+    ) -> Result {
         use crate::token::TokenType::*;
 
         let token = self.peek_token()?;
         match token {
-            LeftBrace => self.do_function_call(node, symbol),
             StaticDeclaration => {
                 self.next_token(&mut node)?;
                 let expression = self.do_expression(node.id)?;
                 let node = self.add_node(
                     node,
-                    NodeBody::ConstDeclaration(symbol.into(), Some(expression)),
+                    NodeBody::ConstDeclaration(ident.into(), tp, expression),
                 );
                 Ok(node)
             }
-            Declaration => {
+            VariableDeclaration => {
                 self.next_token(&mut node)?;
                 let expression = self.do_expression(node.id)?;
                 let node = self.add_node(
                     node,
-                    NodeBody::VariableDeclaration(symbol.into(), Some(expression)),
+                    NodeBody::VariableDeclaration(ident.into(), tp, Some(expression)),
                 );
                 Ok(node)
             }
@@ -344,13 +416,13 @@ where
                 let expression = self.do_expression(node.id)?;
                 let node = self.add_uncomplete_node(
                     node,
-                    UnlinkedNodeBody::VariableAssignment(symbol.into(), expression),
+                    UnlinkedNodeBody::VariableAssignment(ident.into(), expression),
                 );
                 Ok(node)
             }
             _ => Err(Error::new(&format!(
-                "Unknown token: {:?} when parsing symbol with name {:?}",
-                token, symbol
+                "Unexpected token: {:?} when parsing identifier with name {:?}",
+                token, ident
             ))),
         }
     }

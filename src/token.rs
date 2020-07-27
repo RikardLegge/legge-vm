@@ -31,7 +31,8 @@ pub enum TokenType {
     LeftBrace,
     RightBrace,
     StaticDeclaration,
-    Declaration,
+    VariableDeclaration,
+    TypeDeclaration,
     Assignment,
     ReturnTypes,
     Name(String),
@@ -98,7 +99,7 @@ impl<'a> Tokenizer<'a> {
             '-' => self.parse_return_type_or_subtract()?,
             '/' => self.parse_comment_or_div()?,
             'a'..='z' | 'A'..='Z' => self.parse_name()?,
-            ':' => self.parse_declaration()?,
+            ':' => self.parse_declaration_or_type()?,
             '=' => self.parse_assignment_or_eq()?,
             '(' => {
                 self.next()?;
@@ -166,15 +167,18 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    fn parse_declaration(&mut self) -> Option<TokenType> {
+    fn parse_declaration_or_type(&mut self) -> Option<TokenType> {
         assert_eq!(self.next()?, ':');
-        match self.next()? {
-            ':' => Some(TokenType::StaticDeclaration),
-            '=' => Some(TokenType::Declaration),
-            ch => panic!(
-                "Encountered invalid character when parsing declaration: {:?}",
-                ch
-            ),
+        match self.peek()? {
+            ':' => {
+                self.next()?;
+                Some(TokenType::StaticDeclaration)
+            }
+            '=' => {
+                self.next()?;
+                Some(TokenType::VariableDeclaration)
+            }
+            _ => Some(TokenType::TypeDeclaration),
         }
     }
 
