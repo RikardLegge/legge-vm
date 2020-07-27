@@ -1,5 +1,4 @@
 // use crate::interpreter::InterpLogLevel;
-use ast::Ast;
 // use bincode::{deserialize, serialize};
 // use bytecode::Bytecode;
 // use foreign_functions::load_foreign_functions;
@@ -43,7 +42,7 @@ fn run_code(code: String) {
     timing.token = SystemTime::now().duration_since(start).unwrap();
 
     let start = SystemTime::now();
-    let _ast = Ast::from_tokens(tokens.into_iter()).unwrap();
+    let _ast = ast::from_tokens(tokens.into_iter()).unwrap();
     timing.ast = SystemTime::now().duration_since(start).unwrap();
     dbg!(_ast);
 
