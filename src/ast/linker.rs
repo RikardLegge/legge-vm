@@ -1,4 +1,6 @@
 use super::{Ast, NodeBody, NodeID, Result};
+use crate::ast::ast::NodeReference;
+use crate::ast::NodeReferenceType;
 use std::collections::VecDeque;
 use std::mem;
 
@@ -17,11 +19,12 @@ impl<'a> Linker<'a> {
         Self { queue, ast }
     }
 
-    fn add_ref(&mut self, target_id: NodeID, referencer: NodeID) {
+    fn add_ref(&mut self, target_id: NodeID, referencer: NodeID, tp: NodeReferenceType) {
+        let node_ref = NodeReference::new(referencer, tp);
         self.ast
             .get_node_mut(target_id)
             .referenced_by
-            .insert(referencer);
+            .insert(node_ref);
     }
 
     fn link(mut self) -> Result<()> {
@@ -32,27 +35,28 @@ impl<'a> Linker<'a> {
             }
             match &node.body {
                 NodeBody::Unlinked(body) => {
+                    use super::NodeReferenceType::*;
                     use super::UnlinkedNodeBody::*;
                     let new_body = match body {
                         VariableAssignment(ident, expr_id) => {
                             let expr_id = *expr_id;
                             let target_id = self.ast.closest_variable(node_id, &ident)?;
-                            self.add_ref(target_id, node_id);
+                            self.add_ref(target_id, node_id, ReceiveValue);
                             NodeBody::VariableAssignment(target_id, expr_id)
                         }
                         VariableValue(ident) => {
                             let target_id = self.ast.closest_variable(node_id, &ident)?;
-                            self.add_ref(target_id, node_id);
+                            self.add_ref(target_id, node_id, AssignValue);
                             NodeBody::VariableValue(target_id)
                         }
                         Return => {
                             let target_id = self.ast.closest_fn(node_id)?;
-                            self.add_ref(target_id, node_id);
+                            self.add_ref(target_id, node_id, GoTo);
                             NodeBody::Return(target_id)
                         }
                         Break => {
                             let target_id = self.ast.closest_loop(node_id)?;
-                            self.add_ref(target_id, node_id);
+                            self.add_ref(target_id, node_id, GoTo);
                             NodeBody::Break(target_id)
                         }
                         Call(ident, _) => {
@@ -64,7 +68,7 @@ impl<'a> Linker<'a> {
                                 NodeBody::Unlinked(Call(_, args)) => mem::replace(args, Vec::new()),
                                 _ => unreachable!(),
                             };
-                            self.add_ref(target_id, node_id);
+                            self.add_ref(target_id, node_id, GoTo);
                             NodeBody::Call(target_id, args)
                         }
                     };

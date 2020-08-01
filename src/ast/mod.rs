@@ -6,7 +6,10 @@ mod typer;
 use std::result;
 
 use crate::token::Token;
-pub use ast::{Ast, Node, NodeBody, NodeID, NodeType, NodeValue, UnlinkedNodeBody};
+pub use ast::{
+    Ast, Node, NodeBody, NodeID, NodeReferenceType, NodeType, NodeTypeSource, NodeValue,
+    UnlinkedNodeBody,
+};
 
 pub type Result<N = NodeID> = result::Result<N, Error>;
 

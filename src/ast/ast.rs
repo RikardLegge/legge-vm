@@ -21,10 +21,56 @@ impl NodeID {
 pub struct Node {
     pub id: NodeID,
     pub parent_id: Option<NodeID>,
-    pub referenced_by: HashSet<NodeID>,
-    pub tp: Option<NodeType>,
+    pub referenced_by: HashSet<NodeReference>,
+    pub tp: Option<InferredType>,
     pub tokens: Vec<Token>,
     pub body: NodeBody,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct NodeReference {
+    pub id: NodeID,
+    pub ref_tp: NodeReferenceType,
+}
+
+impl NodeReference {
+    pub fn new(id: NodeID, ref_tp: NodeReferenceType) -> Self {
+        Self { id, ref_tp }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum NodeReferenceType {
+    AssignValue,
+    ReceiveValue,
+    GoTo,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InferredType {
+    pub source: NodeTypeSource,
+    pub tp: NodeType,
+}
+
+impl InferredType {
+    pub fn new(tp: NodeType, source: NodeTypeSource) -> Self {
+        Self { tp, source }
+    }
+
+    pub fn maybe(tp: Option<NodeType>, source: NodeTypeSource) -> Option<Self> {
+        match tp {
+            Some(tp) => Some(Self::new(tp, source)),
+            None => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
+pub enum NodeTypeSource {
+    Usage,
+    Value,
+    Variable,
+    Declared,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,8 +78,7 @@ pub enum NodeType {
     NotYetImplemented,
     Void,
     Int,
-    Tuple(Vec<NodeType>),
-    Fn,
+    Fn(Vec<NodeType>, Box<NodeType>),
 }
 
 #[derive(Debug)]
@@ -44,7 +89,7 @@ pub enum NodeValue {
 #[derive(Debug)]
 pub enum NodeBody {
     Empty,
-    Value(NodeValue),
+    ConstValue(NodeValue),
     Op(ArithmeticOP, NodeID, NodeID),
     ProcedureDeclaration(Vec<NodeID>, Option<String>, NodeID),
     PrefixOp(ArithmeticOP, NodeID),
@@ -277,7 +322,7 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
             },
             Call(_, args) => args.get(self.index),
 
-            VariableValue(_) | Comment(_) | Return(_) | Break(_) | Value(_) | Empty => None,
+            VariableValue(_) | Comment(_) | Return(_) | Break(_) | ConstValue(_) | Empty => None,
             Unlinked(body) => {
                 if let None = self.unlinked {
                     self.unlinked = Some(body.children());

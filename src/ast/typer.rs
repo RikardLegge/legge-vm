@@ -1,4 +1,5 @@
-use crate::ast::{Ast, Error, Node, NodeID, NodeType, NodeValue, Result};
+use crate::ast::ast::InferredType;
+use crate::ast::{Ast, Error, Node, NodeID, NodeReferenceType, NodeType, NodeValue, Result};
 use std::collections::VecDeque;
 
 pub fn infer_types(ast: &mut Ast) -> Result<()> {
@@ -22,12 +23,8 @@ impl<'a> Typer<'a> {
         }
     }
 
-    fn try_coerce<'b, 'c: 'b>(
-        &self,
-        tp1_opt: &'b Option<NodeType>,
-        tp2_opt: &'c Option<NodeType>,
-    ) -> &'b Option<NodeType> {
-        match (tp1_opt, tp2_opt) {
+    fn try_coerce(&self, tp1_opt: Option<NodeType>, tp2_opt: Option<NodeType>) -> Option<NodeType> {
+        match (&tp1_opt, &tp2_opt) {
             (Some(tp1), Some(tp2)) => {
                 if tp1 == tp2 {
                     return tp1_opt;
@@ -35,41 +32,52 @@ impl<'a> Typer<'a> {
                 match (tp1, tp2) {
                     (NodeType::NotYetImplemented, _) => tp2_opt,
                     (_, NodeType::NotYetImplemented) => tp1_opt,
-                    _ => &None,
+                    _ => None,
                 }
             }
-            _ => &None,
+            _ => None,
         }
     }
 
-    fn get_type(&self, node_id: &NodeID) -> &Option<NodeType> {
-        let node = self.ast.get_node(*node_id);
-        &node.tp
+    fn get_type(&self, node_id: &NodeID) -> Option<NodeType> {
+        match self.get_inferred_type(node_id) {
+            Some(inf) => Some(inf.tp.clone()),
+            None => None,
+        }
     }
 
-    fn get_ref_type(&self, node_id: &NodeID) -> &Option<NodeType> {
-        let mut tp = &None;
+    fn get_inferred_type(&self, node_id: &NodeID) -> &Option<InferredType> {
+        &self.ast.get_node(*node_id).tp
+    }
+
+    fn get_ref_type(&self, node_id: &NodeID, ref_tp: NodeReferenceType) -> Option<NodeType> {
+        let mut tp = None;
         let node = self.ast.get_node(*node_id);
-        for ref_id in &node.referenced_by {
-            let ref_tp = self.get_type(ref_id);
-            if ref_tp.is_some() {
-                tp = ref_tp;
-                break;
+        for node_ref in &node.referenced_by {
+            if node_ref.ref_tp == ref_tp {
+                let ref_tp = self.get_type(&node_ref.id);
+                if ref_tp.is_some() {
+                    tp = ref_tp;
+                    break;
+                }
             }
         }
         tp
     }
 
-    fn get_type_from_string(&self, node_id: &NodeID, tp: &str) -> &Option<NodeType> {
+    fn get_type_from_string(&self, node_id: &NodeID, tp: &str) -> Option<NodeType> {
         match tp {
-            "int" => &Some(NodeType::Int),
-            "void" => &Some(NodeType::Void),
-            _ => &None,
+            "int" => Some(NodeType::Int),
+            "void" => Some(NodeType::Void),
+            _ => None,
         }
     }
 
     pub fn infer_types(mut self) -> Result<()> {
         use super::NodeBody::*;
+        use super::NodeReferenceType::*;
+        use super::NodeType::*;
+        use super::NodeTypeSource::*;
         while let Some(node_id) = self.queue.pop_front() {
             let node = self.ast.get_node(node_id);
             for &child_id in node.body.children() {
@@ -78,45 +86,63 @@ impl<'a> Typer<'a> {
                 }
             }
             let tp = match &node.body {
-                Value(value) => match value {
-                    NodeValue::Int(..) => &Some(NodeType::Int),
+                ConstValue(value) => match value {
+                    NodeValue::Int(..) => Some(InferredType::new(Int, Declared)),
                 },
                 Op(_, lhs, rhs) => {
                     let lhs = self.get_type(lhs);
                     let rhs = self.get_type(rhs);
-                    self.try_coerce(lhs, rhs)
+                    let tp = self.try_coerce(lhs, rhs);
+                    InferredType::maybe(tp, Value)
                 }
-                ProcedureDeclaration(args, returns, body) => &Some(NodeType::Fn),
-                PrefixOp(_, node_id) => self.get_type(node_id),
-                VariableValue(value) => self.get_type(value),
-                Expression(_) => &Some(NodeType::NotYetImplemented),
+                ProcedureDeclaration(args, returns, body) => {
+                    let arg_types: Vec<Option<NodeType>> =
+                        args.iter().map(|id| self.get_type(id)).collect();
+                    let args_inferred = arg_types.iter().all(|tp| tp.is_some());
+                    if args_inferred {
+                        let arg_types = arg_types.into_iter().map(|tp| tp.unwrap()).collect();
+                        let return_type = match returns {
+                            Some(name) => self.get_type_from_string(&node_id, name),
+                            None => Some(Void),
+                        };
+                        if let Some(return_type) = return_type {
+                            InferredType::maybe(
+                                Some(Fn(arg_types, Box::new(return_type))),
+                                Declared,
+                            )
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                PrefixOp(_, node_id) => InferredType::maybe(self.get_type(node_id), Value),
+                VariableValue(value) => InferredType::maybe(self.get_type(value), Value),
+                Expression(_) => Some(InferredType::new(NotYetImplemented, Declared)),
                 VariableDeclaration(_, declared, value) => {
                     if let Some(declared) = declared {
-                        self.get_type_from_string(&node_id, declared)
+                        InferredType::maybe(self.get_type_from_string(&node_id, declared), Declared)
                     } else if let Some(value) = value {
-                        self.get_type(value)
+                        InferredType::maybe(self.get_type(value), Value)
                     } else {
-                        self.get_ref_type(&node.id)
+                        InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
                     }
                 }
                 ConstDeclaration(_, declared, value) => {
                     if let Some(declared) = declared {
-                        self.get_type_from_string(&node_id, declared)
+                        InferredType::maybe(self.get_type_from_string(&node_id, declared), Declared)
+                    } else if let Some(tp) = self.get_type(value) {
+                        InferredType::maybe(Some(tp), Value)
                     } else {
-                        let value_tp = self.get_type(value);
-                        if let Some(_) = value_tp {
-                            value_tp
-                        } else {
-                            self.get_ref_type(&node.id)
-                        }
+                        InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
                     }
                 }
                 VariableAssignment(var, value) => {
-                    let tp = self.get_type(var);
-                    if let Some(_) = tp {
-                        tp
+                    if let Some(tp) = self.get_type(var) {
+                        InferredType::maybe(Some(tp), Variable)
                     } else {
-                        self.get_type(value)
+                        InferredType::maybe(self.get_type(value), Value)
                     }
                 }
                 Call(var_id, _) => {
@@ -132,8 +158,11 @@ impl<'a> Typer<'a> {
                     };
                     match &proc.body {
                         ProcedureDeclaration(_, return_type, _) => match return_type {
-                            Some(return_type) => self.get_type_from_string(&proc.id, &return_type),
-                            None => &Some(NodeType::Void),
+                            Some(return_type) => InferredType::maybe(
+                                self.get_type_from_string(&proc.id, &return_type),
+                                Value,
+                            ),
+                            None => InferredType::maybe(Some(Void), Value),
                         },
                         _ => Err(Error::new(&format!(
                             "It's currently only possible to call functions, tried to call {:?}",
@@ -142,13 +171,12 @@ impl<'a> Typer<'a> {
                     }
                 }
                 Empty | Break(..) | Return(..) | Block(..) | If(..) | Loop(..) | Comment(..) => {
-                    &Some(NodeType::Void)
+                    InferredType::maybe(Some(Void), Declared)
                 }
                 Unlinked(_) => unreachable!(),
             };
             match tp {
                 Some(_) => {
-                    let tp = tp.clone();
                     let node = self.ast.get_node_mut(node_id);
                     node.tp = tp;
                     self.since_last_changed = 0;

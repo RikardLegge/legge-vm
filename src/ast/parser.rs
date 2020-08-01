@@ -175,7 +175,7 @@ where
         let mut node = self.node(parent_id);
 
         let node = match self.next_token(&mut node)? {
-            Int(value) => Ok(self.add_node(node, NodeBody::Value(NodeValue::Int(value)))),
+            Int(value) => Ok(self.add_node(node, NodeBody::ConstValue(NodeValue::Int(value)))),
             Op(op) => self.do_operation(node, op, None),
             Name(symbol) => self.do_statement_symbol(node, &symbol),
             LeftCurlyBrace => self.do_block(node),
@@ -201,7 +201,7 @@ where
         let mut node = self.node(parent_id);
 
         let node = match self.next_token(&mut node)? {
-            Int(value) => self.add_node(node, NodeBody::Value(NodeValue::Int(value))),
+            Int(value) => self.add_node(node, NodeBody::ConstValue(NodeValue::Int(value))),
             Op(op) => self.do_operation(node, op, None)?,
             Name(symbol) => self.do_expression_symbol(node, &symbol)?,
             LeftCurlyBrace => self.do_block(node)?,
