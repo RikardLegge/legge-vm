@@ -78,12 +78,14 @@ pub enum NodeType {
     NotYetImplemented,
     Void,
     Int,
+    String,
     Fn(Vec<NodeType>, Box<NodeType>),
 }
 
 #[derive(Debug)]
 pub enum NodeValue {
     Int(isize),
+    String(String),
 }
 
 #[derive(Debug)]

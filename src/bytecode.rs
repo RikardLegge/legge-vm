@@ -21,8 +21,8 @@ impl Bytecode {
                 pushed: 0,
                 popped: 0
             },
-            bc.ev_node(&ast.root).stack_usage
-        );
+            bc.ev_node(&ast.root()).stack_usage
+        )
         let global_scope = mem::replace(&mut bc.scope, Scope::new(0));
         assert_eq!(bc.code.len(), 0);
         bc.code = global_scope.instructions;
@@ -573,7 +573,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_expression(&mut self, expr: &AstNode) -> ScopeEvaluation {
-        use crate::ast::AstNodeBody::*;
+        use crate::ast::NodeBody::*;
         match &expr.body {
             Op(op, expr1, expr2) => self.ev_operation(expr.id, *op, &expr1, &expr2),
             Int(primitive) => self.ev_intermediate(expr.id, Value::Int(*primitive)),

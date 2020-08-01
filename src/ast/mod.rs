@@ -1,4 +1,5 @@
 mod ast;
+mod checker;
 mod linker;
 mod parser;
 mod typer;
@@ -33,5 +34,6 @@ where
     let mut ast = parser::ast_from_tokens(iter)?;
     linker::link(&mut ast)?;
     typer::infer_types(&mut ast)?;
+    checker::check_types(&ast)?;
     Ok(ast)
 }

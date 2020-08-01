@@ -202,6 +202,7 @@ where
 
         let node = match self.next_token(&mut node)? {
             Int(value) => self.add_node(node, NodeBody::ConstValue(NodeValue::Int(value))),
+            String(value) => self.add_node(node, NodeBody::ConstValue(NodeValue::String(value))),
             Op(op) => self.do_operation(node, op, None)?,
             Name(symbol) => self.do_expression_symbol(node, &symbol)?,
             LeftCurlyBrace => self.do_block(node)?,

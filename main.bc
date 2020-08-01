@@ -1,5 +1,7 @@
 c :: 5;
-d : int;
+d :: "test";
+e := d;
+e = 1;
 
 main :: fn (a,b: int,c: int) -> int {
     a = 1;

@@ -3,6 +3,7 @@
 // use bytecode::Bytecode;
 // use foreign_functions::load_foreign_functions;
 // use interpreter::Interpreter;
+// use crate::bytecode::Bytecode;
 use std::fs::File;
 use std::io::prelude::*;
 use std::time::{Duration, SystemTime};
