@@ -129,7 +129,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                                 }
                             };
                             // We move the args out the old NodeBody so that we do not have to copy
-                            // the argument vec.
+                            // the argument vec while replacing the node body.
                             let node = self.ast.get_node_mut(node_id);
                             let args = match &mut node.body {
                                 NodeBody::Unlinked(Call(_, args)) => mem::replace(args, Vec::new()),

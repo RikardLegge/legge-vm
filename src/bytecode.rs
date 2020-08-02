@@ -468,6 +468,12 @@ impl<'a> BytecodeGenerator<'a> {
         returns: &Option<String>,
         body_id: NodeID,
     ) -> StackUsage {
+        // We have to add the proc before evaluating the body,
+        // it's therefor not possible for the proc address to
+        // be computed at this point. A post processing phase
+        // therefor has to be introduced for proc call linking.
+        unimplemented!();
+
         let proc = self.with_scope(node_id, ContextType::StackFrame, |bc| {
             for arg in args.iter() {
                 bc.add_var(*arg);
