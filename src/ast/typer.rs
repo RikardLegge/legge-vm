@@ -79,6 +79,7 @@ impl<'a> Typer<'a> {
         use super::NodeType::*;
         use super::NodeTypeSource::*;
         let tp = match &node.body {
+            RuntimeReference(..) => unimplemented!(),
             ConstValue(value) => match value {
                 NodeValue::Int(..) => Some(InferredType::new(Int, Declared)),
                 NodeValue::String(..) => Some(InferredType::new(String, Declared)),
@@ -154,6 +155,10 @@ impl<'a> Typer<'a> {
                             Value,
                         ),
                         None => InferredType::maybe(Some(Void), Value),
+                    },
+                    RuntimeReference(ident) => match &proc.tp {
+                        Some(tp) => Some(tp.clone()),
+                        None => None,
                     },
                     _ => Err(Error::new(&format!(
                         "It's currently only possible to call functions, tried to call {:?}",

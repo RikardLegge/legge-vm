@@ -3,15 +3,14 @@
 // use bytecode::Bytecode;
 // use foreign_functions::load_foreign_functions;
 // use interpreter::Interpreter;
-// use crate::bytecode::Bytecode;
 use std::fs::File;
 use std::io::prelude::*;
 use std::time::{Duration, SystemTime};
 use token::Tokenizer;
 
 mod ast;
-// mod bytecode;
-// mod foreign_functions;
+mod bytecode;
+mod runtime;
 // mod interpreter;
 mod token;
 
@@ -37,21 +36,22 @@ struct Timing {
 
 fn run_code(code: String) {
     let mut timing = Timing::default();
+    let runtime = runtime::get();
 
     let start = SystemTime::now();
     let tokens = Tokenizer::parse(code.chars());
     timing.token = SystemTime::now().duration_since(start).unwrap();
 
     let start = SystemTime::now();
-    let _ast = ast::from_tokens(tokens.into_iter()).unwrap();
+    let ast = ast::from_tokens(tokens.into_iter(), &runtime).unwrap();
     timing.ast = SystemTime::now().duration_since(start).unwrap();
-    dbg!(_ast);
+    print!("{:?}", ast);
 
-    // let start = SystemTime::now();
-    // let functions = load_foreign_functions();
-    // let bytecode = Bytecode::from_ast(&ast, &functions);
-    // timing.bytecode = SystemTime::now().duration_since(start).unwrap();
-    //
+    let start = SystemTime::now();
+    let bytecode = bytecode::from_ast(&ast);
+    timing.bytecode = SystemTime::now().duration_since(start).unwrap();
+    let _ = bytecode;
+
     // let encoded = serialize(&bytecode).unwrap();
     // let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
     //

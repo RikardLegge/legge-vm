@@ -1,5 +1,4 @@
 use super::{Ast, Error, Node, Result};
-use crate::ast::NodeBody;
 
 pub fn check_types(ast: &Ast) -> Result<()> {
     Checker::new(ast).check_all_types()

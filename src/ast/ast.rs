@@ -1,15 +1,19 @@
-use super::{Error, Result};
 use crate::token::{ArithmeticOP, Token};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct NodeID(usize);
 
 impl NodeID {
     pub fn new(id: usize) -> Self {
         NodeID(id)
+    }
+
+    pub fn invalid() -> Self {
+        NodeID(0)
     }
 
     pub fn index(self) -> usize {
@@ -20,11 +24,11 @@ impl NodeID {
 #[derive(Debug)]
 pub struct Node {
     pub id: NodeID,
+    pub tokens: Vec<Token>,
+    pub tp: Option<InferredType>,
+    pub body: NodeBody,
     pub parent_id: Option<NodeID>,
     pub referenced_by: HashSet<NodeReference>,
-    pub tp: Option<InferredType>,
-    pub tokens: Vec<Token>,
-    pub body: NodeBody,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -75,6 +79,7 @@ pub enum NodeTypeSource {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
+    Any,
     NotYetImplemented,
     Void,
     Int,
@@ -94,6 +99,7 @@ pub enum NodeBody {
     ConstValue(NodeValue),
     Op(ArithmeticOP, NodeID, NodeID),
     ProcedureDeclaration(Vec<NodeID>, Option<String>, NodeID),
+    RuntimeReference(String),
     PrefixOp(ArithmeticOP, NodeID),
     Block(Vec<NodeID>),
     If(NodeID, NodeID),
@@ -156,6 +162,20 @@ impl Ast {
         Self { root, nodes }
     }
 
+    pub fn add_node(&mut self, parent_id: NodeID) -> NodeID {
+        let node = Node {
+            id: NodeID::new(self.nodes.len()),
+            parent_id: Some(parent_id),
+            referenced_by: Default::default(),
+            tp: None,
+            tokens: vec![],
+            body: NodeBody::Empty,
+        };
+        let id = node.id;
+        self.nodes.push(node);
+        id
+    }
+
     pub fn root(&self) -> NodeID {
         self.root
     }
@@ -194,37 +214,23 @@ impl Ast {
         }
     }
 
-    pub fn closest_fn(&self, node_id: NodeID) -> Result {
-        let closest = self.closest(node_id, &|node| match node.body {
+    pub fn closest_fn(&self, node_id: NodeID) -> Option<NodeID> {
+        self.closest(node_id, |node| match node.body {
             NodeBody::ProcedureDeclaration(..) => Some(node.id),
             _ => None,
-        });
-        match closest {
-            Some(id) => Ok(id),
-            _ => Err(Error::new(&format!(
-                "No function ancestor found starting at {:?}",
-                node_id
-            ))),
-        }
+        })
     }
 
-    pub fn closest_loop(&self, node_id: NodeID) -> Result {
-        let closest = self.closest(node_id, &|node| match node.body {
+    pub fn closest_loop(&self, node_id: NodeID) -> Option<NodeID> {
+        self.closest(node_id, |node| match node.body {
             NodeBody::Loop(..) => Some(node.id),
             _ => None,
-        });
-        match closest {
-            Some(id) => Ok(id),
-            _ => Err(Error::new(&format!(
-                "No loop ancestor found starting at {:?}",
-                node_id
-            ))),
-        }
+        })
     }
 
-    pub fn closest_variable(&self, node_id: NodeID, target_ident: &str) -> Result<NodeID> {
+    pub fn closest_variable(&self, node_id: NodeID, target_ident: &str) -> Option<NodeID> {
         use NodeBody::*;
-        let closest = self.closest(node_id, &|node| {
+        self.closest(node_id, |node| {
             for &child_id in node.body.children() {
                 let child = self.get_node(child_id);
                 match &child.body {
@@ -237,21 +243,13 @@ impl Ast {
                 }
             }
             None
-        });
-        match closest {
-            Some(id) => Ok(id),
-            _ => Err(Error::new(&format!(
-                "Failed to find variable in scope starting at {:?}",
-                node_id
-            ))),
-        }
+        })
     }
 
-    pub fn closest(
-        &self,
-        mut node_id: NodeID,
-        test: &dyn Fn(&Node) -> Option<NodeID>,
-    ) -> Option<NodeID> {
+    pub fn closest<F>(&self, mut node_id: NodeID, test: F) -> Option<NodeID>
+    where
+        F: Fn(&Node) -> Option<NodeID>,
+    {
         loop {
             let node = self.get_node(node_id);
             let result = test(node);
@@ -324,7 +322,8 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
             },
             Call(_, args) => args.get(self.index),
 
-            VariableValue(_) | Comment(_) | Return(_) | Break(_) | ConstValue(_) | Empty => None,
+            VariableValue(_) | RuntimeReference(_) | Comment(_) | Return(_) | Break(_)
+            | ConstValue(_) | Empty => None,
             Unlinked(body) => {
                 if let None = self.unlinked {
                     self.unlinked = Some(body.children());
