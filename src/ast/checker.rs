@@ -14,7 +14,7 @@ impl<'a> Checker<'a> {
     }
 
     pub fn check_type(&self, node: &Node) -> Result<()> {
-        if let Some(inf_tp) = &node.tp {
+        if let Some(_) = &node.tp {
             Ok(())
         } else {
             Err(Error::new(&format!(

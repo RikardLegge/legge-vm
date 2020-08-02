@@ -12,10 +12,6 @@ impl NodeID {
         NodeID(id)
     }
 
-    pub fn invalid() -> Self {
-        NodeID(0)
-    }
-
     pub fn index(self) -> usize {
         self.0
     }
@@ -153,7 +149,8 @@ pub struct Ast {
 
 impl fmt::Debug for Ast {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.fmt_debug_node(f, 0, self.root)
+        self.fmt_debug_node(f, 0, self.root)?;
+        write!(f, "\n")
     }
 }
 

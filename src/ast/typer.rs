@@ -65,7 +65,7 @@ impl<'a> Typer<'a> {
         tp
     }
 
-    fn get_type_from_string(&self, node_id: &NodeID, tp: &str) -> Option<NodeType> {
+    fn get_type_from_string(&self, _: &NodeID, tp: &str) -> Option<NodeType> {
         match tp {
             "int" => Some(NodeType::Int),
             "void" => Some(NodeType::Void),
@@ -90,7 +90,7 @@ impl<'a> Typer<'a> {
                 let tp = self.try_coerce(lhs, rhs);
                 InferredType::maybe(tp, Value)
             }
-            ProcedureDeclaration(args, returns, body) => {
+            ProcedureDeclaration(args, returns, _) => {
                 let arg_types: Vec<Option<NodeType>> =
                     args.iter().map(|id| self.get_type(id)).collect();
                 let args_inferred = arg_types.iter().all(|tp| tp.is_some());
@@ -156,7 +156,7 @@ impl<'a> Typer<'a> {
                         ),
                         None => InferredType::maybe(Some(Void), Value),
                     },
-                    RuntimeReference(ident) => match &proc.tp {
+                    RuntimeReference(_) => match &proc.tp {
                         Some(tp) => Some(tp.clone()),
                         None => None,
                     },

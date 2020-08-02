@@ -1,13 +1,14 @@
 use crate::ast::{Ast, NodeBody, NodeID, NodeValue};
 use crate::token::ArithmeticOP;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::mem;
 use std::ops::AddAssign;
 
 pub fn from_ast(ast: &Ast) -> Bytecode {
     let root_id = ast.root();
-    let mut bc = BytecodeGenerator::new(ast, root_id);
-    assert_eq!(StackUsage::zero(), bc.ev_node(root_id));
+    let mut bc = BytecodeGenerator::new(ast);
+    bc.evaluate(root_id);
     bc.get_bytecode()
 }
 
@@ -23,30 +24,13 @@ pub struct Instruction {
     pub op: OP,
 }
 
-#[derive(Debug)]
-struct GeneratorInstruction {
-    node_id: NodeID,
-    op: OP,
-}
-
-#[derive(Debug)]
-enum GeneratorOP {
-    Linked(OP),
-    Unlinked(UnlinkedOP),
-}
-
 pub type OPOffset = isize;
 pub type OPAddress = usize;
 
-#[derive(Debug)]
-enum UnlinkedOP {
-    Panic(String),
-    Branch(LinkTarget),
-    BranchIf(LinkTarget),
-    SLoad(String),
-    SStore(String),
-    PopStack(NodeID, NodeID),
-    Call(String),
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum PanicReason {
+    Unlinked,
+    ProcIndex(usize),
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -72,11 +56,11 @@ pub enum OP {
     PushStackFrame,
     PopStackFrame,
 
-    Call(OPAddress),
+    Call,
 
     NoOp,
     Halt,
-    Panic,
+    Panic(PanicReason),
 }
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 enum LinkTarget {
@@ -96,8 +80,8 @@ enum LinkTargetPosition {
 pub enum Value {
     Unset,
     Int(isize),
-    FunctionPointer(usize),
-    RuntimePointer(usize),
+    FunctionPointer(OPAddress),
+    RuntimePointer(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -176,18 +160,30 @@ impl StackUsage {
 }
 
 struct Procedure {
-    scope: Scope,
-    address: usize,
+    node_id: NodeID,
+    size: Option<usize>,
+    scope: Option<Scope>,
 }
 
 struct BytecodeGenerator<'a> {
-    procedures: HashMap<NodeID, Procedure>,
+    procedures: Vec<Procedure>,
     ast: &'a Ast,
     scopes: Vec<Scope>,
     contexts: Vec<Context>,
+    deferred: VecDeque<NodeID>,
 }
 
 impl<'a> BytecodeGenerator<'a> {
+    fn new(ast: &'a Ast) -> Self {
+        BytecodeGenerator {
+            ast,
+            scopes: Vec::new(),
+            deferred: VecDeque::new(),
+            procedures: Vec::new(),
+            contexts: Vec::new(),
+        }
+    }
+
     fn get_bytecode(mut self) -> Bytecode {
         assert_eq!(1, self.scopes.len());
         let scope = self.scopes.pop().unwrap();
@@ -198,8 +194,36 @@ impl<'a> BytecodeGenerator<'a> {
         });
 
         let procedure_address = code.len();
-        for (_, mut proc) in self.procedures {
-            code.append(&mut proc.scope.instructions);
+        for mut proc in self.procedures.iter_mut() {
+            let scope = mem::replace(&mut proc.scope, None);
+            match scope {
+                Some(scope) => {
+                    let mut instructions = scope.instructions;
+                    let size = instructions.len();
+                    code.append(&mut instructions);
+                    proc.size = Some(size);
+                }
+                None => unreachable!(),
+            }
+        }
+
+        for mut inst in code.iter_mut() {
+            match &inst.op {
+                OP::Panic(panic) => match panic {
+                    PanicReason::ProcIndex(proc_index) => {
+                        let offset = self
+                            .procedures
+                            .iter()
+                            .take(*proc_index)
+                            .map(|p| p.size.unwrap())
+                            .sum();
+                        let value = Value::FunctionPointer(offset);
+                        inst.op = OP::PushImmediate(value);
+                    }
+                    _ => unreachable!(),
+                },
+                _ => (),
+            }
         }
 
         Bytecode {
@@ -208,16 +232,21 @@ impl<'a> BytecodeGenerator<'a> {
         }
     }
 
-    fn new(ast: &'a Ast, node_id: NodeID) -> Self {
-        let procedures = HashMap::new();
-        let instruction_scope = vec![Scope::new(node_id)];
-        let context = vec![Context::new(node_id, ContextType::Block)];
-        BytecodeGenerator {
-            scopes: instruction_scope,
-            procedures,
-            ast,
-            contexts: context,
-        }
+    fn evaluate(&mut self, root_id: NodeID) {
+        self.with_scope(root_id, ContextType::Block, |bc| {
+            let usage = bc.ev_node(root_id);
+            assert_eq!(StackUsage::zero(), usage);
+
+            while let Some(node_id) = bc.deferred.pop_front() {
+                let node = bc.ast.get_node(node_id);
+                match &node.body {
+                    NodeBody::ProcedureDeclaration(args, returns, body_id) => {
+                        bc.ev_procedure_body(node_id, args, returns, *body_id)
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+        });
     }
 
     fn get_variable_offset(&self, var_id: NodeID) -> OPOffset {
@@ -230,16 +259,6 @@ impl<'a> BytecodeGenerator<'a> {
             "Failed to get variable offset of {:?}",
             self.ast.get_node(var_id)
         );
-    }
-
-    fn get_proc_address(&self, proc_id: NodeID) -> OPAddress {
-        match self.procedures.get(&proc_id) {
-            Some(proc) => proc.address,
-            None => panic!(
-                "Failed to find procedure in scope {:?}",
-                self.ast.get_node(proc_id)
-            ),
-        }
     }
 
     fn get_loop_break_offset(&self, loop_id: NodeID) -> OPOffset {
@@ -288,12 +307,6 @@ impl<'a> BytecodeGenerator<'a> {
         self.contexts.last_mut().unwrap()
     }
 
-    fn add_child_ops(&mut self, scope: &mut Scope) {
-        self.get_scope_mut()
-            .instructions
-            .append(&mut scope.instructions);
-    }
-
     fn op_index(&self) -> usize {
         self.get_scope().instructions.len()
     }
@@ -312,15 +325,17 @@ impl<'a> BytecodeGenerator<'a> {
         context.variables.push(var);
     }
 
-    fn add_proc(&mut self, scope: Scope) -> OPAddress {
-        let address = self
-            .procedures
-            .iter()
-            .map(|(_, p)| p.scope.instructions.len())
-            .sum();
-        let proc = Procedure { scope, address };
-        self.procedures.insert(proc.scope.node_id, proc);
-        address
+    fn add_proc(&mut self, node_id: NodeID) -> usize {
+        let scope = None;
+        let size = None;
+        let proc = Procedure {
+            node_id,
+            scope,
+            size,
+        };
+        let proc_id = self.procedures.len();
+        self.procedures.push(proc);
+        proc_id
     }
 
     fn add_op(&mut self, node_id: NodeID, op: OP) -> usize {
@@ -384,9 +399,7 @@ impl<'a> BytecodeGenerator<'a> {
             ConstDeclaration(_, _, expr) => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
             VariableAssignment(var, value) => self.ev_assignment(node_id, *var, *value),
-            ProcedureDeclaration(args, returns, body) => {
-                self.ev_procedure(node_id, &args, returns, *body)
-            }
+            ProcedureDeclaration(..) => self.ev_procedure(node_id),
             Return(proc_id) => self.ev_return(node_id, *proc_id),
             If(condition, body) => self.ev_if(node_id, *condition, *body),
             Loop(body) => self.ev_loop(node_id, *body),
@@ -406,7 +419,7 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn ev_loop(&mut self, node_id: NodeID, body_id: NodeID) -> StackUsage {
         self.add_op(node_id, OP::Branch(1));
-        let break_inst = self.add_op(node_id, OP::Panic);
+        let break_inst = self.add_op(node_id, OP::Panic(PanicReason::Unlinked));
         let start = self.op_index();
         self.with_context(node_id, ContextType::Loop { break_inst }, |bc| {
             let body_node = bc.ast.get_node(body_id);
@@ -432,7 +445,7 @@ impl<'a> BytecodeGenerator<'a> {
         assert_eq!(usage.pushed - usage.popped, 1);
         self.add_op(node_id, OP::PushImmediate(Value::Unset));
         self.add_op(node_id, OP::CmpI);
-        let jump_index = self.add_op(node_id, OP::Panic);
+        let jump_index = self.add_op(node_id, OP::Panic(PanicReason::Unlinked));
 
         let start = self.op_index();
         let body_node = self.ast.get_node(body_id);
@@ -461,22 +474,21 @@ impl<'a> BytecodeGenerator<'a> {
         StackUsage::new(0, 0)
     }
 
-    fn ev_procedure(
+    fn ev_procedure(&mut self, node_id: NodeID) -> StackUsage {
+        let proc_index = self.add_proc(node_id);
+        self.add_op(node_id, OP::Panic(PanicReason::ProcIndex(proc_index)));
+        self.deferred.push_back(node_id);
+        StackUsage::new(0, 1)
+    }
+
+    fn ev_procedure_body(
         &mut self,
         node_id: NodeID,
         args: &[NodeID],
-        returns: &Option<String>,
+        _: &Option<String>,
         body_id: NodeID,
-    ) -> StackUsage {
-        // We have to add the proc before evaluating the body,
-        // it's therefor not possible for the proc address to
-        // be computed at this point. Or rather, if another
-        // procedure is declared while evaluating the body,
-        // we wont be able to compute the address of that
-        // procedure.
-        unimplemented!();
-
-        let proc = self.with_scope(node_id, ContextType::StackFrame, |bc| {
+    ) {
+        let scope = self.with_scope(node_id, ContextType::StackFrame, |bc| {
             for arg in args.iter() {
                 bc.add_var(*arg);
             }
@@ -489,12 +501,13 @@ impl<'a> BytecodeGenerator<'a> {
                 _ => panic!("The body of a loop statement must be a Block"),
             };
         });
-
-        let proc_offset = self.add_proc(proc);
-        let value = Value::FunctionPointer(proc_offset);
-        self.add_op(node_id, OP::PushImmediate(value));
-
-        StackUsage::new(0, 1)
+        for proc in self.procedures.iter_mut() {
+            if proc.node_id == node_id {
+                proc.scope = Some(scope);
+                return;
+            }
+        }
+        unreachable!()
     }
 
     fn ev_variable_value(&mut self, node_id: NodeID, val_id: NodeID) -> StackUsage {
@@ -509,6 +522,9 @@ impl<'a> BytecodeGenerator<'a> {
                 NodeValue::Int(val) => self.ev_const(expr_id, Value::Int(*val)),
                 _ => unimplemented!(),
             },
+            NodeBody::RuntimeReference(ident) => {
+                self.ev_const(expr_id, Value::RuntimePointer(ident.into()))
+            }
             _ => self.ev_node(expr_id),
         };
         assert_eq!(usage.pushed, 1);
@@ -525,8 +541,8 @@ impl<'a> BytecodeGenerator<'a> {
         }
     }
 
-    fn ev_call(&mut self, node_id: NodeID, proc_id: NodeID, args: &[NodeID]) -> StackUsage {
-        let pc_index = self.add_op(node_id, OP::Panic);
+    fn ev_call(&mut self, node_id: NodeID, proc_var_id: NodeID, args: &[NodeID]) -> StackUsage {
+        let pc_index = self.add_op(node_id, OP::Panic(PanicReason::Unlinked));
         self.add_op(node_id, OP::PushStackFrame);
         for arg in args {
             let usage = self.ev_expression(*arg);
@@ -534,7 +550,8 @@ impl<'a> BytecodeGenerator<'a> {
             assert_eq!(0, usage.popped);
         }
         self.add_op(node_id, OP::SetStackFrame(-(args.len() as isize)));
-        self.add_op(node_id, OP::Call(self.get_proc_address(proc_id)));
+        self.add_op(node_id, OP::SLoad(self.get_variable_offset(proc_var_id)));
+        self.add_op(node_id, OP::Call);
         let offset = self.op_index() - pc_index - 1;
         self.set_op(pc_index, OP::PushPc(offset as isize));
 
