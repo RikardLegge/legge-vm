@@ -21,8 +21,12 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn new(details: &str) -> Self {
-        let details = format!("Ast Error: {}", details);
+    pub fn new(ast: &Ast, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Self {
+        let node_info: Vec<String> = nodes
+            .into_iter()
+            .map(|n| ast.get_node(n).print_line(ast, row_details))
+            .collect();
+        let details = format!("\nAst Error: {}\n{}\n", details, node_info.join("\n\n"));
         panic!(details);
         // Error { details }
     }

@@ -1,5 +1,5 @@
 use crate::ast::ast::InferredType;
-use crate::ast::{Ast, Error, Node, NodeID, NodeReferenceType, NodeType, NodeValue, Result};
+use crate::ast::{Ast, Node, NodeID, NodeReferenceType, NodeType, NodeValue, Result};
 use std::collections::VecDeque;
 
 pub fn infer_types(ast: &mut Ast) -> Result<()> {
@@ -143,10 +143,14 @@ impl<'a> Typer<'a> {
                     ConstDeclaration(.., proc_id) | VariableDeclaration(.., Some(proc_id)) => {
                         self.ast.get_node(*proc_id)
                     }
-                    _ => Err(Error::new(&format!(
-                        "Call must be referencing a variable declaration, {:?} found",
-                        var
-                    )))?,
+                    _ => Err(self.ast.error(
+                        &format!(
+                            "Call must be referencing a variable declaration, {:?} found",
+                            var
+                        ),
+                        "",
+                        vec![*var_id],
+                    ))?,
                 };
                 match &proc.body {
                     ProcedureDeclaration(_, return_type, _) => match return_type {
@@ -160,10 +164,14 @@ impl<'a> Typer<'a> {
                         Some(tp) => Some(tp.clone()),
                         None => None,
                     },
-                    _ => Err(Error::new(&format!(
-                        "It's currently only possible to call functions, tried to call {:?}",
-                        var
-                    )))?,
+                    _ => Err(self.ast.error(
+                        &format!(
+                            "It's currently only possible to call functions, tried to call {:?}",
+                            var
+                        ),
+                        "",
+                        vec![*var_id],
+                    ))?,
                 }
             }
             Empty | Break(..) | Return(..) | Block(..) | If(..) | Loop(..) | Comment(..) => {
@@ -191,13 +199,12 @@ impl<'a> Typer<'a> {
                 }
                 None => {
                     if self.since_last_changed > self.queue.len() {
-                        let nodes: Vec<&Node> =
-                            self.queue.iter().map(|id| self.ast.get_node(*id)).collect();
-                        // return Ok(());
-                        return Err(Error::new(&format!(
-                            "Failed to complete type check, unable to infer type of {:?}.\nOther nodes in the queue are: {:?}",
-                            self.ast.get_node(node_id), nodes
-                        )));
+                        let mut nodes: Vec<NodeID> = self.queue.iter().map(|id| *id).collect();
+                        nodes.push(node_id);
+                        return Err(self.ast.error(
+                            "Failed to complete type check, unable to infer the type of the following expressions",
+"unable to infer type"
+                        , nodes));
                     }
                     self.since_last_changed += 1;
                     self.queue.push_back(node_id);

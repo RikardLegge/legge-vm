@@ -50,7 +50,7 @@ fn run_code(code: String) {
     let start = SystemTime::now();
     let bytecode = bytecode::from_ast(&ast);
     timing.bytecode = SystemTime::now().duration_since(start).unwrap();
-    let _ = bytecode;
+    print!("{:?}", bytecode);
 
     // let encoded = serialize(&bytecode).unwrap();
     // let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();

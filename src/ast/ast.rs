@@ -1,3 +1,5 @@
+use super::Result;
+use crate::ast::Error;
 use crate::token::{ArithmeticOP, Token};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -11,13 +13,9 @@ impl NodeID {
     pub fn new(id: usize) -> Self {
         NodeID(id)
     }
-
-    pub fn index(self) -> usize {
-        self.0
-    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node {
     pub id: NodeID,
     pub tokens: Vec<Token>,
@@ -25,6 +23,76 @@ pub struct Node {
     pub body: NodeBody,
     pub parent_id: Option<NodeID>,
     pub referenced_by: HashSet<NodeReference>,
+}
+
+impl Node {
+    pub fn print_line(&self, ast: &Ast, msg: &str) -> String {
+        let mut tokens = Vec::new();
+        tokens.append(&mut self.tokens.clone());
+        for child_id in self.body.children() {
+            let child = ast.get_node(*child_id);
+            tokens.append(&mut child.tokens.clone());
+            tokens.append(&mut child.child_tokens(ast));
+        }
+        tokens.sort_by(|t1, t2| t1.start.cmp(&t2.start));
+        tokens.sort_by(|t1, t2| t1.line.cmp(&t2.line));
+        let mut line = tokens[0].line;
+        let mut end = 0;
+        let mut builder = vec![format!("{:>4} | ", line)];
+
+        let mut underline = Vec::new();
+        let mut do_underline = false;
+        for t in tokens.iter() {
+            let mut line_offset = t.line - line;
+            while line_offset > 0 {
+                if do_underline {
+                    builder.push(format!(
+                        "\n       {} {}",
+                        underline.join(""),
+                        msg.to_string()
+                    ));
+                }
+                builder.push(format!("\n{:>4} | ", t.line));
+                end = 0;
+                line_offset -= 1;
+                underline.clear();
+                do_underline = false;
+            }
+            let char_offset = t.start - end;
+            if char_offset > 0 {
+                builder.push(" ".repeat(char_offset));
+                underline.push(" ".repeat(char_offset));
+            }
+            let token_str = format!("{:?}", t.tp);
+            if self.tokens.contains(t) {
+                underline.push("^".repeat(token_str.len()));
+                do_underline = true;
+            } else {
+                underline.push(" ".repeat(token_str.len()));
+            }
+            builder.push(token_str);
+            line = t.line;
+            end = t.end;
+        }
+        if do_underline {
+            builder.push(format!(
+                "\n       {} {}",
+                underline.join(""),
+                msg.to_string()
+            ));
+        }
+        builder.join("")
+    }
+
+    pub fn child_tokens(&self, ast: &Ast) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        for child_id in self.body.children() {
+            let child = ast.get_node(*child_id);
+            tokens.append(&mut child.tokens.clone());
+            tokens.append(&mut child.child_tokens(ast))
+        }
+        tokens
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -83,13 +151,13 @@ pub enum NodeType {
     Fn(Vec<NodeType>, Box<NodeType>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NodeValue {
     Int(isize),
     String(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NodeBody {
     Empty,
     ConstValue(NodeValue),
@@ -124,7 +192,7 @@ impl NodeBody {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UnlinkedNodeBody {
     VariableAssignment(String, NodeID),
     VariableValue(String),
@@ -155,14 +223,29 @@ impl fmt::Debug for Ast {
 }
 
 impl Ast {
-    pub fn new(root: NodeID, nodes: Vec<Node>) -> Self {
-        Self { root, nodes }
+    pub fn error(&self, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Error {
+        Error::new(self, details, row_details, nodes)
+    }
+
+    pub fn new() -> Self {
+        Self {
+            root: NodeID(0),
+            nodes: Vec::new(),
+        }
+    }
+
+    pub fn add_root_node(&mut self) -> NodeID {
+        self.add_some_node(None)
     }
 
     pub fn add_node(&mut self, parent_id: NodeID) -> NodeID {
+        self.add_some_node(Some(parent_id))
+    }
+
+    fn add_some_node(&mut self, parent_id: Option<NodeID>) -> NodeID {
         let node = Node {
             id: NodeID::new(self.nodes.len()),
-            parent_id: Some(parent_id),
+            parent_id,
             referenced_by: Default::default(),
             tp: None,
             tokens: vec![],
@@ -212,50 +295,68 @@ impl Ast {
     }
 
     pub fn closest_fn(&self, node_id: NodeID) -> Option<NodeID> {
-        self.closest(node_id, |node| match node.body {
-            NodeBody::ProcedureDeclaration(..) => Some(node.id),
-            _ => None,
+        self.closest(node_id, |node| {
+            Ok(match node.body {
+                NodeBody::ProcedureDeclaration(..) => Some(node.id),
+                _ => None,
+            })
         })
+        .unwrap()
     }
 
     pub fn closest_loop(&self, node_id: NodeID) -> Option<NodeID> {
-        self.closest(node_id, |node| match node.body {
-            NodeBody::Loop(..) => Some(node.id),
-            _ => None,
+        self.closest(node_id, |node| {
+            Ok(match node.body {
+                NodeBody::Loop(..) => Some(node.id),
+                _ => None,
+            })
         })
+        .unwrap()
     }
 
-    pub fn closest_variable(&self, node_id: NodeID, target_ident: &str) -> Option<NodeID> {
+    pub fn closest_variable(&self, node_id: NodeID, target_ident: &str) -> Result<Option<NodeID>> {
         use NodeBody::*;
         self.closest(node_id, |node| {
+            let mut closest_id = None;
             for &child_id in node.body.children() {
                 let child = self.get_node(child_id);
                 match &child.body {
                     VariableDeclaration(ident, ..) | ConstDeclaration(ident, ..) => {
                         if ident == target_ident {
-                            return Some(child_id);
+                            if let Some(closest_id) = closest_id {
+                                return Err(self.error(
+                                    "Multiple variable declarations with same name encountered",
+                                    "Variable declaration",
+                                    vec![closest_id, child_id],
+                                ));
+                            }
+                            closest_id = Some(child_id);
                         }
                     }
                     _ => (),
                 }
             }
-            None
+            Ok(closest_id)
         })
     }
 
-    pub fn closest<F>(&self, mut node_id: NodeID, test: F) -> Option<NodeID>
+    pub fn closest<F>(&self, mut node_id: NodeID, test: F) -> Result<Option<NodeID>>
     where
-        F: Fn(&Node) -> Option<NodeID>,
+        F: Fn(&Node) -> Result<Option<NodeID>>,
     {
         loop {
             let node = self.get_node(node_id);
             let result = test(node);
-            if result.is_some() {
-                break result;
-            } else if let Some(id) = node.parent_id {
-                node_id = id;
+            if let Ok(option) = result {
+                if let Some(_) = option {
+                    break result;
+                } else if let Some(parent_id) = node.parent_id {
+                    node_id = parent_id;
+                } else {
+                    break Ok(None);
+                }
             } else {
-                break None;
+                break result;
             }
         }
     }

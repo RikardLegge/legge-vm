@@ -10,10 +10,10 @@ main :: fn (a,b: int,c: int) -> int {
         }
         i = i - 1;
     }
-    rec(10);
+    //rec(10);
 
     j :: fn() {
-        rec(10);
+        //rec(10);
     }
 
     return;
@@ -24,7 +24,7 @@ rec := fn (i: int) {
     if(i == 0) {
         return;
     }
-    rec(i - 1);
+    //rec(i - 1);
 }
 rec = 10;
 rec(500);

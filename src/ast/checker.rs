@@ -1,4 +1,4 @@
-use super::{Ast, Error, Node, Result};
+use super::{Ast, Node, Result};
 
 pub fn check_types(ast: &Ast) -> Result<()> {
     Checker::new(ast).check_all_types()
@@ -17,10 +17,11 @@ impl<'a> Checker<'a> {
         if let Some(_) = &node.tp {
             Ok(())
         } else {
-            Err(Error::new(&format!(
-                "Encountered a node without a type: {:?}",
-                node
-            )))?
+            Err(self.ast.error(
+                "Encountered a node without a type",
+                "expression with missing type",
+                vec![node.id],
+            ))
         }
     }
 

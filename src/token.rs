@@ -1,4 +1,6 @@
-use std::iter::{Enumerate, Peekable};
+use std::fmt;
+use std::fmt::Formatter;
+use std::iter::Peekable;
 use std::str::Chars;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -10,18 +12,19 @@ pub enum ArithmeticOP {
     Eq,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TokenID(usize);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     id: TokenID,
-    start: usize,
-    end: usize,
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
     pub tp: TokenType,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(PartialEq, Clone)]
 pub enum TokenType {
     Comment(String),
     LeftCurlyBrace,
@@ -42,17 +45,50 @@ pub enum TokenType {
     Op(ArithmeticOP),
 }
 
+impl fmt::Debug for TokenType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use TokenType::*;
+        match self {
+            Comment(str) => write!(f, "// {}", str),
+            LeftCurlyBrace => write!(f, "{{"),
+            RightCurlyBrace => write!(f, "}}"),
+            ListSeparator => write!(f, ","),
+            EndStatement => write!(f, ";"),
+            LeftBrace => write!(f, "("),
+            RightBrace => write!(f, ")"),
+            StaticDeclaration => write!(f, "::"),
+            VariableDeclaration => write!(f, ":="),
+            TypeDeclaration => write!(f, ":"),
+            Assignment => write!(f, "="),
+            ReturnTypes => write!(f, "->"),
+            Name(ident) => write!(f, "{}", ident),
+            KeyName(key) => write!(f, "{}", key),
+            String(str) => write!(f, "{}", str),
+            Int(num) => write!(f, "{}", num),
+            Op(op) => match op {
+                ArithmeticOP::Add => write!(f, "+"),
+                ArithmeticOP::Sub => write!(f, "-"),
+                ArithmeticOP::Mul => write!(f, "*"),
+                ArithmeticOP::Div => write!(f, "/"),
+                ArithmeticOP::Eq => write!(f, "=="),
+            },
+        }
+    }
+}
+
 pub struct Tokenizer<'a> {
-    iter: &'a mut Peekable<Enumerate<Chars<'a>>>,
+    iter: &'a mut Peekable<Chars<'a>>,
     last_id: usize,
     index: usize,
+    line_number: usize,
 }
 
 impl<'a> Tokenizer<'a> {
     pub fn parse(iter: Chars<'a>) -> Vec<Token> {
-        let mut iter = iter.enumerate().peekable();
+        let mut iter = iter.peekable();
         let mut parser = Tokenizer {
             iter: &mut iter,
+            line_number: 1,
             last_id: 0,
             index: 0,
         };
@@ -67,17 +103,23 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn peek(&mut self) -> Option<char> {
-        let (_, ch) = self.iter.peek()?;
+        let ch = self.iter.peek()?;
         Some(*ch)
     }
 
     fn peek_ignore_whitespace(&mut self) -> Option<char> {
         loop {
-            let (i, ch) = self.iter.peek()?;
+            let ch = self.iter.peek()?;
             match ch {
-                '\n' | ' ' | '\t' => self.next(),
+                '\n' => {
+                    self.next();
+                    self.line_number += 1;
+                    self.index = 0;
+                }
+                ' ' | '\t' => {
+                    self.next();
+                }
                 ch => {
-                    self.index = *i;
                     break Some(*ch);
                 }
             };
@@ -85,9 +127,8 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn next(&mut self) -> Option<char> {
-        let (i, c) = self.iter.next()?;
-        self.index = i;
-        Some(c)
+        self.index += 1;
+        Some(self.iter.next()?)
     }
 
     fn parse_global(&mut self) -> Option<Token> {
@@ -131,7 +172,13 @@ impl<'a> Tokenizer<'a> {
         let end = self.index;
         self.last_id += 1;
         let id = TokenID(self.last_id);
-        Some(Token { tp, id, start, end })
+        Some(Token {
+            tp,
+            id,
+            line: self.line_number,
+            start,
+            end,
+        })
     }
 
     fn parse_return_type_or_subtract(&mut self) -> Option<TokenType> {

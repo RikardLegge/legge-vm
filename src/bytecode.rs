@@ -1,39 +1,32 @@
 use crate::ast::{Ast, NodeBody, NodeID, NodeValue};
 use crate::token::ArithmeticOP;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
-use std::mem;
 use std::ops::AddAssign;
 
 pub fn from_ast(ast: &Ast) -> Bytecode {
     let root_id = ast.root();
     let mut bc = BytecodeGenerator::new(ast);
-    bc.evaluate(root_id);
-    bc.get_bytecode()
+    let root_scope = bc.evaluate(root_id);
+    bc.get_bytecode(root_scope)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Bytecode {
-    pub procedure_address: usize,
     pub code: Vec<Instruction>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Instruction {
     pub node_id: NodeID,
     pub op: OP,
 }
 
 pub type OPOffset = isize;
-pub type OPAddress = usize;
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum PanicReason {
-    Unlinked,
-    ProcIndex(usize),
-}
+#[derive(Debug, PartialEq, Serialize, Deserialize, Copy, Clone)]
+pub struct OPAddress(usize);
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum OP {
     AddI,
     SubI,
@@ -56,11 +49,11 @@ pub enum OP {
     PushStackFrame,
     PopStackFrame,
 
-    Call,
+    Jump,
 
     NoOp,
     Halt,
-    Panic(PanicReason),
+    Panic,
 }
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 enum LinkTarget {
@@ -80,7 +73,8 @@ enum LinkTargetPosition {
 pub enum Value {
     Unset,
     Int(isize),
-    FunctionPointer(OPAddress),
+    String(String),
+    InstructionAddress(OPAddress),
     RuntimePointer(String),
 }
 
@@ -159,100 +153,70 @@ impl StackUsage {
     }
 }
 
-struct Procedure {
-    node_id: NodeID,
-    size: Option<usize>,
-    scope: Option<Scope>,
-}
-
 struct BytecodeGenerator<'a> {
-    procedures: Vec<Procedure>,
+    procedures: Vec<Instruction>,
     ast: &'a Ast,
     scopes: Vec<Scope>,
     contexts: Vec<Context>,
-    deferred: VecDeque<NodeID>,
 }
 
 impl<'a> BytecodeGenerator<'a> {
     fn new(ast: &'a Ast) -> Self {
+        let panic = Instruction {
+            node_id: ast.root(),
+            op: OP::Panic,
+        };
         BytecodeGenerator {
             ast,
+            procedures: vec![panic.clone(), panic],
             scopes: Vec::new(),
-            deferred: VecDeque::new(),
-            procedures: Vec::new(),
             contexts: Vec::new(),
         }
     }
 
-    fn get_bytecode(mut self) -> Bytecode {
-        assert_eq!(1, self.scopes.len());
-        let scope = self.scopes.pop().unwrap();
-        let mut code = scope.instructions;
+    fn get_bytecode(self, mut scope: Scope) -> Bytecode {
+        let mut code = self.procedures;
+        let entrypoint = OPAddress(code.len());
+        // Patch entrypoint instructions
+        code[0] = Instruction {
+            node_id: scope.node_id,
+            op: OP::PushImmediate(Value::InstructionAddress(entrypoint)),
+        };
+        code[1] = Instruction {
+            node_id: scope.node_id,
+            op: OP::Jump,
+        };
+
+        code.append(&mut scope.instructions);
         code.push(Instruction {
-            node_id: self.ast.root(),
+            node_id: scope.node_id,
             op: OP::Halt,
         });
 
-        let procedure_address = code.len();
-        for mut proc in self.procedures.iter_mut() {
-            let scope = mem::replace(&mut proc.scope, None);
-            match scope {
-                Some(scope) => {
-                    let mut instructions = scope.instructions;
-                    let size = instructions.len();
-                    code.append(&mut instructions);
-                    proc.size = Some(size);
-                }
-                None => unreachable!(),
-            }
-        }
-
-        for mut inst in code.iter_mut() {
-            match &inst.op {
-                OP::Panic(panic) => match panic {
-                    PanicReason::ProcIndex(proc_index) => {
-                        let offset = self
-                            .procedures
-                            .iter()
-                            .take(*proc_index)
-                            .map(|p| p.size.unwrap())
-                            .sum();
-                        let value = Value::FunctionPointer(offset);
-                        inst.op = OP::PushImmediate(value);
-                    }
-                    _ => unreachable!(),
-                },
-                _ => (),
-            }
-        }
-
-        Bytecode {
-            code,
-            procedure_address,
-        }
+        Bytecode { code }
     }
 
-    fn evaluate(&mut self, root_id: NodeID) {
-        self.with_scope(root_id, ContextType::Block, |bc| {
+    fn evaluate(&mut self, root_id: NodeID) -> Scope {
+        let scope = self.with_scope(root_id, ContextType::Block, |bc| {
             let usage = bc.ev_node(root_id);
             assert_eq!(StackUsage::zero(), usage);
-
-            while let Some(node_id) = bc.deferred.pop_front() {
-                let node = bc.ast.get_node(node_id);
-                match &node.body {
-                    NodeBody::ProcedureDeclaration(args, returns, body_id) => {
-                        bc.ev_procedure_body(node_id, args, returns, *body_id)
-                    }
-                    _ => unimplemented!(),
-                }
-            }
         });
+        assert_eq!(0, self.scopes.len());
+        scope
     }
 
-    fn get_variable_offset(&self, var_id: NodeID) -> OPOffset {
+    fn get_variable_offset(&self, node_id: NodeID, var_id: NodeID) -> OPOffset {
         for context in self.contexts.iter().rev() {
             if let Some(var) = context.variables.iter().find(|var| var.node_id == var_id) {
                 return var.offset as isize;
+            }
+            if context.tp == ContextType::StackFrame {
+                panic!(
+                    "\nTried to find variable but hit stackframe boundry:\n{}\n",
+                    self.ast
+                        .get_node(node_id)
+                        .print_line(self.ast, "variable usage")
+                )
             }
         }
         panic!(
@@ -325,17 +289,10 @@ impl<'a> BytecodeGenerator<'a> {
         context.variables.push(var);
     }
 
-    fn add_proc(&mut self, node_id: NodeID) -> usize {
-        let scope = None;
-        let size = None;
-        let proc = Procedure {
-            node_id,
-            scope,
-            size,
-        };
+    fn add_proc(&mut self, mut scope: Scope) -> OPAddress {
         let proc_id = self.procedures.len();
-        self.procedures.push(proc);
-        proc_id
+        self.procedures.append(&mut scope.instructions);
+        OPAddress(proc_id)
     }
 
     fn add_op(&mut self, node_id: NodeID, op: OP) -> usize {
@@ -399,7 +356,9 @@ impl<'a> BytecodeGenerator<'a> {
             ConstDeclaration(_, _, expr) => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
             VariableAssignment(var, value) => self.ev_assignment(node_id, *var, *value),
-            ProcedureDeclaration(..) => self.ev_procedure(node_id),
+            ProcedureDeclaration(args, returns, body_id) => {
+                self.ev_procedure(node_id, args, returns, *body_id)
+            }
             Return(proc_id) => self.ev_return(node_id, *proc_id),
             If(condition, body) => self.ev_if(node_id, *condition, *body),
             Loop(body) => self.ev_loop(node_id, *body),
@@ -419,7 +378,7 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn ev_loop(&mut self, node_id: NodeID, body_id: NodeID) -> StackUsage {
         self.add_op(node_id, OP::Branch(1));
-        let break_inst = self.add_op(node_id, OP::Panic(PanicReason::Unlinked));
+        let break_inst = self.add_op(node_id, OP::Panic);
         let start = self.op_index();
         self.with_context(node_id, ContextType::Loop { break_inst }, |bc| {
             let body_node = bc.ast.get_node(body_id);
@@ -445,7 +404,7 @@ impl<'a> BytecodeGenerator<'a> {
         assert_eq!(usage.pushed - usage.popped, 1);
         self.add_op(node_id, OP::PushImmediate(Value::Unset));
         self.add_op(node_id, OP::CmpI);
-        let jump_index = self.add_op(node_id, OP::Panic(PanicReason::Unlinked));
+        let jump_index = self.add_op(node_id, OP::Panic);
 
         let start = self.op_index();
         let body_node = self.ast.get_node(body_id);
@@ -474,20 +433,13 @@ impl<'a> BytecodeGenerator<'a> {
         StackUsage::new(0, 0)
     }
 
-    fn ev_procedure(&mut self, node_id: NodeID) -> StackUsage {
-        let proc_index = self.add_proc(node_id);
-        self.add_op(node_id, OP::Panic(PanicReason::ProcIndex(proc_index)));
-        self.deferred.push_back(node_id);
-        StackUsage::new(0, 1)
-    }
-
-    fn ev_procedure_body(
+    fn ev_procedure(
         &mut self,
         node_id: NodeID,
         args: &[NodeID],
         _: &Option<String>,
         body_id: NodeID,
-    ) {
+    ) -> StackUsage {
         let scope = self.with_scope(node_id, ContextType::StackFrame, |bc| {
             for arg in args.iter() {
                 bc.add_var(*arg);
@@ -498,20 +450,22 @@ impl<'a> BytecodeGenerator<'a> {
                     let usage = bc.ev_block(body_id, children);
                     assert_eq!(StackUsage::zero(), usage);
                 }
-                _ => panic!("The body of a loop statement must be a Block"),
+                _ => panic!("The body of a procedure statement must be a Block"),
             };
         });
-        for proc in self.procedures.iter_mut() {
-            if proc.node_id == node_id {
-                proc.scope = Some(scope);
-                return;
-            }
-        }
-        unreachable!()
+        let proc_index = self.add_proc(scope);
+        self.add_op(
+            node_id,
+            OP::PushImmediate(Value::InstructionAddress(proc_index)),
+        );
+        StackUsage::new(0, 1)
     }
 
     fn ev_variable_value(&mut self, node_id: NodeID, val_id: NodeID) -> StackUsage {
-        self.add_op(node_id, OP::SLoad(self.get_variable_offset(val_id)));
+        self.add_op(
+            node_id,
+            OP::SLoad(self.get_variable_offset(node_id, val_id)),
+        );
         StackUsage::new(0, 1)
     }
 
@@ -529,7 +483,10 @@ impl<'a> BytecodeGenerator<'a> {
         };
         assert_eq!(usage.pushed, 1);
 
-        self.add_op(node_id, OP::SStore(self.get_variable_offset(var_id)));
+        self.add_op(
+            node_id,
+            OP::SStore(self.get_variable_offset(node_id, var_id)),
+        );
         StackUsage::new(usage.popped, 0)
     }
 
@@ -542,7 +499,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_call(&mut self, node_id: NodeID, proc_var_id: NodeID, args: &[NodeID]) -> StackUsage {
-        let pc_index = self.add_op(node_id, OP::Panic(PanicReason::Unlinked));
+        let pc_index = self.add_op(node_id, OP::Panic);
         self.add_op(node_id, OP::PushStackFrame);
         for arg in args {
             let usage = self.ev_expression(*arg);
@@ -550,8 +507,11 @@ impl<'a> BytecodeGenerator<'a> {
             assert_eq!(0, usage.popped);
         }
         self.add_op(node_id, OP::SetStackFrame(-(args.len() as isize)));
-        self.add_op(node_id, OP::SLoad(self.get_variable_offset(proc_var_id)));
-        self.add_op(node_id, OP::Call);
+        self.add_op(
+            node_id,
+            OP::SLoad(self.get_variable_offset(node_id, proc_var_id)),
+        );
+        self.add_op(node_id, OP::Jump);
         let offset = self.op_index() - pc_index - 1;
         self.set_op(pc_index, OP::PushPc(offset as isize));
 

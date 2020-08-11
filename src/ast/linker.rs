@@ -1,6 +1,6 @@
 use super::{Ast, NodeBody, NodeID, Result};
 use crate::ast::ast::{InferredType, NodeReference};
-use crate::ast::{Error, NodeReferenceType, NodeType, NodeTypeSource};
+use crate::ast::{NodeReferenceType, NodeType, NodeTypeSource};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
 use std::mem;
@@ -55,34 +55,37 @@ impl<'a, 'b> Linker<'a, 'b> {
             node.tp = Some(inf_tp);
             Ok(node.id)
         } else {
-            Err(Error::new(&format!(
-                "Variable missing from scope and runtime: {:?}",
-                ident
-            )))
+            Err(self.ast.error(
+                &format!("Variable missing from scope and runtime: {:?}", ident),
+                "",
+                vec![],
+            ))
         }
     }
 
-    fn closest_variable(&self, node_id: NodeID, ident: &str) -> Option<NodeID> {
+    fn closest_variable(&self, node_id: NodeID, ident: &str) -> Result<Option<NodeID>> {
         self.ast.closest_variable(node_id, ident)
     }
 
     fn closest_fn(&mut self, node_id: NodeID) -> Result {
         match self.ast.closest_fn(node_id) {
             Some(id) => Ok(id),
-            _ => Err(Error::new(&format!(
-                "No function ancestor found starting at {:?}",
-                node_id
-            ))),
+            _ => Err(self.ast.error(
+                "No function ancestor found starting at",
+                "statement outside of function",
+                vec![node_id],
+            )),
         }
     }
 
     fn closest_loop(&mut self, node_id: NodeID) -> Result {
         match self.ast.closest_loop(node_id) {
             Some(id) => Ok(id),
-            _ => Err(Error::new(&format!(
-                "No loop ancestor found starting at {:?}",
-                node_id
-            ))),
+            _ => Err(self.ast.error(
+                "No loop ancestor found starting at",
+                "statement outside of loop",
+                vec![node_id],
+            )),
         }
     }
 
@@ -99,7 +102,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                     let new_body = match body {
                         VariableAssignment(ident, expr_id) => {
                             let expr_id = *expr_id;
-                            let target_id = match self.closest_variable(node_id, &ident) {
+                            let target_id = match self.closest_variable(node_id, &ident)? {
                                 Some(node_id) => node_id,
                                 None => {
                                     let ident = ident.into();
@@ -110,7 +113,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                             NodeBody::VariableAssignment(target_id, expr_id)
                         }
                         VariableValue(ident) => {
-                            let target_id = match self.closest_variable(node_id, &ident) {
+                            let target_id = match self.closest_variable(node_id, &ident)? {
                                 Some(node_id) => node_id,
                                 None => {
                                     let ident = ident.into();
@@ -121,7 +124,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                             NodeBody::VariableValue(target_id)
                         }
                         Call(ident, _) => {
-                            let target_id = match self.closest_variable(node_id, &ident) {
+                            let target_id = match self.closest_variable(node_id, &ident)? {
                                 Some(node_id) => node_id,
                                 None => {
                                     let ident = ident.into();
