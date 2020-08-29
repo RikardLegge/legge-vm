@@ -17,7 +17,7 @@ pub struct RuntimeFunctionDefinition {
 pub fn get() -> Runtime {
     use crate::ast::NodeType::*;
     let functions = vec![
-        ff("log", vec![], Void, &log),
+        ff("log", vec![VarArg(Box::new(Any))], Void, &log),
         ff("assert", vec![Any, Any], Void, &assert),
     ];
     Runtime { functions }

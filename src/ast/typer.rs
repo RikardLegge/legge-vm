@@ -1,5 +1,7 @@
 use crate::ast::ast::InferredType;
+use crate::ast::ast::NodeTypeSource::Usage;
 use crate::ast::{Ast, Node, NodeID, NodeReferenceType, NodeType, NodeValue, Result};
+use crate::token::ArithmeticOP;
 use std::collections::VecDeque;
 
 pub fn infer_types(ast: &mut Ast) -> Result<()> {
@@ -84,11 +86,17 @@ impl<'a> Typer<'a> {
                 NodeValue::Int(..) => Some(InferredType::new(Int, Declared)),
                 NodeValue::String(..) => Some(InferredType::new(String, Declared)),
             },
-            Op(_, lhs, rhs) => {
-                let lhs = self.get_type(lhs);
-                let rhs = self.get_type(rhs);
-                let tp = self.try_coerce(lhs, rhs);
-                InferredType::maybe(tp, Value)
+            Op(op, lhs, rhs) => {
+                use ArithmeticOP::*;
+                match op {
+                    Eq => InferredType::maybe(Some(Bool), Declared),
+                    Add | Sub | Mul | Div => {
+                        let lhs = self.get_type(lhs);
+                        let rhs = self.get_type(rhs);
+                        let tp = self.try_coerce(lhs, rhs);
+                        InferredType::maybe(tp, Value)
+                    }
+                }
             }
             ProcedureDeclaration(args, returns, _) => {
                 let arg_types: Vec<Option<NodeType>> =
@@ -191,24 +199,24 @@ impl<'a> Typer<'a> {
                 }
             }
             let tp = self.infer_type(node)?;
-            match tp {
-                Some(_) => {
-                    let node = self.ast.get_node_mut(node_id);
-                    node.tp = tp;
+            if let Some(tp) = tp {
+                let source = tp.source;
+                let node = self.ast.get_node_mut(node_id);
+                node.tp = Some(tp);
+                // Do not mark values which are only used as type checked
+                if source != Usage {
                     self.since_last_changed = 0;
+                    continue;
                 }
-                None => {
-                    if self.since_last_changed > self.queue.len() {
-                        let mut nodes: Vec<NodeID> = self.queue.iter().map(|id| *id).collect();
-                        nodes.push(node_id);
-                        return Err(self.ast.error(
-                            "Failed to complete type check, unable to infer the type of the following expressions",
-"unable to infer type"
-                        , nodes));
-                    }
-                    self.since_last_changed += 1;
-                    self.queue.push_back(node_id);
-                }
+            }
+
+            self.since_last_changed += 1;
+            self.queue.push_back(node_id);
+            if self.since_last_changed > self.queue.len() + 1 {
+                return Err(self.ast.error(
+                    "Failed to complete type check, unable to infer the type of the following expressions",
+                    "unable to infer type"
+                    , self.queue.into()));
             }
         }
         Ok(())

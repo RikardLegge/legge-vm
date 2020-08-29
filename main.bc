@@ -1,34 +1,36 @@
 c :: 5;
 //d :: "test";
-
-main :: fn (a,b: int,c: int) -> int {
-    a = 1;
-    i := 1000000;
-    loop {
-        if(i == 0) {
-            break;
-        }
-        i = i - 1;
-    }
-    //rec(10);
-
-    j :: fn() {
-        //rec(10);
-    }
-
-    return;
-}
-main(1,2,c);
-
-rec := fn (i: int) {
-    if(i == 0) {
-        return;
-    }
-    //rec(i - 1);
-}
-rec = 10;
-rec(500);
-
-main = rec;
-
-log(main);
+//
+//main :: fn (a: int,b: int,c: int) -> int {
+//    a = 1;
+//    i := 1000000;
+//    loop {
+//        if(i == 0) {
+//            break;
+//        }
+//        i = i - 1;
+//    }
+//    //rec(10);
+//
+//    j :: fn() {
+//        //rec(10);
+//    }
+//
+//    return;
+//}
+//main(1,2,c);
+//
+//rec := fn (i: int) {
+//    if(i == 0) {
+//        return;
+//    }
+//    //rec(i - 1);
+//}
+//rec2 := fn (i: int) {}
+////rec = 10;
+//rec(500);
+//
+////rec = rec2;
+//
+//log(main, c, 2);
+//

@@ -1,6 +1,8 @@
 use crate::ast::{Ast, NodeBody, NodeID, NodeValue};
 use crate::token::ArithmeticOP;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::fmt::Formatter;
 use std::ops::AddAssign;
 
 pub fn from_ast(ast: &Ast) -> Bytecode {
@@ -10,15 +12,31 @@ pub fn from_ast(ast: &Ast) -> Bytecode {
     bc.get_bytecode(root_scope)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Bytecode {
     pub code: Vec<Instruction>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+impl fmt::Debug for Bytecode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for (i, inst) in self.code.iter().enumerate() {
+            write!(f, "{:<5}{:?}\n", i, inst)?;
+        }
+        write!(f, "\n")
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Instruction {
     pub node_id: NodeID,
     pub op: OP,
+}
+
+impl fmt::Debug for Instruction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{:<50}", format!("{:?}", self.op))?;
+        write!(f, "    {:?}", self.node_id)
+    }
 }
 
 pub type OPOffset = isize;

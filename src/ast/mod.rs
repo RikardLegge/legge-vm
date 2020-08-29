@@ -6,6 +6,7 @@ mod typer;
 
 use std::result;
 
+use crate::debug;
 use crate::runtime::Runtime;
 use crate::token::Token;
 pub use ast::{
@@ -32,13 +33,26 @@ impl Error {
     }
 }
 
-pub fn from_tokens<I>(iter: I, runtime: &Runtime) -> Result<Ast>
+pub fn from_tokens<I>(iter: I, runtime: &Runtime) -> Result<(Ast, debug::AstTiming)>
 where
     I: Iterator<Item = Token>,
 {
+    let mut timing = debug::AstTiming::default();
+    let start = debug::start_timer();
     let mut ast = parser::ast_from_tokens(iter)?;
+    timing.from_tokens = debug::stop_timer(start);
+
+    let start = debug::start_timer();
     linker::link(&mut ast, runtime)?;
+    timing.linker = debug::stop_timer(start);
+
+    let start = debug::start_timer();
     typer::infer_types(&mut ast)?;
+    timing.type_inference = debug::stop_timer(start);
+
+    let start = debug::start_timer();
     checker::check_types(&ast)?;
-    Ok(ast)
+    timing.type_checker = debug::stop_timer(start);
+
+    Ok((ast, timing))
 }

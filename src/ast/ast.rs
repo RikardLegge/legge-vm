@@ -133,7 +133,7 @@ impl InferredType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum NodeTypeSource {
     Usage,
     Value,
@@ -143,10 +143,12 @@ pub enum NodeTypeSource {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
+    VarArg(Box<NodeType>),
     Any,
     NotYetImplemented,
     Void,
     Int,
+    Bool,
     String,
     Fn(Vec<NodeType>, Box<NodeType>),
 }

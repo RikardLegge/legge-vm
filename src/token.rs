@@ -3,13 +3,26 @@ use std::fmt::Formatter;
 use std::iter::Peekable;
 use std::str::Chars;
 
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum ArithmeticOP {
     Add,
     Sub,
     Mul,
     Div,
     Eq,
+}
+
+impl fmt::Debug for ArithmeticOP {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use ArithmeticOP::*;
+        match self {
+            Add => write!(f, "+"),
+            Sub => write!(f, "-"),
+            Mul => write!(f, "*"),
+            Div => write!(f, "/"),
+            Eq => write!(f, "=="),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,13 +78,7 @@ impl fmt::Debug for TokenType {
             KeyName(key) => write!(f, "{}", key),
             String(str) => write!(f, "{}", str),
             Int(num) => write!(f, "{}", num),
-            Op(op) => match op {
-                ArithmeticOP::Add => write!(f, "+"),
-                ArithmeticOP::Sub => write!(f, "-"),
-                ArithmeticOP::Mul => write!(f, "*"),
-                ArithmeticOP::Div => write!(f, "/"),
-                ArithmeticOP::Eq => write!(f, "=="),
-            },
+            Op(op) => write!(f, "{:?}", op),
         }
     }
 }

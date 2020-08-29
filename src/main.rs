@@ -5,11 +5,11 @@
 // use interpreter::Interpreter;
 use std::fs::File;
 use std::io::prelude::*;
-use std::time::{Duration, SystemTime};
 use token::Tokenizer;
 
 mod ast;
 mod bytecode;
+mod debug;
 mod runtime;
 // mod interpreter;
 mod token;
@@ -25,32 +25,22 @@ fn main() {
     run_code(contents)
 }
 
-#[derive(Default, Debug)]
-struct Timing {
-    token: Duration,
-    ast: Duration,
-    bytecode: Duration,
-    interpreter: Duration,
-    instructions: usize,
-}
-
 fn run_code(code: String) {
-    let mut timing = Timing::default();
+    let mut timing = debug::Timing::default();
     let runtime = runtime::get();
 
-    let start = SystemTime::now();
+    let start = debug::start_timer();
     let tokens = Tokenizer::parse(code.chars());
-    timing.token = SystemTime::now().duration_since(start).unwrap();
+    timing.token = debug::stop_timer(start);
 
-    let start = SystemTime::now();
-    let ast = ast::from_tokens(tokens.into_iter(), &runtime).unwrap();
-    timing.ast = SystemTime::now().duration_since(start).unwrap();
-    print!("{:?}", ast);
+    let (ast, ast_timing) = ast::from_tokens(tokens.into_iter(), &runtime).unwrap();
+    timing.ast = ast_timing;
+    println!("{:?}", ast);
 
-    let start = SystemTime::now();
+    let start = debug::start_timer();
     let bytecode = bytecode::from_ast(&ast);
-    timing.bytecode = SystemTime::now().duration_since(start).unwrap();
-    print!("{:?}", bytecode);
+    timing.bytecode = debug::stop_timer(start);
+    println!("{:?}", bytecode);
 
     // let encoded = serialize(&bytecode).unwrap();
     // let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
