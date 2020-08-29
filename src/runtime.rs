@@ -1,7 +1,7 @@
 use crate::ast::NodeType;
 use crate::bytecode::Value;
 
-type RuntimeFunction = &'static dyn Fn(&mut Vec<Value>) -> Option<Value>;
+pub type RuntimeFunction = &'static dyn Fn(&mut Vec<Value>) -> Option<Value>;
 
 pub struct Runtime {
     pub functions: Vec<RuntimeFunctionDefinition>,

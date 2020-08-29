@@ -1,8 +1,7 @@
 // use crate::interpreter::InterpLogLevel;
 // use bincode::{deserialize, serialize};
 // use bytecode::Bytecode;
-// use foreign_functions::load_foreign_functions;
-// use interpreter::Interpreter;
+use interpreter::{InterpLogLevel, Interpreter};
 use std::fs::File;
 use std::io::prelude::*;
 use token::Tokenizer;
@@ -10,8 +9,8 @@ use token::Tokenizer;
 mod ast;
 mod bytecode;
 mod debug;
+mod interpreter;
 mod runtime;
-// mod interpreter;
 mod token;
 
 fn main() {
@@ -45,12 +44,12 @@ fn run_code(code: String) {
     // let encoded = serialize(&bytecode).unwrap();
     // let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
     //
-    // let mut interpreter = Interpreter::new(&functions);
-    // interpreter.set_log_level(InterpLogLevel::LogNone);
-    //
-    // let start = SystemTime::now();
-    // timing.instructions = interpreter.run(&bytecode);
-    // timing.interpreter = SystemTime::now().duration_since(start).unwrap();
+    let mut interpreter = Interpreter::new(&runtime);
+    interpreter.set_log_level(InterpLogLevel::LogEval);
+
+    let start = debug::start_timer();
+    timing.instructions = interpreter.run(&bytecode);
+    timing.interpreter = debug::stop_timer(start);
 
     dbg!(timing);
 }

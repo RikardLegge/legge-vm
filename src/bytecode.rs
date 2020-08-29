@@ -41,8 +41,7 @@ impl fmt::Debug for Instruction {
 
 pub type OPOffset = isize;
 
-#[derive(Debug, PartialEq, Serialize, Deserialize, Copy, Clone)]
-pub struct OPAddress(usize);
+pub type OPAddress = usize;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum OP {
@@ -93,6 +92,7 @@ pub enum Value {
     Int(isize),
     String(String),
     InstructionAddress(OPAddress),
+    InterpreterAddress(usize),
     RuntimePointer(String),
 }
 
@@ -194,7 +194,7 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn get_bytecode(self, mut scope: Scope) -> Bytecode {
         let mut code = self.procedures;
-        let entrypoint = OPAddress(code.len());
+        let entrypoint = code.len();
         // Patch entrypoint instructions
         code[0] = Instruction {
             node_id: scope.node_id,
@@ -310,7 +310,7 @@ impl<'a> BytecodeGenerator<'a> {
     fn add_proc(&mut self, mut scope: Scope) -> OPAddress {
         let proc_id = self.procedures.len();
         self.procedures.append(&mut scope.instructions);
-        OPAddress(proc_id)
+        proc_id
     }
 
     fn add_op(&mut self, node_id: NodeID, op: OP) -> usize {

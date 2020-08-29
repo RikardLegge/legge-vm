@@ -274,6 +274,10 @@ impl Ast {
         if children.peek().is_some() {
             write!(f, " [\n")?;
             for &child in children {
+                match &self.get_node(child).body {
+                    NodeBody::Comment(..) => continue,
+                    _ => (),
+                }
                 self.fmt_debug_node(f, level + 1, child)?;
                 write!(f, "\n")?;
             }

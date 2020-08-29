@@ -1,11 +1,11 @@
 use crate::bytecode::{Bytecode, Value, OP};
-use crate::foreign_functions::ForeignFunction;
+use crate::runtime::Runtime;
 
 pub struct Interpreter<'a> {
     pc: usize,
     frame_pointer: usize,
     pub stack: Vec<Value>,
-    pub foreign_functions: &'a [ForeignFunction],
+    pub runtime: &'a Runtime,
     pub log_level: InterpLogLevel,
     pub stack_max: usize,
 }
@@ -31,16 +31,15 @@ impl InterpError {
     }
 }
 
-pub type ForeignInterpResult = Result<Vec<i64>, InterpError>;
 pub type InterpResult<V = Value> = Result<V, InterpError>;
 
 impl<'a> Interpreter<'a> {
-    pub fn new(foreign_functions: &'a [ForeignFunction]) -> Self {
+    pub fn new(runtime: &'a Runtime) -> Self {
         Interpreter {
             frame_pointer: 0,
             pc: 0,
             stack: Vec::with_capacity(1000),
-            foreign_functions,
+            runtime,
             log_level: InterpLogLevel::LogDebug,
             stack_max: 10000,
         }
@@ -87,12 +86,12 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn pop_stack_runtime_pointer(&mut self) -> InterpResult<usize> {
+    pub fn pop_stack_addr(&mut self) -> InterpResult<usize> {
         match self.pop_stack() {
             Ok(val) => match val {
-                Value::RuntimePointer(int) => Ok(int),
+                Value::InstructionAddress(addr) => Ok(addr),
                 _ => Err(InterpError::new(&format!(
-                    "Stack value is not of type int {:?}",
+                    "Stack value is not of type address {:?}",
                     val
                 ))),
             },
@@ -121,15 +120,17 @@ impl<'a> Interpreter<'a> {
     }
 
     fn run_command(&mut self, cmd: &OP) -> InterpResult<()> {
-        use self::InterpLogLevel::*;
         use self::OP::*;
 
-        if self.log_level >= LogDebug {
+        if self.log_level >= InterpLogLevel::LogDebug {
             self.debug_log(
-                LogDebug,
+                InterpLogLevel::LogDebug,
                 &format!(
-                    "PC: {} \t SP: {} \t Stack: {:?} \t Inst: {:?}",
-                    self.pc, self.frame_pointer, self.stack, cmd
+                    "PC: {:>4} SP: {:>4} Inst: {:<40} Stack: {:?}",
+                    self.pc,
+                    self.frame_pointer,
+                    format!("{:?}", cmd),
+                    self.stack
                 ),
             );
         }
@@ -197,18 +198,10 @@ impl<'a> Interpreter<'a> {
             PopStack(count) => {
                 self.pop_stack_count(*count)?;
             }
-            CallForeign(addr) => {
-                let function = &self.foreign_functions[*addr as usize];
-                let function_call = &function.function;
-                let mut args = self.get_foreign_function_arguments()?;
-                if let Some(args_count) = function.arguments {
-                    assert_eq!(args_count, args.len())
-                }
-                let return_values = function_call(&mut args)?;
-                assert_eq!(function.returns, return_values.len())
-            }
             PushPc(offset) => {
-                self.push_stack(Value::RuntimePointer((offset + self.pc as isize) as usize))?;
+                self.push_stack(Value::InterpreterAddress(
+                    (offset + self.pc as isize) as usize,
+                ))?;
             }
             Branch(pc) => {
                 self.pc = (self.pc as isize + *pc) as usize;
@@ -220,20 +213,47 @@ impl<'a> Interpreter<'a> {
                 }
             }
             PopPc => {
-                self.pc = self.pop_stack_runtime_pointer()?;
+                self.pc = self.pop_stack_addr()?;
             }
-            Jump(addr) => {
-                self.pc = *addr;
+            Jump => {
+                let val = self.pop_stack()?;
+                match val {
+                    Value::RuntimePointer(ident) => {
+                        let rfd = {
+                            let mut function = None;
+                            for func in &self.runtime.functions {
+                                if func.name == ident {
+                                    function = Some(func)
+                                }
+                            }
+                            if let Some(function) = function {
+                                function
+                            } else {
+                                unimplemented!()
+                            }
+                        };
+
+                        let mut args = self.get_foreign_function_arguments()?;
+                        let _ = (rfd.function)(&mut args);
+                    }
+                    Value::Int(offset) => {
+                        self.pc = (self.pc as isize + offset) as usize;
+                    }
+                    Value::InstructionAddress(addr) => {
+                        self.pc = addr;
+                    }
+                    _ => unimplemented!(),
+                }
             }
             PushStackFrame => {
-                self.push_stack(Value::RuntimePointer(self.frame_pointer))?;
+                self.push_stack(Value::InterpreterAddress(self.frame_pointer))?;
             }
             SetStackFrame(offset) => {
                 let end = self.stack.len() as isize;
                 self.frame_pointer = (end + *offset) as usize;
             }
             PopStackFrame => {
-                self.frame_pointer = self.pop_stack_runtime_pointer()?;
+                self.frame_pointer = self.pop_stack_addr()?;
             }
             NoOp => {}
             _ => panic!("Instruction not implemented: {:?}", cmd),
@@ -258,10 +278,11 @@ impl<'a> Interpreter<'a> {
                 self.debug_log(
                     InterpLogLevel::LogDebug,
                     &format!(
-                        "PC: {} \t SP: {} \t Inst: {:?}",
+                        "PC: {:>4} SP: {:>4} Inst: {:<40} Stack: {:?}\n",
                         self.pc,
-                        self.stack.len(),
-                        cmd
+                        self.frame_pointer,
+                        format!("{:?}", cmd.op),
+                        self.stack
                     ),
                 );
                 break;

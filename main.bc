@@ -1,4 +1,4 @@
-c :: 5;
+log(5);
 //d :: "test";
 //
 //main :: fn (a: int,b: int,c: int) -> int {
