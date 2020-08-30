@@ -34,7 +34,6 @@ fn run_code(code: String) {
 
     let (ast, ast_timing) = ast::from_tokens(tokens.into_iter(), &runtime).unwrap();
     timing.ast = ast_timing;
-    println!("{:?}", ast);
 
     let start = debug::start_timer();
     let bytecode = bytecode::from_ast(&ast);

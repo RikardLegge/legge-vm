@@ -157,6 +157,7 @@ pub enum NodeType {
 pub enum NodeValue {
     Int(isize),
     String(String),
+    RuntimeFn(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -165,13 +166,13 @@ pub enum NodeBody {
     ConstValue(NodeValue),
     Op(ArithmeticOP, NodeID, NodeID),
     ProcedureDeclaration(Vec<NodeID>, Option<String>, NodeID),
-    RuntimeReference(String),
     PrefixOp(ArithmeticOP, NodeID),
     Block(Vec<NodeID>),
     If(NodeID, NodeID),
     Loop(NodeID),
     Expression(NodeID),
     Comment(String),
+    Import(String, NodeID),
 
     VariableDeclaration(String, Option<String>, Option<NodeID>),
     ConstDeclaration(String, Option<String>, NodeID),
@@ -201,6 +202,7 @@ pub enum UnlinkedNodeBody {
     Return,
     Break,
     Call(String, Vec<NodeID>),
+    ImportValue(String),
 }
 
 impl UnlinkedNodeBody {
@@ -327,7 +329,9 @@ impl Ast {
             for &child_id in node.body.children() {
                 let child = self.get_node(child_id);
                 match &child.body {
-                    VariableDeclaration(ident, ..) | ConstDeclaration(ident, ..) => {
+                    VariableDeclaration(ident, ..)
+                    | ConstDeclaration(ident, ..)
+                    | Import(ident, _) => {
                         if ident == target_ident {
                             if let Some(closest_id) = closest_id {
                                 return Err(self.error(
@@ -385,6 +389,11 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
                 1 => Some(rhs),
                 _ => None,
             },
+            If(cond, body) => match self.index {
+                0 => Some(cond),
+                1 => Some(body),
+                _ => None,
+            },
             ProcedureDeclaration(args, _, body) => {
                 if self.index < args.len() {
                     args.get(self.index)
@@ -394,40 +403,23 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
                     None
                 }
             }
-            PrefixOp(_, op) => match self.index {
-                0 => Some(op),
-                _ => None,
-            },
             Block(children) => children.get(self.index),
-            If(cond, body) => match self.index {
-                0 => Some(cond),
-                1 => Some(body),
-                _ => None,
-            },
-            Loop(body) => match self.index {
-                0 => Some(body),
-                _ => None,
-            },
-            Expression(expr) => match self.index {
-                0 => Some(expr),
-                _ => None,
-            },
+            Call(_, args) => args.get(self.index),
+
             VariableDeclaration(.., value) => match self.index {
                 0 => value.as_ref(),
                 _ => None,
             },
-            ConstDeclaration(.., value) => match self.index {
+            PrefixOp(_, value)
+            | Loop(value)
+            | Expression(value)
+            | ConstDeclaration(.., value)
+            | VariableAssignment(_, value)
+            | Import(_, value) => match self.index {
                 0 => Some(value),
                 _ => None,
             },
-            VariableAssignment(_, value) => match self.index {
-                0 => Some(value),
-                _ => None,
-            },
-            Call(_, args) => args.get(self.index),
-
-            VariableValue(_) | RuntimeReference(_) | Comment(_) | Return(_) | Break(_)
-            | ConstValue(_) | Empty => None,
+            VariableValue(_) | Comment(_) | Return(_) | Break(_) | ConstValue(_) | Empty => None,
             Unlinked(body) => {
                 if let None = self.unlinked {
                     self.unlinked = Some(body.children());
@@ -461,7 +453,7 @@ impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
                 _ => None,
             },
             Call(_, args) => args.get(self.index),
-            VariableValue(_) | Return | Break => None,
+            VariableValue(_) | Return | Break | ImportValue(_) => None,
         };
         if option.is_some() {
             self.index += 1;

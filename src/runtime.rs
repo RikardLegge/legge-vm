@@ -11,6 +11,7 @@ pub struct RuntimeFunctionDefinition {
     pub name: String,
     pub arguments: Vec<NodeType>,
     pub returns: NodeType,
+    pub tp: NodeType,
     pub function: RuntimeFunction,
 }
 
@@ -29,11 +30,13 @@ fn ff(
     returns: NodeType,
     function: RuntimeFunction,
 ) -> RuntimeFunctionDefinition {
+    let tp = NodeType::Fn(arguments.clone(), Box::new(returns.clone()));
     RuntimeFunctionDefinition {
         name: name.to_string(),
         arguments,
         returns,
         function,
+        tp,
     }
 }
 

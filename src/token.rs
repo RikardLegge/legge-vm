@@ -246,7 +246,7 @@ impl<'a> Tokenizer<'a> {
         }
 
         match name.as_ref() {
-            "fn" | "return" | "if" | "loop" | "break" | "continue" => {
+            "fn" | "return" | "if" | "loop" | "break" | "continue" | "import" => {
                 Some(TokenType::KeyName(name))
             }
             _ => Some(TokenType::Name(name)),

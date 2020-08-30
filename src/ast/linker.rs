@@ -1,6 +1,6 @@
 use super::{Ast, NodeBody, NodeID, Result};
-use crate::ast::ast::{InferredType, NodeReference};
-use crate::ast::{NodeReferenceType, NodeType, NodeTypeSource};
+use crate::ast::ast::NodeReference;
+use crate::ast::{NodeReferenceType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
 use std::mem;
@@ -33,35 +33,35 @@ impl<'a, 'b> Linker<'a, 'b> {
             .insert(node_ref);
     }
 
-    fn add_runtime_variable(&mut self, ident: String) -> Result {
-        if let Some(f) = self.runtime.functions.iter().find(|f| f.name == ident) {
-            let node_id = self.ast.add_node(self.ast.root());
-            let root_node = self.ast.get_node_mut(self.ast.root());
-            match &mut root_node.body {
-                NodeBody::Block(children) => children.push(node_id),
-                _ => unimplemented!(),
-            }
-            let tp = NodeType::Fn(f.arguments.clone(), Box::new(f.returns.clone()));
-            let inf_tp = InferredType::new(tp, NodeTypeSource::Declared);
-            let body_id = {
-                let node_id = self.ast.add_node(node_id);
-                let node = self.ast.get_node_mut(node_id);
-                node.body = NodeBody::RuntimeReference(ident.clone());
-                node.tp = Some(inf_tp.clone());
-                node.id
-            };
-            let node = self.ast.get_node_mut(node_id);
-            node.body = NodeBody::ConstDeclaration(ident, None, body_id);
-            node.tp = Some(inf_tp);
-            Ok(node.id)
-        } else {
-            Err(self.ast.error(
-                &format!("Variable missing from scope and runtime: {:?}", ident),
-                "",
-                vec![],
-            ))
-        }
-    }
+    // fn add_runtime_variable(&mut self, ident: String) -> Result {
+    //     if let Some(f) = self.runtime.functions.iter().find(|f| f.name == ident) {
+    //         let node_id = self.ast.add_node(self.ast.root());
+    //         let root_node = self.ast.get_node_mut(self.ast.root());
+    //         match &mut root_node.body {
+    //             NodeBody::Block(children) => children.push(node_id),
+    //             _ => unimplemented!(),
+    //         }
+    //         let tp = NodeType::Fn(f.arguments.clone(), Box::new(f.returns.clone()));
+    //         let inf_tp = InferredType::new(tp, NodeTypeSource::Declared);
+    //         let body_id = {
+    //             let node_id = self.ast.add_node(node_id);
+    //             let node = self.ast.get_node_mut(node_id);
+    //             node.body = NodeBody::RuntimeReference(ident.clone());
+    //             node.tp = Some(inf_tp.clone());
+    //             node.id
+    //         };
+    //         let node = self.ast.get_node_mut(node_id);
+    //         node.body = NodeBody::ConstDeclaration(ident, None, body_id);
+    //         node.tp = Some(inf_tp);
+    //         Ok(node.id)
+    //     } else {
+    //         Err(self.ast.error(
+    //             &format!("Variable missing from scope and runtime: {:?}", ident),
+    //             "",
+    //             vec![],
+    //         ))
+    //     }
+    // }
 
     fn closest_variable(&self, node_id: NodeID, ident: &str) -> Result<Option<NodeID>> {
         self.ast.closest_variable(node_id, ident)
@@ -105,8 +105,13 @@ impl<'a, 'b> Linker<'a, 'b> {
                             let target_id = match self.closest_variable(node_id, &ident)? {
                                 Some(node_id) => node_id,
                                 None => {
-                                    let ident = ident.into();
-                                    self.add_runtime_variable(ident)?
+                                    // let ident = ident.into();
+                                    // self.add_runtime_variable(ident)?
+                                    Err(self.ast.error(
+                                        "Failed to find variable to assign to",
+                                        "variable not found",
+                                        vec![node_id],
+                                    ))?
                                 }
                             };
                             self.add_ref(target_id, node_id, ReceiveValue);
@@ -116,8 +121,13 @@ impl<'a, 'b> Linker<'a, 'b> {
                             let target_id = match self.closest_variable(node_id, &ident)? {
                                 Some(node_id) => node_id,
                                 None => {
-                                    let ident = ident.into();
-                                    self.add_runtime_variable(ident)?
+                                    // let ident = ident.into();
+                                    // self.add_runtime_variable(ident)?
+                                    Err(self.ast.error(
+                                        "Failed to find variable",
+                                        "variable not found",
+                                        vec![node_id],
+                                    ))?
                                 }
                             };
                             self.add_ref(target_id, node_id, AssignValue);
@@ -127,8 +137,13 @@ impl<'a, 'b> Linker<'a, 'b> {
                             let target_id = match self.closest_variable(node_id, &ident)? {
                                 Some(node_id) => node_id,
                                 None => {
-                                    let ident = ident.into();
-                                    self.add_runtime_variable(ident)?
+                                    Err(self.ast.error(
+                                        "Failed to find variable to call",
+                                        "function not found",
+                                        vec![node_id],
+                                    ))?
+                                    // let ident = ident.into();
+                                    // self.add_runtime_variable(ident)?
                                 }
                             };
                             // We move the args out the old NodeBody so that we do not have to copy
@@ -140,6 +155,24 @@ impl<'a, 'b> Linker<'a, 'b> {
                             };
                             self.add_ref(target_id, node_id, GoTo);
                             NodeBody::Call(target_id, args)
+                        }
+                        ImportValue(ident) => {
+                            let mut body = None;
+                            for (i, func) in self.runtime.functions.iter().enumerate() {
+                                if &func.name == ident {
+                                    body = Some(NodeBody::ConstValue(NodeValue::RuntimeFn(i)));
+                                    break;
+                                }
+                            }
+                            if let Some(body) = body {
+                                body
+                            } else {
+                                Err(self.ast.error(
+                                    "Failed to find import",
+                                    "import value not found",
+                                    vec![node_id],
+                                ))?
+                            }
                         }
                         Return => {
                             let target_id = self.closest_fn(node_id)?;

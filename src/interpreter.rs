@@ -56,14 +56,13 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn pop_stack_count(&mut self, count: usize) -> InterpResult<()> {
-        if self.stack.len() >= count {
-            for _ in 0..count {
-                self.stack.pop();
+        for _ in 0..count {
+            let ok = self.stack.pop();
+            if ok.is_none() {
+                return Err(InterpError::new("Stack empty, can not pop"));
             }
-            Ok(())
-        } else {
-            Err(InterpError::new("Stack empty, can not pop"))
         }
+        Ok(())
     }
 
     pub fn pop_stack(&mut self) -> InterpResult {
@@ -74,28 +73,12 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn pop_stack_int(&mut self) -> InterpResult<isize> {
-        match self.pop_stack() {
-            Ok(val) => match val {
-                Value::Int(int) => Ok(int),
-                _ => Err(InterpError::new(&format!(
-                    "Stack value is not of type int {:?}",
-                    val
-                ))),
-            },
-            Err(e) => Err(e),
-        }
-    }
-
-    pub fn pop_stack_addr(&mut self) -> InterpResult<usize> {
-        match self.pop_stack() {
-            Ok(val) => match val {
-                Value::InstructionAddress(addr) => Ok(addr),
-                _ => Err(InterpError::new(&format!(
-                    "Stack value is not of type address {:?}",
-                    val
-                ))),
-            },
-            Err(e) => Err(e),
+        match self.pop_stack()? {
+            Value::Int(int) => Ok(int),
+            val => Err(InterpError::new(&format!(
+                "Stack value is not of type int {:?}",
+                val
+            ))),
         }
     }
 
@@ -119,9 +102,7 @@ impl<'a> Interpreter<'a> {
         Ok(arguments)
     }
 
-    fn run_command(&mut self, cmd: &OP) -> InterpResult<()> {
-        use self::OP::*;
-
+    fn next(&mut self, cmd: &OP) -> InterpResult<()> {
         if self.log_level >= InterpLogLevel::LogDebug {
             self.debug_log(
                 InterpLogLevel::LogDebug,
@@ -135,6 +116,11 @@ impl<'a> Interpreter<'a> {
             );
         }
         self.pc += 1;
+        self.run_command(cmd)
+    }
+
+    fn run_command(&mut self, cmd: &OP) -> InterpResult<()> {
+        use self::OP::*;
         match cmd {
             AddI => {
                 let n1 = self.pop_stack_int()?;
@@ -199,9 +185,7 @@ impl<'a> Interpreter<'a> {
                 self.pop_stack_count(*count)?;
             }
             PushPc(offset) => {
-                self.push_stack(Value::InterpreterAddress(
-                    (offset + self.pc as isize) as usize,
-                ))?;
+                self.push_stack(Value::PC((offset + self.pc as isize) as usize))?;
             }
             Branch(pc) => {
                 self.pc = (self.pc as isize + *pc) as usize;
@@ -212,49 +196,44 @@ impl<'a> Interpreter<'a> {
                     self.pc = (self.pc as isize + *pc) as usize;
                 }
             }
-            PopPc => {
-                self.pc = self.pop_stack_addr()?;
-            }
+            PopPc => match self.pop_stack()? {
+                Value::PC(addr) => {
+                    self.pc = addr;
+                }
+                _ => unreachable!(),
+            },
             Jump => {
                 let val = self.pop_stack()?;
                 match val {
-                    Value::RuntimePointer(ident) => {
-                        let rfd = {
-                            let mut function = None;
-                            for func in &self.runtime.functions {
-                                if func.name == ident {
-                                    function = Some(func)
-                                }
-                            }
-                            if let Some(function) = function {
-                                function
-                            } else {
-                                unimplemented!()
-                            }
-                        };
-
-                        let mut args = self.get_foreign_function_arguments()?;
-                        let _ = (rfd.function)(&mut args);
-                    }
-                    Value::Int(offset) => {
-                        self.pc = (self.pc as isize + offset) as usize;
-                    }
-                    Value::InstructionAddress(addr) => {
+                    Value::ProcAddress(addr) => {
                         self.pc = addr;
+                    }
+                    Value::RuntimeFn(id) => {
+                        let mut args = self.get_foreign_function_arguments()?;
+                        let func = self.runtime.functions[id].function;
+                        let returns = func(&mut args);
+                        self.run_command(&PopStackFrame)?;
+                        self.run_command(&PopPc)?;
+                        if let Some(returns) = returns {
+                            self.push_stack(returns)?;
+                        }
                     }
                     _ => unimplemented!(),
                 }
             }
             PushStackFrame => {
-                self.push_stack(Value::InterpreterAddress(self.frame_pointer))?;
+                self.push_stack(Value::StackFrame(self.frame_pointer))?;
             }
             SetStackFrame(offset) => {
                 let end = self.stack.len() as isize;
                 self.frame_pointer = (end + *offset) as usize;
             }
-            PopStackFrame => {
-                self.frame_pointer = self.pop_stack_addr()?;
-            }
+            PopStackFrame => match self.pop_stack()? {
+                Value::StackFrame(addr) => {
+                    self.frame_pointer = addr;
+                }
+                _ => unreachable!(),
+            },
             NoOp => {}
             _ => panic!("Instruction not implemented: {:?}", cmd),
         }
@@ -287,7 +266,7 @@ impl<'a> Interpreter<'a> {
                 );
                 break;
             }
-            if let Err(err) = self.run_command(&cmd.op) {
+            if let Err(err) = self.next(&cmd.op) {
                 panic!("{:?}", err);
             }
         }

@@ -23,17 +23,17 @@ impl<'a> Checker<'a> {
                 | Break(..)
                 | Comment(..)
                 | ConstValue(..)
-                | RuntimeReference(..)
                 | PrefixOp(..)
                 | Block(..)
                 | Loop(..)
                 | Expression(..)
                 | VariableValue(..)
-                | ProcedureDeclaration(..) => Ok(()),
+                | ProcedureDeclaration(..)
+                | Import(..) => Ok(()),
                 Op(op, lhs, rhs) => {
                     let lhs_tp = self.ast.get_node(*lhs).tp.as_ref().unwrap();
                     let rhs_tp = self.ast.get_node(*rhs).tp.as_ref().unwrap();
-                    return if lhs_tp.tp == rhs_tp.tp {
+                    if lhs_tp.tp == rhs_tp.tp {
                         Ok(())
                     } else {
                         Err(self.ast.error(
@@ -44,12 +44,12 @@ impl<'a> Checker<'a> {
                             "Both sides must have the same type",
                             vec![node.id, *lhs, *rhs],
                         ))
-                    };
+                    }
                 }
                 VariableAssignment(lhs, rhs) => {
                     let lhs_tp = self.ast.get_node(*lhs).tp.as_ref().unwrap();
                     let rhs_tp = self.ast.get_node(*rhs).tp.as_ref().unwrap();
-                    return if lhs_tp.tp == rhs_tp.tp {
+                    if lhs_tp.tp == rhs_tp.tp {
                         Ok(())
                     } else {
                         Err(self.ast.error(
@@ -58,7 +58,7 @@ impl<'a> Checker<'a> {
                             "Both sides of an assignment must have the same type",
                             vec![node.id],
                         ))
-                    };
+                    }
                 }
                 If(statement, _) => {
                     let statement_tp = self.ast.get_node(*statement).tp.as_ref().unwrap();

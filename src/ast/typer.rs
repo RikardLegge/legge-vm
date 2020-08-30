@@ -1,26 +1,29 @@
 use crate::ast::ast::InferredType;
 use crate::ast::ast::NodeTypeSource::Usage;
 use crate::ast::{Ast, Node, NodeID, NodeReferenceType, NodeType, NodeValue, Result};
+use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
 use std::collections::VecDeque;
 
-pub fn infer_types(ast: &mut Ast) -> Result<()> {
-    Typer::new(ast).infer_all_types()
+pub fn infer_types(ast: &mut Ast, runtime: &Runtime) -> Result<()> {
+    Typer::new(ast, runtime).infer_all_types()
 }
 
 pub struct Typer<'a> {
     queue: VecDeque<NodeID>,
     ast: &'a mut Ast,
+    runtime: &'a Runtime,
     since_last_changed: usize,
 }
 
 impl<'a> Typer<'a> {
-    pub fn new(ast: &'a mut Ast) -> Self {
+    pub fn new(ast: &'a mut Ast, runtime: &'a Runtime) -> Self {
         let queue = VecDeque::from(vec![ast.root()]);
         let since_last_changed = 0;
         Self {
             queue,
             ast,
+            runtime,
             since_last_changed,
         }
     }
@@ -38,6 +41,18 @@ impl<'a> Typer<'a> {
                 }
             }
             _ => None,
+        }
+    }
+
+    fn not_void(&self, node_id: &NodeID) -> Result<()> {
+        let tp = self.get_type(node_id);
+        match tp {
+            Some(NodeType::Void) => Err(self.ast.error(
+                "Did not expect void value here",
+                "value is void",
+                vec![*node_id],
+            )),
+            _ => Ok(()),
         }
     }
 
@@ -81,10 +96,14 @@ impl<'a> Typer<'a> {
         use super::NodeType::*;
         use super::NodeTypeSource::*;
         let tp = match &node.body {
-            RuntimeReference(..) => unimplemented!(),
             ConstValue(value) => match value {
                 NodeValue::Int(..) => Some(InferredType::new(Int, Declared)),
                 NodeValue::String(..) => Some(InferredType::new(String, Declared)),
+                NodeValue::RuntimeFn(id) => {
+                    let func = &self.runtime.functions[*id];
+                    let tp = func.tp.clone();
+                    Some(InferredType::new(tp, Declared))
+                }
             },
             Op(op, lhs, rhs) => {
                 use ArithmeticOP::*;
@@ -124,6 +143,7 @@ impl<'a> Typer<'a> {
                 if let Some(declared) = declared {
                     InferredType::maybe(self.get_type_from_string(&node.id, declared), Declared)
                 } else if let Some(value) = value {
+                    self.not_void(value)?;
                     InferredType::maybe(self.get_type(value), Value)
                 } else {
                     InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
@@ -133,15 +153,24 @@ impl<'a> Typer<'a> {
                 if let Some(declared) = declared {
                     InferredType::maybe(self.get_type_from_string(&node.id, declared), Declared)
                 } else if let Some(tp) = self.get_type(value) {
+                    self.not_void(value)?;
                     InferredType::maybe(Some(tp), Value)
                 } else {
                     InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
+                }
+            }
+            Import(_, value) => {
+                if let Some(tp) = self.get_type(value) {
+                    InferredType::maybe(Some(tp), Value)
+                } else {
+                    None
                 }
             }
             VariableAssignment(var, value) => {
                 if let Some(tp) = self.get_type(var) {
                     InferredType::maybe(Some(tp), Variable)
                 } else {
+                    self.not_void(value)?;
                     InferredType::maybe(self.get_type(value), Value)
                 }
             }
@@ -151,13 +180,14 @@ impl<'a> Typer<'a> {
                     ConstDeclaration(.., proc_id) | VariableDeclaration(.., Some(proc_id)) => {
                         self.ast.get_node(*proc_id)
                     }
+                    Import(..) => self.ast.get_node(*var_id),
                     _ => Err(self.ast.error(
                         &format!(
                             "Call must be referencing a variable declaration, {:?} found",
                             var
                         ),
                         "",
-                        vec![*var_id],
+                        vec![node.id],
                     ))?,
                 };
                 match &proc.body {
@@ -168,9 +198,12 @@ impl<'a> Typer<'a> {
                         ),
                         None => InferredType::maybe(Some(Void), Value),
                     },
-                    RuntimeReference(_) => match &proc.tp {
-                        Some(tp) => Some(tp.clone()),
-                        None => None,
+                    Import(_, func) => match &self.ast.get_node(*func).body {
+                        ConstValue(NodeValue::RuntimeFn(id)) => {
+                            let tp = self.runtime.functions[*id].returns.clone();
+                            InferredType::maybe(Some(tp), Value)
+                        }
+                        _ => unreachable!(),
                     },
                     _ => Err(self.ast.error(
                         &format!(
@@ -178,7 +211,7 @@ impl<'a> Typer<'a> {
                             var
                         ),
                         "",
-                        vec![*var_id],
+                        vec![node.id, *var_id],
                     ))?,
                 }
             }

@@ -1,4 +1,4 @@
-use crate::ast::{Ast, NodeBody, NodeID, NodeValue};
+use crate::ast::{Ast, NodeBody, NodeID, NodeType, NodeValue};
 use crate::token::ArithmeticOP;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -91,9 +91,11 @@ pub enum Value {
     Unset,
     Int(isize),
     String(String),
-    InstructionAddress(OPAddress),
-    InterpreterAddress(usize),
-    RuntimePointer(String),
+    ProcAddress(OPAddress),
+
+    PC(usize),
+    StackFrame(usize),
+    RuntimeFn(usize),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -198,7 +200,7 @@ impl<'a> BytecodeGenerator<'a> {
         // Patch entrypoint instructions
         code[0] = Instruction {
             node_id: scope.node_id,
-            op: OP::PushImmediate(Value::InstructionAddress(entrypoint)),
+            op: OP::PushImmediate(Value::ProcAddress(entrypoint)),
         };
         code[1] = Instruction {
             node_id: scope.node_id,
@@ -373,6 +375,7 @@ impl<'a> BytecodeGenerator<'a> {
             VariableValue(val) => self.ev_variable_value(node_id, *val),
             ConstDeclaration(_, _, expr) => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
+            Import(_, value) => self.ev_declaration(node_id, Some(*value)),
             VariableAssignment(var, value) => self.ev_assignment(node_id, *var, *value),
             ProcedureDeclaration(args, returns, body_id) => {
                 self.ev_procedure(node_id, args, returns, *body_id)
@@ -472,10 +475,7 @@ impl<'a> BytecodeGenerator<'a> {
             };
         });
         let proc_index = self.add_proc(scope);
-        self.add_op(
-            node_id,
-            OP::PushImmediate(Value::InstructionAddress(proc_index)),
-        );
+        self.add_op(node_id, OP::PushImmediate(Value::ProcAddress(proc_index)));
         StackUsage::new(0, 1)
     }
 
@@ -492,11 +492,9 @@ impl<'a> BytecodeGenerator<'a> {
         let usage = match &expr.body {
             NodeBody::ConstValue(value) => match value {
                 NodeValue::Int(val) => self.ev_const(expr_id, Value::Int(*val)),
-                _ => unimplemented!(),
+                NodeValue::String(val) => self.ev_const(expr_id, Value::String(val.clone())),
+                NodeValue::RuntimeFn(id) => self.ev_const(expr_id, Value::RuntimeFn(*id)),
             },
-            NodeBody::RuntimeReference(ident) => {
-                self.ev_const(expr_id, Value::RuntimePointer(ident.into()))
-            }
             _ => self.ev_node(expr_id),
         };
         assert_eq!(usage.pushed, 1);
@@ -524,16 +522,24 @@ impl<'a> BytecodeGenerator<'a> {
             assert_eq!(1, usage.pushed);
             assert_eq!(0, usage.popped);
         }
-        self.add_op(node_id, OP::SetStackFrame(-(args.len() as isize)));
         self.add_op(
             node_id,
             OP::SLoad(self.get_variable_offset(node_id, proc_var_id)),
         );
+        self.add_op(node_id, OP::SetStackFrame(-(args.len() as isize + 1)));
         self.add_op(node_id, OP::Jump);
         let offset = self.op_index() - pc_index - 1;
         self.set_op(pc_index, OP::PushPc(offset as isize));
 
-        StackUsage::new(0, 0)
+        let node = self.ast.get_node(proc_var_id);
+        let pushed = match &node.tp.as_ref().unwrap().tp {
+            NodeType::Fn(_, ret) => match &**ret {
+                NodeType::Void => 0,
+                _ => 1,
+            },
+            _ => unreachable!(),
+        };
+        StackUsage::new(0, pushed)
     }
 
     fn ev_block(&mut self, node_id: NodeID, children: &[NodeID]) -> StackUsage {
@@ -541,7 +547,9 @@ impl<'a> BytecodeGenerator<'a> {
             for child_id in children {
                 let node = bc.ast.get_node(*child_id);
                 match &node.body {
-                    NodeBody::VariableDeclaration(..) | NodeBody::ConstDeclaration(..) => {
+                    NodeBody::VariableDeclaration(..)
+                    | NodeBody::ConstDeclaration(..)
+                    | NodeBody::Import(..) => {
                         bc.add_var(*child_id);
                         bc.add_op(*child_id, OP::PushImmediate(Value::Unset));
                     }

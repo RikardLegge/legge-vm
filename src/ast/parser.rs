@@ -173,6 +173,7 @@ where
                 "if" => self.do_if(node),
                 "loop" => self.do_loop(node),
                 "break" => self.do_break(node),
+                "import" => self.do_import(node),
                 "continue" => unimplemented!(),
                 keyword => Err(self.ast.error(
                     &format!("Unknown keyword '{:?}'", keyword),
@@ -232,6 +233,20 @@ where
         self.ensure_next_token(&mut body_node, TokenType::LeftCurlyBrace)?;
         let body = self.do_block(body_node)?;
         Ok(self.add_node(node, NodeBody::If(expr, body)))
+    }
+
+    fn do_import(&mut self, mut node: PendingNode) -> Result {
+        match self.next_token(&mut node)? {
+            TokenType::Name(name) => {
+                let body_node = self.node(node.id);
+                let value = self.add_node(
+                    body_node,
+                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue(name.clone())),
+                );
+                Ok(self.add_node(node, NodeBody::Import(name, value)))
+            }
+            _ => unimplemented!(),
+        }
     }
 
     fn do_loop(&mut self, node: PendingNode) -> Result {

@@ -1,5 +1,7 @@
-log(5);
-//d :: "test";
+import log;
+//a :: 5;
+//b :: "test";
+log();
 //
 //main :: fn (a: int,b: int,c: int) -> int {
 //    a = 1;
