@@ -8,7 +8,7 @@ if (b == "test") {
 }
 
 log2 :: fn () -> int {
-  log(10);
+  //log(10);
   return 1;
 }
 

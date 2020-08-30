@@ -47,7 +47,16 @@ impl<'a> Checker<'a> {
                     }
                 }
                 VariableAssignment(lhs, rhs) => {
-                    let lhs_tp = self.ast.get_node(*lhs).tp.as_ref().unwrap();
+                    let lhs_node = self.ast.get_node(*lhs);
+                    match lhs_node.body {
+                        NodeBody::ConstDeclaration(..) => Err(self.ast.error(
+                            "Not allowed to assign to constant value",
+                            "Assignment to constant value",
+                            vec![node.id],
+                        ))?,
+                        _ => (),
+                    }
+                    let lhs_tp = lhs_node.tp.as_ref().unwrap();
                     let rhs_tp = self.ast.get_node(*rhs).tp.as_ref().unwrap();
                     if lhs_tp.tp == rhs_tp.tp {
                         Ok(())
