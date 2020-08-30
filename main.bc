@@ -1,7 +1,18 @@
 import log;
-//a :: 5;
-//b :: "test";
-log();
+a :: 5;
+//b :: 10;
+b :: "test";
+if (b == "test") {
+  c :: 1;
+  log(c);
+}
+
+log2 :: fn () -> int {
+  log(10);
+  return 1;
+}
+
+log2();
 //
 //main :: fn (a: int,b: int,c: int) -> int {
 //    a = 1;

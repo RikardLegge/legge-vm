@@ -174,10 +174,15 @@ impl<'a, 'b> Linker<'a, 'b> {
                                 ))?
                             }
                         }
-                        Return => {
+                        Return(_) => {
                             let target_id = self.closest_fn(node_id)?;
                             self.add_ref(target_id, node_id, GoTo);
-                            NodeBody::Return(target_id)
+                            let node = self.ast.get_node_mut(node_id);
+                            let ret = match &mut node.body {
+                                NodeBody::Unlinked(Return(ret)) => mem::replace(ret, None),
+                                _ => unreachable!(),
+                            };
+                            NodeBody::Return(target_id, ret)
                         }
                         Break => {
                             let target_id = self.closest_loop(node_id)?;

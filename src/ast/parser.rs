@@ -1,4 +1,5 @@
 use super::{Ast, NodeBody, NodeID, NodeValue, Result, UnlinkedNodeBody};
+use crate::token::TokenType::EndStatement;
 use crate::token::{ArithmeticOP, Token, TokenType};
 use std::iter::Peekable;
 
@@ -495,6 +496,12 @@ where
     }
 
     fn do_return(&mut self, node: PendingNode) -> Result {
-        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Return))
+        let ret = if self.peek_token()? != &EndStatement {
+            let ret_id = self.do_expression(node.id)?;
+            Some(ret_id)
+        } else {
+            None
+        };
+        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Return(ret)))
     }
 }

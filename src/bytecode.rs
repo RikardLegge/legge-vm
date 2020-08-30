@@ -41,15 +41,13 @@ impl fmt::Debug for Instruction {
 
 pub type OPOffset = isize;
 
-pub type OPAddress = usize;
-
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum OP {
     AddI,
     SubI,
     MulI,
     DivI,
-    CmpI,
+    Eq,
 
     SLoad(OPOffset),
     SStore(OPOffset),
@@ -86,12 +84,13 @@ enum LinkTargetPosition {
     End,
 }
 
-#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
 pub enum Value {
     Unset,
     Int(isize),
+    Bool(bool),
     String(String),
-    ProcAddress(OPAddress),
+    ProcAddress(usize),
 
     PC(usize),
     StackFrame(usize),
@@ -309,7 +308,7 @@ impl<'a> BytecodeGenerator<'a> {
         context.variables.push(var);
     }
 
-    fn add_proc(&mut self, mut scope: Scope) -> OPAddress {
+    fn add_proc(&mut self, mut scope: Scope) -> usize {
         let proc_id = self.procedures.len();
         self.procedures.append(&mut scope.instructions);
         proc_id
@@ -371,7 +370,7 @@ impl<'a> BytecodeGenerator<'a> {
             Op(op, expr1, expr2) => self.ev_operation(node_id, *op, *expr1, *expr2),
             PrefixOp(op, expr1) => self.ev_prefix_operation(node_id, *op, *expr1),
             Block(children) => self.ev_block(node_id, children),
-            Call(proc_id, args) => self.ev_call(node_id, *proc_id, args),
+            Call(proc_id, args) => self.ev_call(node_id, *proc_id, args, true),
             VariableValue(val) => self.ev_variable_value(node_id, *val),
             ConstDeclaration(_, _, expr) => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
@@ -380,7 +379,7 @@ impl<'a> BytecodeGenerator<'a> {
             ProcedureDeclaration(args, returns, body_id) => {
                 self.ev_procedure(node_id, args, returns, *body_id)
             }
-            Return(proc_id) => self.ev_return(node_id, *proc_id),
+            Return(proc_id, ret_id) => self.ev_return(node_id, *proc_id, *ret_id),
             If(condition, body) => self.ev_if(node_id, *condition, *body),
             Loop(body) => self.ev_loop(node_id, *body),
             Break(loop_id) => self.ev_break(node_id, *loop_id),
@@ -391,7 +390,9 @@ impl<'a> BytecodeGenerator<'a> {
 
     fn ev_break(&mut self, node_id: NodeID, loop_id: NodeID) -> StackUsage {
         let allocations = self.get_allocations(loop_id);
-        self.add_op(node_id, OP::PopStack(allocations));
+        if allocations > 0 {
+            self.add_op(node_id, OP::PopStack(allocations));
+        }
         let offset = self.get_loop_break_offset(loop_id);
         self.add_op(node_id, OP::Branch(offset));
         StackUsage::new(0, 0)
@@ -423,8 +424,8 @@ impl<'a> BytecodeGenerator<'a> {
     fn ev_if(&mut self, node_id: NodeID, condition_id: NodeID, body_id: NodeID) -> StackUsage {
         let usage = self.ev_expression(condition_id);
         assert_eq!(usage.pushed - usage.popped, 1);
-        self.add_op(node_id, OP::PushImmediate(Value::Unset));
-        self.add_op(node_id, OP::CmpI);
+        self.add_op(node_id, OP::PushImmediate(Value::Bool(false)));
+        self.add_op(node_id, OP::Eq);
         let jump_index = self.add_op(node_id, OP::Panic);
 
         let start = self.op_index();
@@ -446,9 +447,22 @@ impl<'a> BytecodeGenerator<'a> {
         }
     }
 
-    fn ev_return(&mut self, node_id: NodeID, proc_id: NodeID) -> StackUsage {
+    fn ev_return(
+        &mut self,
+        node_id: NodeID,
+        proc_id: NodeID,
+        ret_value: Option<NodeID>,
+    ) -> StackUsage {
         let allocations = self.get_allocations(proc_id);
-        self.add_op(node_id, OP::PopStack(allocations));
+        if allocations > 0 {
+            self.add_op(node_id, OP::PopStack(allocations));
+        }
+        if let Some(ret_id) = ret_value {
+            let usage = self.ev_expression(ret_id);
+            assert_eq!(usage.pushed, 1);
+            assert_eq!(usage.popped, 0);
+            self.add_op(ret_id, OP::SStore(-3));
+        }
         self.add_op(node_id, OP::PopStackFrame);
         self.add_op(node_id, OP::PopPc);
         StackUsage::new(0, 0)
@@ -490,11 +504,7 @@ impl<'a> BytecodeGenerator<'a> {
     fn ev_assignment(&mut self, node_id: NodeID, var_id: NodeID, expr_id: NodeID) -> StackUsage {
         let expr = self.ast.get_node(expr_id);
         let usage = match &expr.body {
-            NodeBody::ConstValue(value) => match value {
-                NodeValue::Int(val) => self.ev_const(expr_id, Value::Int(*val)),
-                NodeValue::String(val) => self.ev_const(expr_id, Value::String(val.clone())),
-                NodeValue::RuntimeFn(id) => self.ev_const(expr_id, Value::RuntimeFn(*id)),
-            },
+            NodeBody::ConstValue(value) => self.ev_const(expr_id, value),
             _ => self.ev_node(expr_id),
         };
         assert_eq!(usage.pushed, 1);
@@ -514,7 +524,26 @@ impl<'a> BytecodeGenerator<'a> {
         }
     }
 
-    fn ev_call(&mut self, node_id: NodeID, proc_var_id: NodeID, args: &[NodeID]) -> StackUsage {
+    fn ev_call(
+        &mut self,
+        node_id: NodeID,
+        proc_var_id: NodeID,
+        args: &[NodeID],
+        ignore_return: bool,
+    ) -> StackUsage {
+        let node = self.ast.get_node(proc_var_id);
+        let return_values = match &node.tp.as_ref().unwrap().tp {
+            NodeType::Fn(_, ret) => match &**ret {
+                NodeType::Void => 0,
+                _ => 1,
+            },
+            _ => unreachable!(),
+        };
+
+        if return_values > 0 {
+            self.add_op(node_id, OP::PushImmediate(Value::Unset));
+        }
+
         let pc_index = self.add_op(node_id, OP::Panic);
         self.add_op(node_id, OP::PushStackFrame);
         for arg in args {
@@ -531,15 +560,14 @@ impl<'a> BytecodeGenerator<'a> {
         let offset = self.op_index() - pc_index - 1;
         self.set_op(pc_index, OP::PushPc(offset as isize));
 
-        let node = self.ast.get_node(proc_var_id);
-        let pushed = match &node.tp.as_ref().unwrap().tp {
-            NodeType::Fn(_, ret) => match &**ret {
-                NodeType::Void => 0,
-                _ => 1,
-            },
-            _ => unreachable!(),
-        };
-        StackUsage::new(0, pushed)
+        if return_values == 0 {
+            StackUsage::zero()
+        } else if ignore_return {
+            self.add_op(node_id, OP::PopStack(return_values));
+            StackUsage::new(0, 0)
+        } else {
+            StackUsage::new(0, return_values)
+        }
     }
 
     fn ev_block(&mut self, node_id: NodeID, children: &[NodeID]) -> StackUsage {
@@ -567,7 +595,9 @@ impl<'a> BytecodeGenerator<'a> {
             assert_eq!(stack_usage.pushed, stack_usage.popped);
             bc.get_context().variables.len()
         });
-        self.add_op(node_id, OP::PopStack(allocations));
+        if allocations > 0 {
+            self.add_op(node_id, OP::PopStack(allocations));
+        }
         return StackUsage::new(0, 0);
     }
 
@@ -607,29 +637,30 @@ impl<'a> BytecodeGenerator<'a> {
             ArithmeticOP::Sub => self.add_op(node_id, OP::SubI),
             ArithmeticOP::Mul => self.add_op(node_id, OP::MulI),
             ArithmeticOP::Div => self.add_op(node_id, OP::DivI),
-            ArithmeticOP::Eq => self.add_op(node_id, OP::CmpI),
+            ArithmeticOP::Eq => self.add_op(node_id, OP::Eq),
         };
         StackUsage::new(usage1.popped + usage2.popped, 1)
     }
 
     fn ev_expression(&mut self, expr_id: NodeID) -> StackUsage {
         use crate::ast::NodeBody::*;
-        use crate::ast::NodeValue::*;
         let expr = self.ast.get_node(expr_id);
         match &expr.body {
             Op(op, expr1, expr2) => self.ev_operation(expr.id, *op, *expr1, *expr2),
-            ConstValue(value) => match value {
-                Int(primitive) => self.ev_const(expr.id, Value::Int(*primitive)),
-                _ => unimplemented!(),
-            },
+            ConstValue(value) => self.ev_const(expr_id, value),
             VariableValue(value) => self.ev_variable_value(expr.id, *value),
-            Call(proc_id, args) => self.ev_call(expr.id, *proc_id, args),
+            Call(proc_id, args) => self.ev_call(expr.id, *proc_id, args, false),
             _ => panic!("Unsupported node {:?} used as expression", expr),
         }
     }
 
-    fn ev_const(&mut self, node_id: NodeID, value: Value) -> StackUsage {
-        self.add_op(node_id, OP::PushImmediate(value.clone()));
+    fn ev_const(&mut self, node_id: NodeID, node_value: &NodeValue) -> StackUsage {
+        let value = match node_value {
+            NodeValue::Int(val) => Value::Int(*val),
+            NodeValue::String(val) => Value::String(val.clone()),
+            NodeValue::RuntimeFn(id) => Value::RuntimeFn(*id),
+        };
+        self.add_op(node_id, OP::PushImmediate(value));
         StackUsage::new(0, 1)
     }
 }

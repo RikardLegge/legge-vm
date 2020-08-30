@@ -150,17 +150,11 @@ impl<'a> Interpreter<'a> {
                 self.push_stack(Value::Int(kvote))?;
                 // self.debug_log(LogEval, &format!("{} / {} = {}", n2, n1, kvote));
             }
-            CmpI => {
-                let n1 = self.pop_stack_int()?;
-                let n2 = self.pop_stack_int()?;
-                let cmp = if n2 == n1 {
-                    0
-                } else if n2 < n1 {
-                    -1
-                } else {
-                    1
-                };
-                self.push_stack(Value::Int(cmp))?;
+            Eq => {
+                let n1 = self.pop_stack()?;
+                let n2 = self.pop_stack()?;
+                let eq = n1 == n2;
+                self.push_stack(Value::Bool(eq))?;
                 // self.debug_log(LogEval, &format!("({} == {}) = {}", n2, n1, eq));
             }
             SStore(offset) => {
@@ -190,12 +184,14 @@ impl<'a> Interpreter<'a> {
             Branch(pc) => {
                 self.pc = (self.pc as isize + *pc) as usize;
             }
-            BranchIf(pc) => {
-                let value = self.pop_stack_int()?;
-                if value != 0 {
-                    self.pc = (self.pc as isize + *pc) as usize;
+            BranchIf(pc) => match self.pop_stack()? {
+                Value::Bool(cond) => {
+                    if cond {
+                        self.pc = (self.pc as isize + *pc) as usize;
+                    }
                 }
-            }
+                _ => unreachable!(),
+            },
             PopPc => match self.pop_stack()? {
                 Value::PC(addr) => {
                     self.pc = addr;

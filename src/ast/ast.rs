@@ -178,7 +178,7 @@ pub enum NodeBody {
     ConstDeclaration(String, Option<String>, NodeID),
     VariableAssignment(NodeID, NodeID),
     VariableValue(NodeID),
-    Return(NodeID),
+    Return(NodeID, Option<NodeID>),
     Break(NodeID),
     Call(NodeID, Vec<NodeID>),
 
@@ -199,7 +199,7 @@ impl NodeBody {
 pub enum UnlinkedNodeBody {
     VariableAssignment(String, NodeID),
     VariableValue(String),
-    Return,
+    Return(Option<NodeID>),
     Break,
     Call(String, Vec<NodeID>),
     ImportValue(String),
@@ -406,7 +406,7 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
             Block(children) => children.get(self.index),
             Call(_, args) => args.get(self.index),
 
-            VariableDeclaration(.., value) => match self.index {
+            Return(_, value) | VariableDeclaration(.., value) => match self.index {
                 0 => value.as_ref(),
                 _ => None,
             },
@@ -419,7 +419,7 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
                 0 => Some(value),
                 _ => None,
             },
-            VariableValue(_) | Comment(_) | Return(_) | Break(_) | ConstValue(_) | Empty => None,
+            VariableValue(_) | Comment(_) | Break(_) | ConstValue(_) | Empty => None,
             Unlinked(body) => {
                 if let None = self.unlinked {
                     self.unlinked = Some(body.children());
@@ -452,8 +452,12 @@ impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
                 0 => Some(value),
                 _ => None,
             },
+            Return(value) => match self.index {
+                0 => value.as_ref(),
+                _ => None,
+            },
             Call(_, args) => args.get(self.index),
-            VariableValue(_) | Return | Break | ImportValue(_) => None,
+            VariableValue(_) | Break | ImportValue(_) => None,
         };
         if option.is_some() {
             self.index += 1;

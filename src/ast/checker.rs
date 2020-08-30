@@ -17,7 +17,7 @@ impl<'a> Checker<'a> {
     pub fn check_type(&self, node: &Node) -> Result<()> {
         use NodeBody::*;
         use NodeType::*;
-        if let Some(tp) = &node.tp {
+        if node.tp.is_some() {
             match &node.body {
                 Empty
                 | Break(..)
@@ -94,20 +94,42 @@ impl<'a> Checker<'a> {
                         unreachable!()
                     }
                 }
-                Return(func) => {
+                Return(func, ret_value) => {
                     let func = self.ast.get_node(*func).tp.as_ref().unwrap();
                     match &func.tp {
-                        Fn(_, func_ret) => {
-                            if **func_ret == tp.tp {
-                                Ok(())
-                            } else {
-                                Err(self.ast.error(
-                                    &format!("Return statement does not return the right type, {:?} expected, {:?} provided", func_ret, tp.tp),
-                                    "Wrong return type for function",
-                                    vec![node.id],
-                                ))
+                        Fn(_, func_ret) => match &**func_ret {
+                            NodeType::Void => {
+                                if let Some(ret_id) = ret_value {
+                                    Err(self.ast.error(
+                                        "Return value should be of type void.",
+                                        "Not allowed to return a value from here",
+                                        vec![*ret_id],
+                                    ))
+                                } else {
+                                    Ok(())
+                                }
                             }
-                        }
+                            _ => {
+                                if let Some(ret_id) = ret_value {
+                                    let ret = self.ast.get_node(*ret_id).tp.as_ref().unwrap();
+                                    if ret.tp == func.tp {
+                                        Err(self.ast.error(
+                                            &format!("Return statement does not return the right type, {:?} expected, {:?} provided", func.tp, ret.tp),
+                                            "Wrong return type for function",
+                                            vec![*ret_id],
+                                        ))
+                                    } else {
+                                        Ok(())
+                                    }
+                                } else {
+                                    Err(self.ast.error(
+                                        "Return value can not be of type void",
+                                        "A value must be provided when returning from here",
+                                        vec![node.id],
+                                    ))
+                                }
+                            }
+                        },
                         _ => unreachable!(),
                     }
                 }
