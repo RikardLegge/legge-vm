@@ -35,13 +35,14 @@ pub type InterpResult<V = Value> = Result<V, InterpError>;
 
 impl<'a> Interpreter<'a> {
     pub fn new(runtime: &'a Runtime) -> Self {
+        let stack_size = 20;
         Interpreter {
             frame_pointer: 0,
             pc: 0,
-            stack: Vec::with_capacity(1000),
+            stack: Vec::with_capacity(stack_size),
             runtime,
             log_level: InterpLogLevel::LogDebug,
-            stack_max: 10000,
+            stack_max: stack_size,
         }
     }
 
@@ -261,8 +262,7 @@ impl<'a> Interpreter<'a> {
                     ),
                 );
                 break;
-            }
-            if let Err(err) = self.next(&cmd.op) {
+            } else if let Err(err) = self.next(&cmd.op) {
                 panic!("{:?}", err);
             }
         }

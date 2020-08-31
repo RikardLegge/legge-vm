@@ -82,17 +82,12 @@ impl<'a> Typer<'a> {
         tp
     }
 
-    fn get_type_from_string(&self, _: &NodeID, tp: &str) -> Option<NodeType> {
-        match tp {
-            "int" => Some(NodeType::Int),
-            "void" => Some(NodeType::Void),
-            _ => None,
-        }
+    fn get_type_from_declaration(&self, _: &NodeID, tp: &NodeType) -> Result<Option<NodeType>> {
+        Ok(Some(tp.clone()))
     }
 
     pub fn infer_type(&self, node: &Node) -> Result<Option<InferredType>> {
         use super::NodeBody::*;
-        use super::NodeReferenceType::*;
         use super::NodeType::*;
         use super::NodeTypeSource::*;
         let tp = match &node.body {
@@ -124,7 +119,7 @@ impl<'a> Typer<'a> {
                 if args_inferred {
                     let arg_types = arg_types.into_iter().map(|tp| tp.unwrap()).collect();
                     let return_type = match returns {
-                        Some(name) => self.get_type_from_string(&node.id, name),
+                        Some(tp) => self.get_type_from_declaration(&node.id, tp)?,
                         None => Some(Void),
                     };
                     if let Some(return_type) = return_type {
@@ -141,22 +136,30 @@ impl<'a> Typer<'a> {
             Expression(_) => Some(InferredType::new(NotYetImplemented, Declared)),
             VariableDeclaration(_, declared, value) => {
                 if let Some(declared) = declared {
-                    InferredType::maybe(self.get_type_from_string(&node.id, declared), Declared)
+                    InferredType::maybe(
+                        self.get_type_from_declaration(&node.id, declared)?,
+                        Declared,
+                    )
                 } else if let Some(value) = value {
                     self.not_void(value)?;
                     InferredType::maybe(self.get_type(value), Value)
                 } else {
-                    InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
+                    // InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
+                    None
                 }
             }
             ConstDeclaration(_, declared, value) => {
                 if let Some(declared) = declared {
-                    InferredType::maybe(self.get_type_from_string(&node.id, declared), Declared)
+                    InferredType::maybe(
+                        self.get_type_from_declaration(&node.id, declared)?,
+                        Declared,
+                    )
                 } else if let Some(tp) = self.get_type(value) {
                     self.not_void(value)?;
                     InferredType::maybe(Some(tp), Value)
                 } else {
-                    InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
+                    // InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
+                    None
                 }
             }
             Import(_, value) => {
@@ -176,44 +179,60 @@ impl<'a> Typer<'a> {
             }
             Call(var_id, _) => {
                 let var = self.ast.get_node(*var_id);
-                let proc = match &var.body {
-                    ConstDeclaration(.., proc_id) | VariableDeclaration(.., Some(proc_id)) => {
-                        self.ast.get_node(*proc_id)
-                    }
-                    Import(..) => self.ast.get_node(*var_id),
-                    _ => Err(self.ast.error(
-                        &format!(
-                            "Call must be referencing a variable declaration, {:?} found",
-                            var
-                        ),
-                        "",
-                        vec![node.id],
-                    ))?,
-                };
-                match &proc.body {
-                    ProcedureDeclaration(_, return_type, _) => match return_type {
-                        Some(return_type) => InferredType::maybe(
-                            self.get_type_from_string(&proc.id, &return_type),
-                            Value,
-                        ),
-                        None => InferredType::maybe(Some(Void), Value),
-                    },
-                    Import(_, func) => match &self.ast.get_node(*func).body {
-                        ConstValue(NodeValue::RuntimeFn(id)) => {
-                            let tp = self.runtime.functions[*id].returns.clone();
-                            InferredType::maybe(Some(tp), Value)
+                if let Some(tp) = &var.tp {
+                    match &tp.tp {
+                        Fn(_, ret) => {
+                            InferredType::maybe(Some((**ret).clone()), Value)
                         }
-                        _ => unreachable!(),
-                    },
-                    _ => Err(self.ast.error(
-                        &format!(
-                            "It's currently only possible to call functions, tried to call {:?}",
-                            var
-                        ),
-                        "",
-                        vec![node.id, *var_id],
-                    ))?,
+                        _ => Err(self.ast.error(
+                            &format!(
+                                "It's currently only possible to call functions, tried to call {:?}",
+                                var
+                            ),
+                            "",
+                            vec![node.id, *var_id],
+                        ))?
+                    }
+                } else {
+                    None
                 }
+                // match var.body {
+                //     ConstDeclaration(.., proc_id)
+                //     | VariableDeclaration(.., Some(proc_id))
+                //     | Import(.., proc_id) => {
+                //         let proc = self.ast.get_node(*proc_id);
+                //         match &proc.body {
+                //             ProcedureDeclaration(_, return_type, _) => match return_type {
+                //                 Some(return_type) => InferredType::maybe(
+                //                     self.get_type_from_declaration(&proc.id, &return_type)?,
+                //                     Value,
+                //                 ),
+                //                 None => InferredType::maybe(Some(Void), Value),
+                //             },
+                //             ConstValue(NodeValue::RuntimeFn(id)) => {
+                //                 let tp = self.runtime.functions[*id].returns.clone();
+                //                 InferredType::maybe(Some(tp), Value)
+                //             }
+                //             _ => Err(self.ast.error(
+                //                 &format!(
+                //                     "It's currently only possible to call functions, tried to call {:?}",
+                //                     var
+                //                 ),
+                //                 "",
+                //                 vec![node.id, *var_id],
+                //             ))?,
+                //         }
+                //     }
+                //     VariableDeclaration(..) => None,
+                //     _ => Err(self.ast.error(
+                //         &format!(
+                //             "Call must be referencing a variable declaration, {:?} found",
+                //             var
+                //         ),
+                //         "",
+                //         vec![node.id],
+                //     ))?,
+                // };
             }
             Empty | Break(..) | Return(..) | Block(..) | If(..) | Loop(..) | Comment(..) => {
                 InferredType::maybe(Some(Void), Declared)

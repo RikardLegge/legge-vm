@@ -49,6 +49,7 @@ fn run_code(code: String) {
     let start = debug::start_timer();
     timing.instructions = interpreter.run(&bytecode);
     timing.interpreter = debug::stop_timer(start);
+    timing.avg_instruction = timing.interpreter / timing.instructions as u32;
 
     dbg!(timing);
 }

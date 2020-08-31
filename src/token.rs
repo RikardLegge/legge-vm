@@ -27,10 +27,15 @@ impl fmt::Debug for ArithmeticOP {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TokenID(usize);
+impl TokenID {
+    fn new(id: usize) -> Self {
+        Self(id)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
-    id: TokenID,
+    pub id: TokenID,
     pub line: usize,
     pub start: usize,
     pub end: usize,
@@ -178,13 +183,13 @@ impl<'a> Tokenizer<'a> {
         };
         let end = self.index;
         self.last_id += 1;
-        let id = TokenID(self.last_id);
+        let id = TokenID::new(self.last_id);
         Some(Token {
-            tp,
             id,
             line: self.line_number,
             start,
             end,
+            tp,
         })
     }
 

@@ -1,8 +1,8 @@
 use super::{Ast, Node, Result};
-use crate::ast::{NodeBody, NodeType};
+use crate::ast::{NodeBody, NodeID, NodeType};
 
 pub fn check_types(ast: &Ast) -> Result<()> {
-    Checker::new(ast).check_all_types()
+    Checker::new(ast).check_all_types(ast.root())
 }
 
 pub struct Checker<'a> {
@@ -143,36 +143,17 @@ impl<'a> Checker<'a> {
                     }
                 }
                 Call(func, args) => {
-                    let func = self.ast.get_node(*func).tp.as_ref().unwrap();
-                    match &func.tp {
-                        Fn(decl_args, _) => {
-                            let mut vararg = None;
-                            for (i, arg_id) in args.iter().enumerate() {
-                                let arg = &self.ast.get_node(*arg_id).tp.as_ref().unwrap().tp;
-                                let decl_arg = if let Some(arg) = vararg {
-                                    arg
-                                } else {
-                                    let arg = &decl_args[i];
-                                    match arg {
-                                        VarArg(tp) => {
-                                            vararg = Some(tp);
-                                            tp
-                                        }
-                                        _ => arg,
-                                    }
-                                };
-                                if decl_arg != arg && decl_arg != &Any {
-                                    return Err(self.ast.error(
-                                        &format!("Function call arguments are of the wrong type, {:?} expected, {:?} provided", decl_arg, arg),
-                                        "Wrong argument type",
-                                        vec![node.id],
-                                    ));
-                                }
-                            }
-                            Ok(())
-                        }
+                    let func = &self.ast.get_node(*func).tp.as_ref().unwrap().tp;
+                    let args = args
+                        .iter()
+                        .map(|id| self.ast.get_node(*id).tp.as_ref().unwrap().tp.clone())
+                        .collect();
+                    let call = &match func {
+                        Fn(_, ret) => Fn(args, ret.clone()),
                         _ => unreachable!(),
-                    }
+                    };
+                    self.fits(node, func, call)?;
+                    Ok(())
                 }
                 Unlinked(..) => Err(self.ast.error(
                     "Encountered a node with unlinked type",
@@ -189,13 +170,55 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub fn check_all_types(&self) -> Result<()> {
-        let root_id = self.ast.root();
+    fn fits(&self, node: &Node, hole: &NodeType, shape: &NodeType) -> Result<()> {
+        use NodeType::*;
+        let fits = match (&hole, &shape) {
+            (&Any, &shape) if shape != &Void => true,
+            (&Fn(hole_args, hole_ret), &Fn(shape_args, shape_ret)) => {
+                self.fits(node, &*hole_ret, &*shape_ret)?;
+                if hole_args.len() < shape_args.len() {
+                    false
+                } else {
+                    let mut vararg = None;
+                    for (i, shape_arg) in shape_args.iter().enumerate() {
+                        let hole_arg = if let Some(decl_arg) = vararg {
+                            decl_arg
+                        } else {
+                            match &hole_args[i] {
+                                VarArg(tp) => {
+                                    vararg = Some(tp);
+                                    tp
+                                }
+                                decl_arg => decl_arg,
+                            }
+                        };
+                        self.fits(node, hole_arg, shape_arg)?;
+                    }
+                    true
+                }
+            }
+            (&hole, &shape) if hole == shape => true,
+            _ => false,
+        };
+        if fits {
+            Ok(())
+        } else {
+            Err(self.ast.error(
+                &format!(
+                    "arguments are of the wrong type, {:?} expected, {:?} provided",
+                    hole, shape
+                ),
+                "Wrong argument type",
+                vec![node.id],
+            ))
+        }
+    }
+
+    pub fn check_all_types(&self, root_id: NodeID) -> Result<()> {
         let root = self.ast.get_node(root_id);
         self.check_type(root)?;
         for child_id in root.body.children() {
-            let child = self.ast.get_node(*child_id);
-            self.check_type(child)?;
+            self.check_all_types(*child_id)?;
         }
         Ok(())
     }

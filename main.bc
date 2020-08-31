@@ -1,18 +1,31 @@
-import log;
-a :: 5;
+//import log;
+//a :: 5;
 //b :: 10;
-b :: "test";
-if (b == "test") {
-  c :: 1;
-  log(c);
+//b :: "test";
+//if (b == "test") {
+//  c :: 1;
+//log(c);
+//}
+
+main :: fn (test: Fn(int)) {
+  i := 0;
+  //loop {
+  test(i);
+  //  if(i == 0) {
+  //      break;
+  //  }
+  //  i = i - 1;
+  //}
+  //return;
+  return;
 }
 
-log2 :: fn () -> int {
-  //log(10);
-  return 1;
+log2 :: fn(i: int) {
+  import log;
+  log(i);
 }
 
-log2();
+main(log2);
 //
 //main :: fn (a: int,b: int,c: int) -> int {
 //    a = 1;

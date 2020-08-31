@@ -36,6 +36,9 @@ impl Node {
         }
         tokens.sort_by(|t1, t2| t1.start.cmp(&t2.start));
         tokens.sort_by(|t1, t2| t1.line.cmp(&t2.line));
+        if tokens.len() == 0 {
+            return "generated (More details should be added in the future)".into();
+        }
         let mut line = tokens[0].line;
         let mut end = 0;
         let mut builder = vec![format!("{:>4} | ", line)];
@@ -165,7 +168,7 @@ pub enum NodeBody {
     Empty,
     ConstValue(NodeValue),
     Op(ArithmeticOP, NodeID, NodeID),
-    ProcedureDeclaration(Vec<NodeID>, Option<String>, NodeID),
+    ProcedureDeclaration(Vec<NodeID>, Option<NodeType>, NodeID),
     PrefixOp(ArithmeticOP, NodeID),
     Block(Vec<NodeID>),
     If(NodeID, NodeID),
@@ -174,8 +177,8 @@ pub enum NodeBody {
     Comment(String),
     Import(String, NodeID),
 
-    VariableDeclaration(String, Option<String>, Option<NodeID>),
-    ConstDeclaration(String, Option<String>, NodeID),
+    VariableDeclaration(String, Option<NodeType>, Option<NodeID>),
+    ConstDeclaration(String, Option<NodeType>, NodeID),
     VariableAssignment(NodeID, NodeID),
     VariableValue(NodeID),
     Return(NodeID, Option<NodeID>),

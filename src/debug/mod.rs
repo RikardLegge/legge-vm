@@ -7,6 +7,7 @@ pub struct Timing {
     pub bytecode: Duration,
     pub interpreter: Duration,
     pub instructions: usize,
+    pub avg_instruction: Duration,
 }
 
 pub fn start_timer() -> SystemTime {

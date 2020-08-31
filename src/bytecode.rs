@@ -376,9 +376,7 @@ impl<'a> BytecodeGenerator<'a> {
             VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
             Import(_, value) => self.ev_declaration(node_id, Some(*value)),
             VariableAssignment(var, value) => self.ev_assignment(node_id, *var, *value),
-            ProcedureDeclaration(args, returns, body_id) => {
-                self.ev_procedure(node_id, args, returns, *body_id)
-            }
+            ProcedureDeclaration(args, _, body_id) => self.ev_procedure(node_id, args, *body_id),
             Return(proc_id, ret_id) => self.ev_return(node_id, *proc_id, *ret_id),
             If(condition, body) => self.ev_if(node_id, *condition, *body),
             Loop(body) => self.ev_loop(node_id, *body),
@@ -414,7 +412,7 @@ impl<'a> BytecodeGenerator<'a> {
         });
         let end = self.op_index();
         self.add_op(node_id, OP::Branch(start as isize - end as isize - 1));
-        self.set_op(break_inst, OP::Branch(end as isize - start as isize));
+        self.set_op(break_inst, OP::Branch(end as isize - start as isize + 1));
         StackUsage {
             popped: 0,
             pushed: 0,
@@ -468,13 +466,7 @@ impl<'a> BytecodeGenerator<'a> {
         StackUsage::new(0, 0)
     }
 
-    fn ev_procedure(
-        &mut self,
-        node_id: NodeID,
-        args: &[NodeID],
-        _: &Option<String>,
-        body_id: NodeID,
-    ) -> StackUsage {
+    fn ev_procedure(&mut self, node_id: NodeID, args: &[NodeID], body_id: NodeID) -> StackUsage {
         let scope = self.with_scope(node_id, ContextType::StackFrame, |bc| {
             for arg in args.iter() {
                 bc.add_var(*arg);
