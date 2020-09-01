@@ -43,7 +43,7 @@ impl<'a> Interpreter<'a> {
             pc: Some(0),
             stack: Vec::with_capacity(stack_size),
             runtime,
-            log_level: InterpLogLevel::LogDebug,
+            log_level: InterpLogLevel::LogNone,
             stack_max: stack_size,
             executed_instructions: 0,
             interrupt: &|_| {},
@@ -112,9 +112,9 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn execute(&mut self, cmd: &OP) -> InterpResult<()> {
-        if self.log_level >= InterpLogLevel::LogDebug {
+        if self.log_level >= InterpLogLevel::LogEval {
             self.debug_log(
-                InterpLogLevel::LogDebug,
+                InterpLogLevel::LogEval,
                 &format!(
                     "PC: {:>4} SP: {:>4} Inst: {:<40} Stack: {:?}",
                     format!("{:?}", self.pc),
@@ -136,35 +136,30 @@ impl<'a> Interpreter<'a> {
                 let n2 = self.pop_stack_int()?;
                 let sum = n2 + n1;
                 self.push_stack(Value::Int(sum))?;
-                // self.debug_log(LogEval, &format!("{} + {} = {}", n2, n1, sum));
             }
             SubI => {
                 let n1 = self.pop_stack_int()?;
                 let n2 = self.pop_stack_int()?;
                 let diff = n2 - n1;
                 self.push_stack(Value::Int(diff))?;
-                // self.debug_log(LogEval, &format!("{} - {} = {}", n2, n1, diff));
             }
             MulI => {
                 let n1 = self.pop_stack_int()?;
                 let n2 = self.pop_stack_int()?;
                 let prod = n2 * n1;
                 self.push_stack(Value::Int(prod))?;
-                // self.debug_log(LogEval, &format!("{} * {} = {}", n2, n1, prod));
             }
             DivI => {
                 let n1 = self.pop_stack_int()?;
                 let n2 = self.pop_stack_int()?;
                 let kvote = n2 / n1;
                 self.push_stack(Value::Int(kvote))?;
-                // self.debug_log(LogEval, &format!("{} / {} = {}", n2, n1, kvote));
             }
             Eq => {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let eq = n1 == n2;
                 self.push_stack(Value::Bool(eq))?;
-                // self.debug_log(LogEval, &format!("({} == {}) = {}", n2, n1, eq));
             }
             SStore(offset) => {
                 let value = self.pop_stack()?;
@@ -176,7 +171,6 @@ impl<'a> Interpreter<'a> {
                 let index = self.frame_pointer as isize + *offset;
                 let value = self.stack[index as usize].clone();
                 self.push_stack(value)?;
-                // self.debug_log(LogEval, &format!("{}", value));
             }
             PushImmediate(primitive) => {
                 // We clone here since all immediate values are constants and
@@ -200,6 +194,16 @@ impl<'a> Interpreter<'a> {
             BranchIf(offset) => match self.pop_stack()? {
                 Value::Bool(cond) => {
                     if cond {
+                        let pc = self.pc.unwrap();
+                        let new_pc = (pc as isize + *offset) as usize;
+                        self.pc = Some(new_pc);
+                    }
+                }
+                _ => unreachable!(),
+            },
+            BranchIfNot(offset) => match self.pop_stack()? {
+                Value::Bool(cond) => {
+                    if !cond {
                         let pc = self.pc.unwrap();
                         let new_pc = (pc as isize + *offset) as usize;
                         self.pc = Some(new_pc);
@@ -260,7 +264,7 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
-    pub fn run(&mut self, code: &Bytecode) -> usize {
+    pub fn run(mut self, code: &Bytecode) -> usize {
         loop {
             if let Some(pc) = self.pc {
                 if let Some(cmd) = code.code.get(pc) {

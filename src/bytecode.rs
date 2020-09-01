@@ -1,6 +1,5 @@
 use crate::ast::{Ast, NodeBody, NodeID, NodeType, NodeValue};
 use crate::token::ArithmeticOP;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Formatter;
 use std::ops::AddAssign;
@@ -12,7 +11,6 @@ pub fn from_ast(ast: &Ast) -> Bytecode {
     bc.get_bytecode(root_scope)
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct Bytecode {
     pub code: Vec<Instruction>,
 }
@@ -26,7 +24,7 @@ impl fmt::Debug for Bytecode {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Clone)]
 pub struct Instruction {
     pub node_id: NodeID,
     pub op: OP,
@@ -41,7 +39,7 @@ impl fmt::Debug for Instruction {
 
 pub type OPOffset = isize;
 
-#[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum OP {
     AddI,
     SubI,
@@ -54,6 +52,7 @@ pub enum OP {
 
     Branch(OPOffset),
     BranchIf(OPOffset),
+    BranchIfNot(OPOffset),
     PushPc(OPOffset),
     PopPc,
 
@@ -70,21 +69,8 @@ pub enum OP {
     Halt,
     Panic,
 }
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-enum LinkTarget {
-    If(NodeID, LinkTargetPosition),
-    Loop(NodeID, LinkTargetPosition),
-    Return(NodeID, LinkTargetPosition),
-}
 
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-enum LinkTargetPosition {
-    Start,
-    Else,
-    End,
-}
-
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum Value {
     Unset,
     Int(isize),
@@ -422,8 +408,6 @@ impl<'a> BytecodeGenerator<'a> {
     fn ev_if(&mut self, node_id: NodeID, condition_id: NodeID, body_id: NodeID) -> StackUsage {
         let usage = self.ev_expression(condition_id);
         assert_eq!(usage.pushed - usage.popped, 1);
-        self.add_op(node_id, OP::PushImmediate(Value::Bool(false)));
-        self.add_op(node_id, OP::Eq);
         let jump_index = self.add_op(node_id, OP::Panic);
 
         let start = self.op_index();
@@ -437,7 +421,7 @@ impl<'a> BytecodeGenerator<'a> {
         }
         let end = self.op_index();
         let end_of_if = (end - start) as isize;
-        self.set_op(jump_index, OP::BranchIf(end_of_if));
+        self.set_op(jump_index, OP::BranchIfNot(end_of_if));
 
         StackUsage {
             popped: 0,
@@ -644,10 +628,12 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_const(&mut self, node_id: NodeID, node_value: &NodeValue) -> StackUsage {
+        use NodeValue::*;
         let value = match node_value {
-            NodeValue::Int(val) => Value::Int(*val),
-            NodeValue::String(val) => Value::String(val.clone()),
-            NodeValue::RuntimeFn(id) => Value::RuntimeFn(*id),
+            Int(val) => Value::Int(*val),
+            Bool(val) => Value::Bool(*val),
+            String(val) => Value::String(val.clone()),
+            RuntimeFn(id) => Value::RuntimeFn(*id),
         };
         self.add_op(node_id, OP::PushImmediate(value));
         StackUsage::new(0, 1)

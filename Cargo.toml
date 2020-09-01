@@ -1,9 +1,14 @@
 [package]
 edition = "2018"
-name = "legge-vm"
+name = "leggevm"
 version = "0.1.0"
 authors = ["Rikard Legge <rikard.legge@gmail.com>"]
 
 [dependencies]
-serde = { version = "1.0.98", features = ["derive"] }
-bincode = "1.1.4"
+
+[dev-dependencies]
+criterion = "0.3.3"
+
+[[bench]]
+name = "interp"
+harness = false

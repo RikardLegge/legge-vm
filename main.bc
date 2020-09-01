@@ -1,65 +1,7 @@
-//import log;
-//a :: 5;
-//b :: 10;
-//b :: "test";
-//if (b == "test") {
-//  c :: 1;
-//log(c);
-//}
-
-main :: fn (num: int, map: Fn(int) -> int ) {
-  import log;
-  import exit;
-  log(map(num));
-  exit(10);
-  //import log;
-  //i := num;
-  //loop {
-  //  //log(map(i));
-  //  if(i == 0) {
-  //      break;
-  //  }
-  //  i = i - 1;
-  //}
-  //return;
+i := 100000;
+loop {
+    if(i == 0) {
+        break;
+    }
+    i = i - 1;
 }
-
-square :: fn(i: int) -> int {
-  return i * i;
-}
-
-main(10, square);
-//
-//main :: fn (a: int,b: int,c: int) -> int {
-//    a = 1;
-//    i := 1000000;
-//    loop {
-//        if(i == 0) {
-//            break;
-//        }
-//        i = i - 1;
-//    }
-//    //rec(10);
-//
-//    j :: fn() {
-//        //rec(10);
-//    }
-//
-//    return;
-//}
-//main(1,2,c);
-//
-//rec := fn (i: int) {
-//    if(i == 0) {
-//        return;
-//    }
-//    //rec(i - 1);
-//}
-//rec2 := fn (i: int) {}
-////rec = 10;
-//rec(500);
-//
-////rec = rec2;
-//
-//log(main, c, 2);
-//

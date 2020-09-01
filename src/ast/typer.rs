@@ -1,6 +1,6 @@
 use crate::ast::ast::InferredType;
 use crate::ast::ast::NodeTypeSource::Usage;
-use crate::ast::{Ast, Node, NodeID, NodeReferenceType, NodeType, NodeValue, Result};
+use crate::ast::{Ast, Node, NodeID, NodeType, NodeValue, Result};
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
 use std::collections::VecDeque;
@@ -67,20 +67,20 @@ impl<'a> Typer<'a> {
         &self.ast.get_node(*node_id).tp
     }
 
-    fn get_ref_type(&self, node_id: &NodeID, ref_tp: NodeReferenceType) -> Option<NodeType> {
-        let mut tp = None;
-        let node = self.ast.get_node(*node_id);
-        for node_ref in &node.referenced_by {
-            if node_ref.ref_tp == ref_tp {
-                let ref_tp = self.get_type(&node_ref.id);
-                if ref_tp.is_some() {
-                    tp = ref_tp;
-                    break;
-                }
-            }
-        }
-        tp
-    }
+    // fn get_ref_type(&self, node_id: &NodeID, ref_tp: NodeReferenceType) -> Option<NodeType> {
+    //     let mut tp = None;
+    //     let node = self.ast.get_node(*node_id);
+    //     for node_ref in &node.referenced_by {
+    //         if node_ref.ref_tp == ref_tp {
+    //             let ref_tp = self.get_type(&node_ref.id);
+    //             if ref_tp.is_some() {
+    //                 tp = ref_tp;
+    //                 break;
+    //             }
+    //         }
+    //     }
+    //     tp
+    // }
 
     fn get_type_from_declaration(&self, _: &NodeID, tp: &NodeType) -> Result<Option<NodeType>> {
         Ok(Some(tp.clone()))
@@ -94,6 +94,7 @@ impl<'a> Typer<'a> {
             ConstValue(value) => match value {
                 NodeValue::Int(..) => Some(InferredType::new(Int, Declared)),
                 NodeValue::String(..) => Some(InferredType::new(String, Declared)),
+                NodeValue::Bool(..) => Some(InferredType::new(Bool, Declared)),
                 NodeValue::RuntimeFn(id) => {
                     let func = &self.runtime.functions[*id];
                     let tp = func.tp.clone();

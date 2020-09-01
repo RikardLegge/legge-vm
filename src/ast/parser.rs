@@ -178,7 +178,7 @@ where
                 "import" => self.do_import(node),
                 "continue" => unimplemented!(),
                 keyword => Err(self.ast.error(
-                    &format!("Unknown keyword '{:?}'", keyword),
+                    &format!("Invalid keyword here '{:?}'", keyword),
                     "",
                     vec![node.id],
                 )),
@@ -204,7 +204,16 @@ where
             Op(op) => self.do_operation(node, op, None)?,
             Name(symbol) => self.do_expression_symbol(node, &symbol)?,
             LeftCurlyBrace => self.do_block(node)?,
-            KeyName(key) if key == "fn" => self.do_procedure(node)?,
+            KeyName(key) => match key.as_ref() {
+                "fn" => self.do_procedure(node)?,
+                "true" => self.do_bool(node, true)?,
+                "false" => self.do_bool(node, false)?,
+                keyword => Err(self.ast.error(
+                    &format!("Invalid keyword here '{:?}'", keyword),
+                    "",
+                    vec![node.id],
+                ))?,
+            },
             LeftBrace => {
                 let expr_node = self.do_expression(node.id)?;
                 self.ensure_next_token(&node, RightBrace)?;
@@ -249,6 +258,10 @@ where
             }
             _ => unimplemented!(),
         }
+    }
+
+    fn do_bool(&mut self, node: PendingNode, value: bool) -> Result {
+        Ok(self.add_node(node, NodeBody::ConstValue(NodeValue::Bool(value))))
     }
 
     fn do_loop(&mut self, node: PendingNode) -> Result {

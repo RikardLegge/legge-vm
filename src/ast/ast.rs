@@ -1,12 +1,11 @@
 use super::Result;
 use crate::ast::Error;
 use crate::token::{ArithmeticOP, Token};
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct NodeID(usize);
 
 impl NodeID {
@@ -159,6 +158,7 @@ pub enum NodeType {
 #[derive(Debug, Clone)]
 pub enum NodeValue {
     Int(isize),
+    Bool(bool),
     String(String),
     RuntimeFn(usize),
 }
