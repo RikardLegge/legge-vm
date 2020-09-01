@@ -7,25 +7,26 @@
 //log(c);
 //}
 
-main :: fn (test: Fn(int)) {
-  i := 0;
+main :: fn (num: int, map: Fn(int) -> int ) {
+  import log;
+  log(map(num));
+  //import log;
+  //i := num;
   //loop {
-  test(i);
+  //  //log(map(i));
   //  if(i == 0) {
   //      break;
   //  }
   //  i = i - 1;
   //}
   //return;
-  return;
 }
 
-log2 :: fn(i: int) {
-  import log;
-  log(i);
+square :: fn(i: int) -> int {
+  return i * i;
 }
 
-main(log2);
+main(10, square);
 //
 //main :: fn (a: int,b: int,c: int) -> int {
 //    a = 1;

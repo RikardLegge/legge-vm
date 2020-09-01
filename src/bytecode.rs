@@ -451,15 +451,15 @@ impl<'a> BytecodeGenerator<'a> {
         proc_id: NodeID,
         ret_value: Option<NodeID>,
     ) -> StackUsage {
-        let allocations = self.get_allocations(proc_id);
-        if allocations > 0 {
-            self.add_op(node_id, OP::PopStack(allocations));
-        }
         if let Some(ret_id) = ret_value {
             let usage = self.ev_expression(ret_id);
             assert_eq!(usage.pushed, 1);
             assert_eq!(usage.popped, 0);
             self.add_op(ret_id, OP::SStore(-3));
+        }
+        let allocations = self.get_allocations(proc_id);
+        if allocations > 0 {
+            self.add_op(node_id, OP::PopStack(allocations));
         }
         self.add_op(node_id, OP::PopStackFrame);
         self.add_op(node_id, OP::PopPc);
@@ -494,11 +494,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_assignment(&mut self, node_id: NodeID, var_id: NodeID, expr_id: NodeID) -> StackUsage {
-        let expr = self.ast.get_node(expr_id);
-        let usage = match &expr.body {
-            NodeBody::ConstValue(value) => self.ev_const(expr_id, value),
-            _ => self.ev_node(expr_id),
-        };
+        let usage = self.ev_expression(expr_id);
         assert_eq!(usage.pushed, 1);
 
         self.add_op(
@@ -638,10 +634,11 @@ impl<'a> BytecodeGenerator<'a> {
         use crate::ast::NodeBody::*;
         let expr = self.ast.get_node(expr_id);
         match &expr.body {
-            Op(op, expr1, expr2) => self.ev_operation(expr.id, *op, *expr1, *expr2),
+            Op(op, expr1, expr2) => self.ev_operation(expr_id, *op, *expr1, *expr2),
             ConstValue(value) => self.ev_const(expr_id, value),
-            VariableValue(value) => self.ev_variable_value(expr.id, *value),
-            Call(proc_id, args) => self.ev_call(expr.id, *proc_id, args, false),
+            ProcedureDeclaration(args, _, body_id) => self.ev_procedure(expr_id, args, *body_id),
+            VariableValue(value) => self.ev_variable_value(expr_id, *value),
+            Call(proc_id, args) => self.ev_call(expr_id, *proc_id, args, false),
             _ => panic!("Unsupported node {:?} used as expression", expr),
         }
     }
