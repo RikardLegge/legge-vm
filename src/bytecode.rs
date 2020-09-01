@@ -66,7 +66,7 @@ pub enum OP {
 
     Jump,
 
-    NoOp,
+    Yield,
     Halt,
     Panic,
 }

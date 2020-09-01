@@ -2,12 +2,14 @@ use crate::bytecode::{Bytecode, Value, OP};
 use crate::runtime::Runtime;
 
 pub struct Interpreter<'a> {
-    pc: usize,
+    pc: Option<usize>,
     frame_pointer: usize,
     pub stack: Vec<Value>,
     pub runtime: &'a Runtime,
     pub log_level: InterpLogLevel,
     pub stack_max: usize,
+    pub executed_instructions: usize,
+    pub interrupt: &'a dyn Fn(Value),
 }
 
 #[allow(dead_code)]
@@ -38,11 +40,13 @@ impl<'a> Interpreter<'a> {
         let stack_size = 20;
         Interpreter {
             frame_pointer: 0,
-            pc: 0,
+            pc: Some(0),
             stack: Vec::with_capacity(stack_size),
             runtime,
             log_level: InterpLogLevel::LogDebug,
             stack_max: stack_size,
+            executed_instructions: 0,
+            interrupt: &|_| {},
         }
     }
 
@@ -103,20 +107,24 @@ impl<'a> Interpreter<'a> {
         Ok(arguments)
     }
 
-    fn next(&mut self, cmd: &OP) -> InterpResult<()> {
+    pub fn exit(&mut self) {
+        self.pc = None;
+    }
+
+    pub fn execute(&mut self, cmd: &OP) -> InterpResult<()> {
         if self.log_level >= InterpLogLevel::LogDebug {
             self.debug_log(
                 InterpLogLevel::LogDebug,
                 &format!(
                     "PC: {:>4} SP: {:>4} Inst: {:<40} Stack: {:?}",
-                    self.pc,
+                    format!("{:?}", self.pc),
                     self.frame_pointer,
                     format!("{:?}", cmd),
                     self.stack
                 ),
             );
         }
-        self.pc += 1;
+        self.executed_instructions += 1;
         self.run_command(cmd)
     }
 
@@ -180,22 +188,28 @@ impl<'a> Interpreter<'a> {
                 self.pop_stack_count(*count)?;
             }
             PushPc(offset) => {
-                self.push_stack(Value::PC((offset + self.pc as isize) as usize))?;
+                let pc = self.pc.unwrap();
+                let new_pc = (pc as isize + *offset) as usize;
+                self.push_stack(Value::PC(new_pc))?;
             }
-            Branch(pc) => {
-                self.pc = (self.pc as isize + *pc) as usize;
+            Branch(offset) => {
+                let pc = self.pc.unwrap();
+                let new_pc = (pc as isize + *offset) as usize;
+                self.pc = Some(new_pc);
             }
-            BranchIf(pc) => match self.pop_stack()? {
+            BranchIf(offset) => match self.pop_stack()? {
                 Value::Bool(cond) => {
                     if cond {
-                        self.pc = (self.pc as isize + *pc) as usize;
+                        let pc = self.pc.unwrap();
+                        let new_pc = (pc as isize + *offset) as usize;
+                        self.pc = Some(new_pc);
                     }
                 }
                 _ => unreachable!(),
             },
             PopPc => match self.pop_stack()? {
                 Value::PC(addr) => {
-                    self.pc = addr;
+                    self.pc = Some(addr);
                 }
                 _ => unreachable!(),
             },
@@ -203,16 +217,19 @@ impl<'a> Interpreter<'a> {
                 let val = self.pop_stack()?;
                 match val {
                     Value::ProcAddress(addr) => {
-                        self.pc = addr;
+                        self.pc = Some(addr);
                     }
                     Value::RuntimeFn(id) => {
                         let mut args = self.get_foreign_function_arguments()?;
                         let func = self.runtime.functions[id].function;
-                        let returns = func(&mut args);
-                        self.run_command(&PopStackFrame)?;
-                        self.run_command(&PopPc)?;
-                        if let Some(returns) = returns {
-                            self.push_stack(returns)?;
+                        let returns = func(self, &mut args)?;
+                        // Just make sure that the function has not se the pc to None
+                        if self.pc != None {
+                            self.run_command(&PopStackFrame)?;
+                            self.run_command(&PopPc)?;
+                            if let Some(returns) = returns {
+                                self.push_stack(returns)?;
+                            }
                         }
                     }
                     _ => unimplemented!(),
@@ -231,45 +248,37 @@ impl<'a> Interpreter<'a> {
                 }
                 _ => unreachable!(),
             },
-            NoOp => {}
+            Halt => {
+                self.exit();
+            }
+            Yield => {
+                let value = self.pop_stack()?;
+                (self.interrupt)(value);
+            }
             _ => panic!("Instruction not implemented: {:?}", cmd),
         }
         Ok(())
     }
 
-    fn setup(&mut self) {
-        self.pc = 0;
-        self.frame_pointer = 0;
-        self.stack.clear();
-    }
-
     pub fn run(&mut self, code: &Bytecode) -> usize {
-        self.setup();
-
-        let mut instructions = 0;
-
-        while let Some(cmd) = code.code.get(self.pc) {
-            instructions += 1;
-            if cmd.op == OP::Halt {
-                self.debug_log(
-                    InterpLogLevel::LogDebug,
-                    &format!(
-                        "PC: {:>4} SP: {:>4} Inst: {:<40} Stack: {:?}\n",
-                        self.pc,
-                        self.frame_pointer,
-                        format!("{:?}", cmd.op),
-                        self.stack
-                    ),
-                );
+        loop {
+            if let Some(pc) = self.pc {
+                if let Some(cmd) = code.code.get(pc) {
+                    self.pc = Some(pc + 1);
+                    if let Err(err) = self.execute(&cmd.op) {
+                        panic!("{:?}", err);
+                    }
+                } else {
+                    panic!("Invalid PC");
+                }
+            } else {
                 break;
-            } else if let Err(err) = self.next(&cmd.op) {
-                panic!("{:?}", err);
             }
         }
         if self.stack.len() > 0 {
             dbg!(&self.stack);
             panic!("Interpreter stopped without an empty stack")
         }
-        instructions
+        self.executed_instructions
     }
 }

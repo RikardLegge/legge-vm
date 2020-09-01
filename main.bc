@@ -9,7 +9,9 @@
 
 main :: fn (num: int, map: Fn(int) -> int ) {
   import log;
+  import exit;
   log(map(num));
+  exit(10);
   //import log;
   //i := num;
   //loop {

@@ -50,8 +50,6 @@ where
     typer::infer_types(&mut ast, runtime)?;
     timing.type_inference = debug::stop_timer(start);
 
-    println!("{:?}", ast);
-
     let start = debug::start_timer();
     checker::check_types(&ast)?;
     timing.type_checker = debug::stop_timer(start);

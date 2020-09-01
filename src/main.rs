@@ -1,6 +1,7 @@
 // use crate::interpreter::InterpLogLevel;
 // use bincode::{deserialize, serialize};
 // use bytecode::Bytecode;
+use crate::bytecode::Value;
 use interpreter::{InterpLogLevel, Interpreter};
 use std::fs::File;
 use std::io::prelude::*;
@@ -21,10 +22,13 @@ fn main() {
     f.read_to_string(&mut contents)
         .expect("something went wrong reading the file");
 
-    run_code(contents)
+    run_code(contents, true, &|v| println!("{:?}", v))
 }
 
-fn run_code(code: String) {
+fn run_code<F>(code: String, logging: bool, interrupt: F)
+where
+    F: Fn(Value),
+{
     let mut timing = debug::Timing::default();
     let runtime = runtime::get();
 
@@ -33,334 +37,90 @@ fn run_code(code: String) {
     timing.token = debug::stop_timer(start);
 
     let (ast, ast_timing) = ast::from_tokens(tokens.into_iter(), &runtime).unwrap();
+    if logging {
+        println!("{:?}", ast);
+    }
     timing.ast = ast_timing;
 
     let start = debug::start_timer();
     let bytecode = bytecode::from_ast(&ast);
     timing.bytecode = debug::stop_timer(start);
-    println!("{:?}", bytecode);
+    if logging {
+        println!("{:?}", bytecode);
+    }
 
     // let encoded = serialize(&bytecode).unwrap();
     // let bytecode: Bytecode = deserialize(&encoded[..]).unwrap();
     //
+    let log_level = if logging {
+        InterpLogLevel::LogEval
+    } else {
+        InterpLogLevel::LogNone
+    };
     let mut interpreter = Interpreter::new(&runtime);
-    interpreter.set_log_level(InterpLogLevel::LogEval);
+    interpreter.set_log_level(log_level);
+    interpreter.interrupt = &interrupt;
 
     let start = debug::start_timer();
     timing.instructions = interpreter.run(&bytecode);
     timing.interpreter = debug::stop_timer(start);
     timing.avg_instruction = timing.interpreter / timing.instructions as u32;
 
-    dbg!(timing);
+    if logging {
+        dbg!(timing);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bytecode::Value::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
-    fn run_test(code: &str) {
-        run_code(code.into())
+    fn run_test(code: &str, expected_result: Option<Value>) {
+        let code = format!("import exit;{}", code);
+        let result = Rc::new(RefCell::new(None));
+        let assign_result = result.clone();
+        run_code(code.into(), false, move |v| {
+            *assign_result.borrow_mut() = Some(v);
+        });
+        let result = result.borrow();
+        assert_eq!(*result, expected_result);
     }
 
     #[test]
-    fn test_assert_true() {
-        run_test(
-            "
-            a :: 1;
-            assert(a, 1);
-        ",
-        );
+    fn test_variable() {
+        run_test("a :: 1; exit(a);", Some(Int(1)));
     }
 
     #[test]
-    fn test_recursion() {
-        run_test(
-            "
-            rec :: fn (i) {
-                if(i == 0) {
-                    return;
-                }
-                rec(i - 1);
-            }
-            rec(5);
-        ",
-        );
+    fn test_add() {
+        run_test("a :: 1; b :: 2; c :: a + b; exit(c);", Some(Int(3)));
     }
 
     #[test]
-    #[should_panic]
-    fn test_assert_false() {
-        run_test(
-            "
-            a :: 1;
-            assert(a, 2);
-        ",
-        );
+    fn test_sub() {
+        run_test("a :: 1; b :: 2; c :: a - b; exit(c);", Some(Int(-1)));
     }
 
     #[test]
-    fn single_argument_function_call() {
-        run_test(
-            "
-            main :: fn(a) {
-                assert(a, 1);
-            }
-            main(1);
-        ",
-        );
+    fn test_mult() {
+        run_test("a :: 2; b :: 3; c :: a * b; exit(c);", Some(Int(6)));
     }
 
     #[test]
-    #[should_panic]
-    fn wrong_argument_function_call() {
-        run_test(
-            "
-            main :: fn(a) {}
-            main(1,2);
-        ",
-        );
+    fn test_div() {
+        run_test("a :: 4; b :: 2; c :: a / b; exit(c);", Some(Int(2)));
     }
 
     #[test]
-    fn function_early_return() {
-        run_test(
-            "
-            main :: fn() {
-                return;
-                assert(1,2);
-            }
-            main();
-        ",
-        );
+    fn test_if_true() {
+        run_test("if(1 == 1) {exit(1);} exit(0);", Some(Int(1)));
     }
 
     #[test]
-    fn function_void_return_value_ok() {
-        run_test(
-            "
-            main :: fn() {
-                assert(1,1);
-                return;
-            }
-            main();
-        ",
-        );
+    fn test_if_fales() {
+        run_test("if(1 == 2) {exit(1);} exit(0);", Some(Int(0)));
     }
-
-    #[test]
-    #[should_panic]
-    fn function_void_return_value_err() {
-        run_test(
-            "
-            main :: fn() {
-                assert(1,2);
-                return;
-            }
-            main();
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn turn_value_err() {
-        run_test(
-            "
-            main :: fn() -> int {
-                return 1;
-            }
-            a :: main();
-        ",
-        );
-    }
-
-    #[test]
-    fn function_nested_scopes() {
-        run_test(
-            "
-            main :: fn() {
-                a := 1;
-                {
-                    b := 2;
-                    return;
-                }
-                c := 3;
-            }
-            main();
-        ",
-        );
-    }
-
-    #[test]
-    fn if_ok() {
-        run_test(
-            "
-            if (1 == 1) {
-                assert(1,1);
-            }
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn if_err() {
-        run_test(
-            "
-            if (1 == 1) {
-                assert(1,2);
-            }
-        ",
-        );
-    }
-
-    #[test]
-    fn if_not_ok() {
-        run_test(
-            "
-            if (1 == 2) {
-                assert(1,2);
-            }
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn if_not_err() {
-        run_test(
-            "
-            if (1 == 2) {
-                assert(1,2);
-            }
-            assert(1,2);
-        ",
-        );
-    }
-
-    #[test]
-    fn if_nested_ok() {
-        run_test(
-            "
-            if (1 == 1) {
-                if (1 == 2) {
-                    assert(1,2);
-                }
-            }
-        ",
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn if_nested_err() {
-        run_test(
-            "
-            if (1 == 1) {
-                if (1 == 1) {
-                    assert(1,2);
-                }
-            }
-        ",
-        );
-    }
-
-    #[test]
-    fn loop_break_ok() {
-        run_test(
-            "
-            n := 0;
-            loop {
-                if (n == 10) {
-                    break;
-                }
-                n = n + 1;
-            }
-            assert(n, 10);
-        ",
-        );
-    }
-
-    //    #[test]
-    //    fn recursion() {
-    //        run_test("
-    //            loop :: fn(n) {
-    //                if (n == 0) {
-    //                    return 1;
-    //                }
-    //                return loop(n+1) + 1;
-    //            }
-    //            assert(loop(10),10);
-    //        ");
-    //    }
 }
-
-//    use test::Bencher;
-
-//    fn read() -> String {
-//        let filename = "main.bc";
-//        let mut f = File::open(filename).expect("file not found");
-//
-//        let mut contents = String::new();
-//        f.read_to_string(&mut contents)
-//            .expect("something went wrong reading the file");
-//        contents
-//    }
-//
-//    fn parse(contents: &str) -> Vec<Token> {
-//        Tokenizer::parse(&mut contents.chars().peekable().into_iter())
-//    }
-//
-//    fn ast(tokens: Vec<Token>) -> Ast {
-//        Ast::from_tokens(&mut tokens.into_iter().peekable())
-//    }
-
-//    #[bench]
-//    fn bench_parse(b: &mut Bencher) {
-//        let contents = read();
-//        b.iter(|| parse(&contents));
-//    }
-//
-//    #[bench]
-//    fn bench_ast(b: &mut Bencher) {
-//        let tokens = parse(&read());
-//        b.iter(|| ast(tokens.to_vec()));
-//    }
-//
-//    #[bench]
-//    fn bench_ast_vec_copy(b: &mut Bencher) {
-//        let tokens = parse(&read());
-//        b.iter(|| tokens.to_vec());
-//    }
-//
-//    #[bench]
-//    fn bench_interp(b: &mut Bencher) {
-//        let tokens = parse(&read());
-//        let ast = ast(tokens.to_vec());
-//        let functions = load_foreign_functions();
-//        let bytecode = Bytecode::from_ast(&ast, &functions);
-//
-//        b.iter(|| Interpreter::new(&functions).run(&bytecode));
-//    }
-//
-//    #[bench]
-//    fn bench_interp_native(b: &mut Bencher) {
-//        let add = |a,b| {println!("{}", a+b)};
-//        let one = || {1};
-//        b.iter(|| {
-//            {
-//                let a = 2 * (2 + 3);
-//                println!("{}", a);
-//                let a = 11;
-//                let b = 12;
-//                add(a, b);
-//
-//                {
-//                    let mut a = one();
-//                    a = a + 2;
-//                    println!("{}", a+b*10);
-//                }
-//            }
-//
-//        });
-//    }
