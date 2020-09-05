@@ -1,4 +1,2 @@
 # legge-vm
-A stackbased virtual machine, since it's exam period
-
-Just for fun since it feelt like a good exercise. 
+A compilter, typechecker and stackbased virtual machine, better than cleaning the house this exam period. Closures and custom type declarations not yet implemented.
