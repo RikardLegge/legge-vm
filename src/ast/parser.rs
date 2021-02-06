@@ -410,14 +410,24 @@ where
         let block_node = self.do_block(block_node)?;
 
         let children = self.ast.get_node(block_node).body.children();
-        let has_return = if let Some(last_id) = children.last() {
-            let last = self.ast.get_node(*last_id);
-            match last.body {
-                NodeBody::Unlinked(UnlinkedNodeBody::Return(..)) | NodeBody::Return(..) => true,
-                _ => false,
+
+        let has_return = {
+            // TODO: Optimize. We are lazy and just copy the entire array instead of implementing a double ended iterator.
+            let children = children.collect::<Vec<&NodeID>>();
+            let mut has_return = false;
+            for last_id in children.into_iter().rev() {
+                let last = self.ast.get_node(*last_id);
+                match last.body {
+                    // Ignore comments when searching for last statement
+                    NodeBody::Comment(..) => continue,
+                    NodeBody::Unlinked(UnlinkedNodeBody::Return(..)) | NodeBody::Return(..) => {
+                        has_return = true;
+                        break;
+                    }
+                    _ => break,
+                }
             }
-        } else {
-            false
+            has_return
         };
         if !has_return {
             let ret_node = self.node(block_node);

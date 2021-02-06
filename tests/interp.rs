@@ -81,6 +81,19 @@ fn test_pass_function() {
 }
 
 #[test]
+fn test_comments_after_return() {
+    run_test(
+        "
+        exec :: fn() -> int {
+            return 4; 
+            // a comment
+        }
+        exit(exec());",
+        Some(Int(4)),
+    );
+}
+
+#[test]
 fn test_return_function() {
     run_test(
         "
