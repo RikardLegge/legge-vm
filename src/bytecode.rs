@@ -40,6 +40,12 @@ impl fmt::Debug for Instruction {
 pub type OPOffset = isize;
 
 #[derive(Debug, PartialEq, Clone)]
+pub enum SFOffset {
+    Stack(OPOffset),
+    Heap(OPOffset, usize),
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum OP {
     AddI,
     SubI,
@@ -47,8 +53,8 @@ pub enum OP {
     DivI,
     Eq,
 
-    SLoad(OPOffset),
-    SStore(OPOffset),
+    SLoad(SFOffset),
+    SStore(SFOffset),
 
     Branch(OPOffset),
     BranchIf(OPOffset),
@@ -60,8 +66,8 @@ pub enum OP {
     PopStack(usize),
 
     SetStackFrame(OPOffset),
-    PushStackFrame,
-    PopStackFrame,
+    PushFramePointer,
+    PopFramePointer,
 
     Jump,
 
@@ -76,7 +82,7 @@ pub enum Value {
     Int(isize),
     Bool(bool),
     String(String),
-    ProcAddress(usize),
+    ProcAddress(usize, Option<usize>),
 
     PC(usize),
     StackFrame(usize),
@@ -167,13 +173,13 @@ struct BytecodeGenerator<'a> {
 
 impl<'a> BytecodeGenerator<'a> {
     fn new(ast: &'a Ast) -> Self {
-        let panic = Instruction {
+        let placeholder = Instruction {
             node_id: ast.root(),
             op: OP::Panic,
         };
         BytecodeGenerator {
             ast,
-            procedures: vec![panic.clone(), panic],
+            procedures: vec![placeholder.clone(), placeholder],
             scopes: Vec::new(),
             contexts: Vec::new(),
         }
@@ -182,10 +188,11 @@ impl<'a> BytecodeGenerator<'a> {
     fn get_bytecode(self, mut scope: Scope) -> Bytecode {
         let mut code = self.procedures;
         let entrypoint = code.len();
+
         // Patch entrypoint instructions
         code[0] = Instruction {
             node_id: scope.node_id,
-            op: OP::PushImmediate(Value::ProcAddress(entrypoint)),
+            op: OP::PushImmediate(Value::ProcAddress(entrypoint, None)),
         };
         code[1] = Instruction {
             node_id: scope.node_id,
@@ -210,10 +217,10 @@ impl<'a> BytecodeGenerator<'a> {
         scope
     }
 
-    fn get_variable_offset(&self, node_id: NodeID, var_id: NodeID) -> OPOffset {
+    fn get_variable_offset(&self, node_id: NodeID, var_id: NodeID) -> SFOffset {
         for context in self.contexts.iter().rev() {
             if let Some(var) = context.variables.iter().find(|var| var.node_id == var_id) {
-                return var.offset as isize;
+                return SFOffset::Stack(var.offset as isize);
             }
             if context.tp == ContextType::StackFrame {
                 panic!(
@@ -439,13 +446,13 @@ impl<'a> BytecodeGenerator<'a> {
             let usage = self.ev_expression(ret_id);
             assert_eq!(usage.pushed, 1);
             assert_eq!(usage.popped, 0);
-            self.add_op(ret_id, OP::SStore(-3));
+            self.add_op(ret_id, OP::SStore(SFOffset::Stack(-3)));
         }
         let allocations = self.get_allocations(proc_id);
         if allocations > 0 {
             self.add_op(node_id, OP::PopStack(allocations));
         }
-        self.add_op(node_id, OP::PopStackFrame);
+        self.add_op(node_id, OP::PopFramePointer);
         self.add_op(node_id, OP::PopPc);
         StackUsage::new(0, 0)
     }
@@ -465,7 +472,10 @@ impl<'a> BytecodeGenerator<'a> {
             };
         });
         let proc_index = self.add_proc(scope);
-        self.add_op(node_id, OP::PushImmediate(Value::ProcAddress(proc_index)));
+        self.add_op(
+            node_id,
+            OP::PushImmediate(Value::ProcAddress(proc_index, None)),
+        );
         StackUsage::new(0, 1)
     }
 
@@ -517,7 +527,7 @@ impl<'a> BytecodeGenerator<'a> {
         }
 
         let pc_index = self.add_op(node_id, OP::Panic);
-        self.add_op(node_id, OP::PushStackFrame);
+        self.add_op(node_id, OP::PushFramePointer);
         for arg in args {
             let usage = self.ev_expression(*arg);
             assert_eq!(1, usage.pushed);
@@ -601,8 +611,10 @@ impl<'a> BytecodeGenerator<'a> {
     ) -> StackUsage {
         let usage1 = self.ev_expression(expr1);
         assert_eq!(usage1.pushed, 1);
+        assert_eq!(usage1.popped, 0);
         let usage2 = self.ev_expression(expr2);
         assert_eq!(usage2.pushed, 1);
+        assert_eq!(usage1.popped, 0);
 
         match op {
             ArithmeticOP::Add => self.add_op(node_id, OP::AddI),

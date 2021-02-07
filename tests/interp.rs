@@ -42,6 +42,12 @@ fn test_div() {
 }
 
 #[test]
+#[should_panic]
+fn test_redeclare() {
+    run_test("a :: 1; a :: 1; exit(a);", Some(Int(1)));
+}
+
+#[test]
 fn test_if_true() {
     run_test("if(true) {exit(1);} exit(0);", Some(Int(1)));
 }

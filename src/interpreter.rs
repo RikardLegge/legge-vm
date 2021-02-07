@@ -1,9 +1,16 @@
-use crate::bytecode::{Bytecode, Value, OP};
+use crate::bytecode::{Bytecode, SFOffset, Value, OP};
 use crate::runtime::Runtime;
+
+struct StackFrame {
+    pub parent: Option<usize>,
+    pub stack: Vec<Value>,
+}
 
 pub struct Interpreter<'a> {
     pc: Option<usize>,
     frame_pointer: usize,
+    stack_frame: usize,
+    stack_frames: Vec<StackFrame>,
     pub stack: Vec<Value>,
     pub runtime: &'a Runtime,
     pub log_level: InterpLogLevel,
@@ -38,10 +45,16 @@ pub type InterpResult<V = Value> = Result<V, InterpError>;
 impl<'a> Interpreter<'a> {
     pub fn new(runtime: &'a Runtime) -> Self {
         let stack_size = 20;
+        let root_frame = StackFrame {
+            parent: None,
+            stack: Vec::new(),
+        };
         Interpreter {
             frame_pointer: 0,
             pc: Some(0),
             stack: Vec::with_capacity(stack_size),
+            stack_frame: 0,
+            stack_frames: vec![root_frame],
             runtime,
             log_level: InterpLogLevel::LogNone,
             stack_max: stack_size,
@@ -161,21 +174,34 @@ impl<'a> Interpreter<'a> {
                 let eq = n1 == n2;
                 self.push_stack(Value::Bool(eq))?;
             }
-            SStore(offset) => {
-                let value = self.pop_stack()?;
-                let index = self.frame_pointer as isize + *offset;
-                assert!(index >= 0);
-                self.stack[index as usize] = value;
-            }
-            SLoad(offset) => {
-                let index = self.frame_pointer as isize + *offset;
-                let value = self.stack[index as usize].clone();
-                self.push_stack(value)?;
-            }
+            SStore(offset) => match offset {
+                SFOffset::Heap(offset, depth) => unimplemented!(),
+                SFOffset::Stack(offset) => {
+                    let index = self.frame_pointer as isize + *offset;
+                    assert!(index >= 0);
+                    self.stack[index as usize] = self.pop_stack()?;
+                }
+            },
+            SLoad(offset) => match offset {
+                SFOffset::Heap(offset, depth) => unimplemented!(),
+                SFOffset::Stack(offset) => {
+                    let index = self.frame_pointer as isize + *offset;
+                    let value = self.stack[index as usize].clone();
+                    self.push_stack(value)?;
+                }
+            },
             PushImmediate(primitive) => {
-                // We clone here since all immediate values are constants and
-                // should never change.
-                let value = (*primitive).clone();
+                let value = match primitive {
+                    Value::ProcAddress(addr, None) => {
+                        Value::ProcAddress(*addr, Some(self.stack_frame))
+                    }
+                    Value::ProcAddress(_, Some(_)) => panic!(
+                        "A proc address can not contain a stack pointer before being evaluated"
+                    ),
+                    // We clone here since all immediate values are constants and
+                    // should never change.
+                    value => (*value).clone(),
+                };
                 self.push_stack(value)?;
             }
             PopStack(count) => {
@@ -220,8 +246,14 @@ impl<'a> Interpreter<'a> {
             Jump => {
                 let val = self.pop_stack()?;
                 match val {
-                    Value::ProcAddress(addr) => {
+                    Value::ProcAddress(addr, parent_stack_frame) => {
                         self.pc = Some(addr);
+                        self.stack_frame = self.stack_frames.len();
+                        let stack_frame = StackFrame {
+                            parent: parent_stack_frame,
+                            stack: Vec::new(),
+                        };
+                        self.stack_frames.push(stack_frame);
                     }
                     Value::RuntimeFn(id) => {
                         let mut args = self.get_foreign_function_arguments()?;
@@ -229,7 +261,7 @@ impl<'a> Interpreter<'a> {
                         let returns = func(self, &mut args)?;
                         // Just make sure that the function has not se the pc to None
                         if self.pc != None {
-                            self.run_command(&PopStackFrame)?;
+                            self.run_command(&PopFramePointer)?;
                             self.run_command(&PopPc)?;
                             if let Some(returns) = returns {
                                 self.push_stack(returns)?;
@@ -239,14 +271,14 @@ impl<'a> Interpreter<'a> {
                     _ => unimplemented!(),
                 }
             }
-            PushStackFrame => {
+            PushFramePointer => {
                 self.push_stack(Value::StackFrame(self.frame_pointer))?;
             }
             SetStackFrame(offset) => {
                 let end = self.stack.len() as isize;
                 self.frame_pointer = (end + *offset) as usize;
             }
-            PopStackFrame => match self.pop_stack()? {
+            PopFramePointer => match self.pop_stack()? {
                 Value::StackFrame(addr) => {
                     self.frame_pointer = addr;
                 }
