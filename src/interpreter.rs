@@ -224,6 +224,7 @@ impl<'a> Interpreter<'a> {
             PushImmediate(primitive) => {
                 let value = match primitive {
                     Value::ProcAddress(addr, None) => {
+                        self.stack_frames[self.stack_frame].references += 1;
                         Value::ProcAddress(*addr, Some(self.stack_frame))
                     }
                     Value::ProcAddress(_, Some(_)) => panic!(

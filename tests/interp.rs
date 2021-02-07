@@ -100,6 +100,23 @@ fn test_access_value_of_other_stack_frame() {
 }
 
 #[test]
+fn test_modify_value_of_other_stack_frame() {
+    run_test(
+        "
+        val := 1;
+        change_val :: fn() {
+            val = 2; 
+        }
+        get_val :: fn() -> int {
+            return val; 
+        }
+        change_val();
+        exit(get_val());",
+        Some(Int(2)),
+    );
+}
+
+#[test]
 fn test_comments_after_return() {
     run_test(
         "
