@@ -42,7 +42,7 @@ pub type OPOffset = isize;
 #[derive(Debug, PartialEq, Clone)]
 pub enum SFOffset {
     Stack(OPOffset),
-    Heap(OPOffset, usize),
+    Heap(usize, usize),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -63,6 +63,7 @@ pub enum OP {
     PopPc,
 
     PushImmediate(Value),
+    PushToStackFrame,
     PopStack(usize),
 
     SetStackFrame(OPOffset),
@@ -99,11 +100,16 @@ enum ContextType {
 struct ContextVariable {
     node_id: NodeID,
     offset: usize,
+    is_heap_allocated: bool,
 }
 
 impl ContextVariable {
-    fn new(node_id: NodeID, offset: usize) -> Self {
-        Self { node_id, offset }
+    fn new(node_id: NodeID, offset: usize, is_heap_allocated: bool) -> Self {
+        Self {
+            node_id,
+            offset,
+            is_heap_allocated,
+        }
     }
 }
 
@@ -121,6 +127,26 @@ impl Context {
             tp,
             variables,
         }
+    }
+
+    fn local_allocations(&self) -> usize {
+        let mut allocations = 0;
+        for var in &self.variables {
+            if !var.is_heap_allocated {
+                allocations += 1;
+            }
+        }
+        allocations
+    }
+
+    fn global_allocations(&self) -> usize {
+        let mut allocations = 0;
+        for var in &self.variables {
+            if var.is_heap_allocated {
+                allocations += 1;
+            }
+        }
+        allocations
     }
 }
 
@@ -218,17 +244,23 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn get_variable_offset(&self, node_id: NodeID, var_id: NodeID) -> SFOffset {
+        let mut stack_frame_offset = 0;
         for context in self.contexts.iter().rev() {
             if let Some(var) = context.variables.iter().find(|var| var.node_id == var_id) {
-                return SFOffset::Stack(var.offset as isize);
+                return if self.ast.get_node(var.node_id).is_referenced_globally() {
+                    SFOffset::Heap(var.offset, stack_frame_offset)
+                } else {
+                    SFOffset::Stack(var.offset as isize)
+                };
             }
             if context.tp == ContextType::StackFrame {
-                panic!(
-                    "\nTried to find variable but hit stackframe boundry:\n{}\n",
-                    self.ast
-                        .get_node(node_id)
-                        .print_line(self.ast, "variable usage")
-                )
+                stack_frame_offset += 1;
+                // panic!(
+                //     "\nTried to find variable but hit stackframe boundry:\n{}\n",
+                //     self.ast
+                //         .get_node(node_id)
+                //         .print_line(self.ast, "variable usage")
+                // )
             }
         }
         panic!(
@@ -256,7 +288,7 @@ impl<'a> BytecodeGenerator<'a> {
     fn get_allocations(&self, node_id: NodeID) -> usize {
         let mut allocations = 0;
         for context in self.contexts.iter().rev() {
-            allocations += context.variables.len();
+            allocations += context.local_allocations();
             if context.node_id == node_id {
                 return allocations;
             }
@@ -288,16 +320,37 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn add_var(&mut self, var_id: NodeID) {
-        let mut offset = 0;
-        for context in self.contexts.iter().rev() {
-            offset += context.variables.len();
-            if context.tp == ContextType::StackFrame {
-                break;
+        let is_heap_allocated = self.ast.get_node(var_id).is_referenced_globally();
+        let offset = if is_heap_allocated {
+            let mut offset = 0;
+            match self.contexts.last() {
+                Some(context) => {
+                    for var in context.variables.iter() {
+                        if var.is_heap_allocated {
+                            offset += 1;
+                        }
+                    }
+                }
+                None => panic!("Context missing"),
             }
-        }
+            offset
+        } else {
+            let mut offset = 0;
+            for context in self.contexts.iter().rev() {
+                for var in context.variables.iter() {
+                    if !var.is_heap_allocated {
+                        offset += 1;
+                    }
+                }
+                if context.tp == ContextType::StackFrame {
+                    break;
+                }
+            }
+            offset
+        };
 
         let context = self.get_context_mut();
-        let var = ContextVariable::new(var_id, offset);
+        let var = ContextVariable::new(var_id, offset, is_heap_allocated);
         context.variables.push(var);
     }
 
@@ -556,14 +609,26 @@ impl<'a> BytecodeGenerator<'a> {
         let allocations = self.with_context(node_id, ContextType::Block, |bc| {
             for child_id in children {
                 let node = bc.ast.get_node(*child_id);
-                match &node.body {
-                    NodeBody::VariableDeclaration(..)
-                    | NodeBody::ConstDeclaration(..)
-                    | NodeBody::Import(..) => {
-                        bc.add_var(*child_id);
-                        bc.add_op(*child_id, OP::PushImmediate(Value::Unset));
+                if node.is_referenced_globally() {
+                    match &node.body {
+                        NodeBody::VariableDeclaration(..)
+                        | NodeBody::ConstDeclaration(..)
+                        | NodeBody::Import(..) => {
+                            bc.add_var(*child_id);
+                            bc.add_op(*child_id, OP::PushToStackFrame);
+                        }
+                        _ => (),
                     }
-                    _ => (),
+                } else {
+                    match &node.body {
+                        NodeBody::VariableDeclaration(..)
+                        | NodeBody::ConstDeclaration(..)
+                        | NodeBody::Import(..) => {
+                            bc.add_var(*child_id);
+                            bc.add_op(*child_id, OP::PushImmediate(Value::Unset));
+                        }
+                        _ => (),
+                    }
                 }
             }
 
@@ -575,7 +640,7 @@ impl<'a> BytecodeGenerator<'a> {
                 }
             }
             assert_eq!(stack_usage.pushed, stack_usage.popped);
-            bc.get_context().variables.len()
+            bc.get_context().local_allocations()
         });
         if allocations > 0 {
             self.add_op(node_id, OP::PopStack(allocations));

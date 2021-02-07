@@ -1,7 +1,13 @@
-i := 100000;
-loop {
-    if(i == 0) {
-        break;
-    }
-    i = i - 1;
+//i := 100000;
+//loop {
+//    if(i == 0) {
+//        break;
+//    }
+//    i = i - 1;
+//}
+import log;
+a :: 1;
+double :: fn(i: int) -> int {
+  return a * i;
 }
+log(double(2));

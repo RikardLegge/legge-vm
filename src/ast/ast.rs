@@ -25,6 +25,19 @@ pub struct Node {
 }
 
 impl Node {
+    pub fn is_stack_frame_boundary(&self) -> bool {
+        match self.body {
+            NodeBody::ProcedureDeclaration(..) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_referenced_globally(&self) -> bool {
+        self.referenced_by
+            .iter()
+            .any(|ref_by| ref_by.ref_loc == NodeReferenceLocation::Global)
+    }
+
     pub fn print_line(&self, ast: &Ast, msg: &str) -> String {
         let mut tokens = Vec::new();
         tokens.append(&mut self.tokens.clone());
@@ -101,11 +114,16 @@ impl Node {
 pub struct NodeReference {
     pub id: NodeID,
     pub ref_tp: NodeReferenceType,
+    pub ref_loc: NodeReferenceLocation,
 }
 
 impl NodeReference {
-    pub fn new(id: NodeID, ref_tp: NodeReferenceType) -> Self {
-        Self { id, ref_tp }
+    pub fn new(id: NodeID, ref_tp: NodeReferenceType, ref_loc: NodeReferenceLocation) -> Self {
+        Self {
+            id,
+            ref_tp,
+            ref_loc,
+        }
     }
 }
 
@@ -114,6 +132,12 @@ pub enum NodeReferenceType {
     AssignValue,
     ReceiveValue,
     GoTo,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum NodeReferenceLocation {
+    Local,
+    Global,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -271,10 +295,15 @@ impl Ast {
         let node = &self.nodes[node_id.0];
         let pad = " ".repeat(level * 2);
         let mut children = node.body.children().peekable();
+        let location_text = if node.is_referenced_globally() {
+            "global"
+        } else {
+            ""
+        };
         write!(
             f,
-            "{}Node({}): {:?} = {:?}",
-            pad, node.id.0, node.tp, node.body
+            "{}Node({}): {} {:?} = {:?}",
+            pad, node.id.0, location_text, node.tp, node.body
         )?;
         if children.peek().is_some() {
             write!(f, " [\n")?;
@@ -305,7 +334,7 @@ impl Ast {
         }
     }
 
-    pub fn closest_fn(&self, node_id: NodeID) -> Option<NodeID> {
+    pub fn closest_fn(&self, node_id: NodeID) -> Option<(NodeID, bool)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
                 NodeBody::ProcedureDeclaration(..) => Some(node.id),
@@ -315,7 +344,7 @@ impl Ast {
         .unwrap()
     }
 
-    pub fn closest_loop(&self, node_id: NodeID) -> Option<NodeID> {
+    pub fn closest_loop(&self, node_id: NodeID) -> Option<(NodeID, bool)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
                 NodeBody::Loop(..) => Some(node.id),
@@ -325,7 +354,11 @@ impl Ast {
         .unwrap()
     }
 
-    pub fn closest_variable(&self, node_id: NodeID, target_ident: &str) -> Result<Option<NodeID>> {
+    pub fn closest_variable(
+        &self,
+        node_id: NodeID,
+        target_ident: &str,
+    ) -> Result<Option<(NodeID, bool)>> {
         use NodeBody::*;
         self.closest(node_id, |node| {
             let mut closest_id = None;
@@ -353,23 +386,28 @@ impl Ast {
         })
     }
 
-    pub fn closest<F>(&self, mut node_id: NodeID, test: F) -> Result<Option<NodeID>>
+    pub fn closest<F>(&self, mut node_id: NodeID, test: F) -> Result<Option<(NodeID, bool)>>
     where
         F: Fn(&Node) -> Result<Option<NodeID>>,
     {
+        let mut passes_stack_frame_boundary = false;
         loop {
             let node = self.get_node(node_id);
             let result = test(node);
-            if let Ok(option) = result {
-                if let Some(_) = option {
-                    break result;
-                } else if let Some(parent_id) = node.parent_id {
-                    node_id = parent_id;
-                } else {
-                    break Ok(None);
+            match result {
+                Ok(option) => {
+                    if let Some(node_id) = option {
+                        break Ok(Some((node_id, passes_stack_frame_boundary)));
+                    } else if let Some(parent_id) = node.parent_id {
+                        if node.is_stack_frame_boundary() {
+                            passes_stack_frame_boundary = true;
+                        }
+                        node_id = parent_id;
+                    } else {
+                        break Ok(None);
+                    }
                 }
-            } else {
-                break result;
+                Err(e) => break Result::Err(e),
             }
         }
     }

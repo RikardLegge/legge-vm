@@ -1,5 +1,5 @@
 use super::{Ast, NodeBody, NodeID, Result};
-use crate::ast::ast::NodeReference;
+use crate::ast::ast::{NodeReference, NodeReferenceLocation};
 use crate::ast::{NodeReferenceType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
@@ -25,8 +25,14 @@ impl<'a, 'b> Linker<'a, 'b> {
         }
     }
 
-    fn add_ref(&mut self, target_id: NodeID, referencer: NodeID, tp: NodeReferenceType) {
-        let node_ref = NodeReference::new(referencer, tp);
+    fn add_ref(
+        &mut self,
+        target_id: NodeID,
+        referencer: NodeID,
+        tp: NodeReferenceType,
+        loc: NodeReferenceLocation,
+    ) {
+        let node_ref = NodeReference::new(referencer, tp, loc);
         self.ast
             .get_node_mut(target_id)
             .referenced_by
@@ -63,11 +69,11 @@ impl<'a, 'b> Linker<'a, 'b> {
     //     }
     // }
 
-    fn closest_variable(&self, node_id: NodeID, ident: &str) -> Result<Option<NodeID>> {
+    fn closest_variable(&self, node_id: NodeID, ident: &str) -> Result<Option<(NodeID, bool)>> {
         self.ast.closest_variable(node_id, ident)
     }
 
-    fn closest_fn(&mut self, node_id: NodeID) -> Result {
+    fn closest_fn(&mut self, node_id: NodeID) -> Result<(NodeID, bool)> {
         match self.ast.closest_fn(node_id) {
             Some(id) => Ok(id),
             _ => Err(self.ast.error(
@@ -78,7 +84,7 @@ impl<'a, 'b> Linker<'a, 'b> {
         }
     }
 
-    fn closest_loop(&mut self, node_id: NodeID) -> Result {
+    fn closest_loop(&mut self, node_id: NodeID) -> Result<(NodeID, bool)> {
         match self.ast.closest_loop(node_id) {
             Some(id) => Ok(id),
             _ => Err(self.ast.error(
@@ -102,50 +108,59 @@ impl<'a, 'b> Linker<'a, 'b> {
                     let new_body = match body {
                         VariableAssignment(ident, expr_id) => {
                             let expr_id = *expr_id;
-                            let target_id = match self.closest_variable(node_id, &ident)? {
-                                Some(node_id) => node_id,
-                                None => {
-                                    // let ident = ident.into();
-                                    // self.add_runtime_variable(ident)?
-                                    Err(self.ast.error(
-                                        "Failed to find variable to assign to",
-                                        "variable not found",
-                                        vec![node_id],
-                                    ))?
-                                }
+                            let (target_id, crosses_stack_frame) =
+                                match self.closest_variable(node_id, &ident)? {
+                                    Some(node_id) => node_id,
+                                    None => {
+                                        // let ident = ident.into();
+                                        // self.add_runtime_variable(ident)?
+                                        Err(self.ast.error(
+                                            "Failed to find variable to assign to",
+                                            "variable not found",
+                                            vec![node_id],
+                                        ))?
+                                    }
+                                };
+                            let loc = if crosses_stack_frame {
+                                NodeReferenceLocation::Global
+                            } else {
+                                NodeReferenceLocation::Local
                             };
-                            self.add_ref(target_id, node_id, ReceiveValue);
+                            self.add_ref(target_id, node_id, ReceiveValue, loc);
                             NodeBody::VariableAssignment(target_id, expr_id)
                         }
                         VariableValue(ident) => {
-                            let target_id = match self.closest_variable(node_id, &ident)? {
-                                Some(node_id) => node_id,
-                                None => {
-                                    // let ident = ident.into();
-                                    // self.add_runtime_variable(ident)?
-                                    Err(self.ast.error(
-                                        "Failed to find variable",
-                                        "variable not found",
-                                        vec![node_id],
-                                    ))?
-                                }
+                            let (target_id, crosses_stack_frame) =
+                                match self.closest_variable(node_id, &ident)? {
+                                    Some(node_id) => node_id,
+                                    None => {
+                                        // let ident = ident.into();
+                                        // self.add_runtime_variable(ident)?
+                                        Err(self.ast.error(
+                                            "Failed to find variable",
+                                            "variable not found",
+                                            vec![node_id],
+                                        ))?
+                                    }
+                                };
+                            let loc = if crosses_stack_frame {
+                                NodeReferenceLocation::Global
+                            } else {
+                                NodeReferenceLocation::Local
                             };
-                            self.add_ref(target_id, node_id, AssignValue);
+                            self.add_ref(target_id, node_id, AssignValue, loc);
                             NodeBody::VariableValue(target_id)
                         }
                         Call(ident, _) => {
-                            let target_id = match self.closest_variable(node_id, &ident)? {
-                                Some(node_id) => node_id,
-                                None => {
-                                    Err(self.ast.error(
+                            let (target_id, crosses_stack_frame) =
+                                match self.closest_variable(node_id, &ident)? {
+                                    Some(node_id) => node_id,
+                                    None => Err(self.ast.error(
                                         "Failed to find variable to call",
                                         "function not found",
                                         vec![node_id],
-                                    ))?
-                                    // let ident = ident.into();
-                                    // self.add_runtime_variable(ident)?
-                                }
-                            };
+                                    ))?,
+                                };
                             // We move the args out the old NodeBody so that we do not have to copy
                             // the argument vec while replacing the node body.
                             let node = self.ast.get_node_mut(node_id);
@@ -153,7 +168,12 @@ impl<'a, 'b> Linker<'a, 'b> {
                                 NodeBody::Unlinked(Call(_, args)) => mem::replace(args, Vec::new()),
                                 _ => unreachable!(),
                             };
-                            self.add_ref(target_id, node_id, GoTo);
+                            let loc = if crosses_stack_frame {
+                                NodeReferenceLocation::Global
+                            } else {
+                                NodeReferenceLocation::Local
+                            };
+                            self.add_ref(target_id, node_id, GoTo, loc);
                             NodeBody::Call(target_id, args)
                         }
                         ImportValue(ident) => {
@@ -175,8 +195,13 @@ impl<'a, 'b> Linker<'a, 'b> {
                             }
                         }
                         Return(_) => {
-                            let target_id = self.closest_fn(node_id)?;
-                            self.add_ref(target_id, node_id, GoTo);
+                            let (target_id, crosses_stack_frame) = self.closest_fn(node_id)?;
+                            let loc = if crosses_stack_frame {
+                                NodeReferenceLocation::Global
+                            } else {
+                                NodeReferenceLocation::Local
+                            };
+                            self.add_ref(target_id, node_id, GoTo, loc);
                             let node = self.ast.get_node_mut(node_id);
                             let ret = match &mut node.body {
                                 NodeBody::Unlinked(Return(ret)) => mem::replace(ret, None),
@@ -185,8 +210,13 @@ impl<'a, 'b> Linker<'a, 'b> {
                             NodeBody::Return(target_id, ret)
                         }
                         Break => {
-                            let target_id = self.closest_loop(node_id)?;
-                            self.add_ref(target_id, node_id, GoTo);
+                            let (target_id, crosses_stack_frame) = self.closest_loop(node_id)?;
+                            let loc = if crosses_stack_frame {
+                                NodeReferenceLocation::Global
+                            } else {
+                                NodeReferenceLocation::Local
+                            };
+                            self.add_ref(target_id, node_id, GoTo, loc);
                             NodeBody::Break(target_id)
                         }
                     };

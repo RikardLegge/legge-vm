@@ -87,6 +87,19 @@ fn test_pass_function() {
 }
 
 #[test]
+fn test_access_value_of_other_stack_frame() {
+    run_test(
+        "
+        val :: 1;
+        get_val :: fn() -> int {
+            return val; 
+        }
+        exit(get_val());",
+        Some(Int(1)),
+    );
+}
+
+#[test]
 fn test_comments_after_return() {
     run_test(
         "

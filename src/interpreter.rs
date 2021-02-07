@@ -2,6 +2,7 @@ use crate::bytecode::{Bytecode, SFOffset, Value, OP};
 use crate::runtime::Runtime;
 
 struct StackFrame {
+    pub references: usize,
     pub parent: Option<usize>,
     pub stack: Vec<Value>,
 }
@@ -47,6 +48,7 @@ impl<'a> Interpreter<'a> {
         let stack_size = 20;
         let root_frame = StackFrame {
             parent: None,
+            references: 0,
             stack: Vec::new(),
         };
         Interpreter {
@@ -174,8 +176,24 @@ impl<'a> Interpreter<'a> {
                 let eq = n1 == n2;
                 self.push_stack(Value::Bool(eq))?;
             }
+            PushToStackFrame => {
+                self.stack_frames[self.stack_frame].stack.push(Value::Unset);
+            }
             SStore(offset) => match offset {
-                SFOffset::Heap(offset, depth) => unimplemented!(),
+                SFOffset::Heap(index, depth) => {
+                    let mut depth = *depth;
+                    let mut frame_pointer = self.stack_frame;
+                    while depth > 0 {
+                        match self.stack_frames[frame_pointer].parent {
+                            Some(parent_pointer) => frame_pointer = parent_pointer,
+                            None => panic!("Invalid stack frame refernce when storing value"),
+                        }
+                        depth -= 1;
+                    }
+                    let value = self.pop_stack()?;
+                    let stack_frame = &mut self.stack_frames[frame_pointer];
+                    stack_frame.stack[*index] = value;
+                }
                 SFOffset::Stack(offset) => {
                     let index = self.frame_pointer as isize + *offset;
                     assert!(index >= 0);
@@ -183,7 +201,20 @@ impl<'a> Interpreter<'a> {
                 }
             },
             SLoad(offset) => match offset {
-                SFOffset::Heap(offset, depth) => unimplemented!(),
+                SFOffset::Heap(index, depth) => {
+                    let mut depth = *depth;
+                    let mut frame_pointer = self.stack_frame;
+                    while depth > 0 {
+                        match self.stack_frames[frame_pointer].parent {
+                            Some(parent_pointer) => frame_pointer = parent_pointer,
+                            None => panic!("Invalid stack frame refernce when loading value"),
+                        }
+                        depth -= 1;
+                    }
+                    let stack_frame = &mut self.stack_frames[frame_pointer];
+                    let value = stack_frame.stack[*index].clone();
+                    self.push_stack(value)?;
+                }
                 SFOffset::Stack(offset) => {
                     let index = self.frame_pointer as isize + *offset;
                     let value = self.stack[index as usize].clone();
@@ -248,8 +279,15 @@ impl<'a> Interpreter<'a> {
                 match val {
                     Value::ProcAddress(addr, parent_stack_frame) => {
                         self.pc = Some(addr);
+                        match parent_stack_frame {
+                            Some(index) => {
+                                self.stack_frames[index].references += 1;
+                            }
+                            None => {}
+                        }
                         self.stack_frame = self.stack_frames.len();
                         let stack_frame = StackFrame {
+                            references: 0,
                             parent: parent_stack_frame,
                             stack: Vec::new(),
                         };
@@ -259,7 +297,8 @@ impl<'a> Interpreter<'a> {
                         let mut args = self.get_foreign_function_arguments()?;
                         let func = self.runtime.functions[id].function;
                         let returns = func(self, &mut args)?;
-                        // Just make sure that the function has not se the pc to None
+                        // Just make sure that the function has not set the pc to None
+                        // If pc is none then we will terminate
                         if self.pc != None {
                             self.run_command(&PopFramePointer)?;
                             self.run_command(&PopPc)?;
