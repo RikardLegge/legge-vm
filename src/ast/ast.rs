@@ -25,17 +25,17 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn is_stack_frame_boundary(&self) -> bool {
+    pub fn is_closure_boundary(&self) -> bool {
         match self.body {
             NodeBody::ProcedureDeclaration(..) => true,
             _ => false,
         }
     }
 
-    pub fn is_referenced_globally(&self) -> bool {
+    pub fn has_closure_references(&self) -> bool {
         self.referenced_by
             .iter()
-            .any(|ref_by| ref_by.ref_loc == NodeReferenceLocation::Global)
+            .any(|ref_by| ref_by.ref_loc == NodeReferenceLocation::Closure)
     }
 
     pub fn print_line(&self, ast: &Ast, msg: &str) -> String {
@@ -137,7 +137,7 @@ pub enum NodeReferenceType {
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum NodeReferenceLocation {
     Local,
-    Global,
+    Closure,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -295,8 +295,8 @@ impl Ast {
         let node = &self.nodes[node_id.0];
         let pad = " ".repeat(level * 2);
         let mut children = node.body.children().peekable();
-        let location_text = if node.is_referenced_globally() {
-            "global"
+        let location_text = if node.has_closure_references() {
+            "closure"
         } else {
             ""
         };
@@ -334,7 +334,7 @@ impl Ast {
         }
     }
 
-    pub fn closest_fn(&self, node_id: NodeID) -> Option<(NodeID, bool)> {
+    pub fn closest_fn(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
                 NodeBody::ProcedureDeclaration(..) => Some(node.id),
@@ -344,7 +344,7 @@ impl Ast {
         .unwrap()
     }
 
-    pub fn closest_loop(&self, node_id: NodeID) -> Option<(NodeID, bool)> {
+    pub fn closest_loop(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
                 NodeBody::Loop(..) => Some(node.id),
@@ -358,7 +358,7 @@ impl Ast {
         &self,
         node_id: NodeID,
         target_ident: &str,
-    ) -> Result<Option<(NodeID, bool)>> {
+    ) -> Result<Option<(NodeID, NodeReferenceLocation)>> {
         use NodeBody::*;
         self.closest(node_id, |node| {
             let mut closest_id = None;
@@ -386,21 +386,25 @@ impl Ast {
         })
     }
 
-    pub fn closest<F>(&self, mut node_id: NodeID, test: F) -> Result<Option<(NodeID, bool)>>
+    pub fn closest<F>(
+        &self,
+        mut node_id: NodeID,
+        test: F,
+    ) -> Result<Option<(NodeID, NodeReferenceLocation)>>
     where
         F: Fn(&Node) -> Result<Option<NodeID>>,
     {
-        let mut passes_stack_frame_boundary = false;
+        let mut location = NodeReferenceLocation::Local;
         loop {
             let node = self.get_node(node_id);
             let result = test(node);
             match result {
                 Ok(option) => {
                     if let Some(node_id) = option {
-                        break Ok(Some((node_id, passes_stack_frame_boundary)));
+                        break Ok(Some((node_id, location)));
                     } else if let Some(parent_id) = node.parent_id {
-                        if node.is_stack_frame_boundary() {
-                            passes_stack_frame_boundary = true;
+                        if node.is_closure_boundary() {
+                            location = NodeReferenceLocation::Closure;
                         }
                         node_id = parent_id;
                     } else {

@@ -1,7 +1,7 @@
 use crate::bytecode::{Bytecode, SFOffset, Value, OP};
 use crate::runtime::Runtime;
 
-struct StackFrame {
+struct Closure {
     pub references: usize,
     pub parent: Option<usize>,
     pub stack: Vec<Value>,
@@ -10,8 +10,8 @@ struct StackFrame {
 pub struct Interpreter<'a> {
     pc: Option<usize>,
     frame_pointer: usize,
-    stack_frame: usize,
-    stack_frames: Vec<StackFrame>,
+    closure_id: usize,
+    closures: Vec<Closure>,
     pub stack: Vec<Value>,
     pub runtime: &'a Runtime,
     pub log_level: InterpLogLevel,
@@ -46,7 +46,7 @@ pub type InterpResult<V = Value> = Result<V, InterpError>;
 impl<'a> Interpreter<'a> {
     pub fn new(runtime: &'a Runtime) -> Self {
         let stack_size = 20;
-        let root_frame = StackFrame {
+        let root_frame = Closure {
             parent: None,
             references: 0,
             stack: Vec::new(),
@@ -55,8 +55,8 @@ impl<'a> Interpreter<'a> {
             frame_pointer: 0,
             pc: Some(0),
             stack: Vec::with_capacity(stack_size),
-            stack_frame: 0,
-            stack_frames: vec![root_frame],
+            closure_id: 0,
+            closures: vec![root_frame],
             runtime,
             log_level: InterpLogLevel::LogNone,
             stack_max: stack_size,
@@ -176,23 +176,23 @@ impl<'a> Interpreter<'a> {
                 let eq = n1 == n2;
                 self.push_stack(Value::Bool(eq))?;
             }
-            PushToStackFrame => {
-                self.stack_frames[self.stack_frame].stack.push(Value::Unset);
+            PushToClosure => {
+                self.closures[self.closure_id].stack.push(Value::Unset);
             }
             SStore(offset) => match offset {
-                SFOffset::Heap(index, depth) => {
+                SFOffset::Closure(index, depth) => {
                     let mut depth = *depth;
-                    let mut frame_pointer = self.stack_frame;
+                    let mut closuer_id = self.closure_id;
                     while depth > 0 {
-                        match self.stack_frames[frame_pointer].parent {
-                            Some(parent_pointer) => frame_pointer = parent_pointer,
-                            None => panic!("Invalid stack frame refernce when storing value"),
+                        match self.closures[closuer_id].parent {
+                            Some(parent_pointer) => closuer_id = parent_pointer,
+                            None => panic!("Invalid closure reference when storing value"),
                         }
                         depth -= 1;
                     }
                     let value = self.pop_stack()?;
-                    let stack_frame = &mut self.stack_frames[frame_pointer];
-                    stack_frame.stack[*index] = value;
+                    let closure = &mut self.closures[closuer_id];
+                    closure.stack[*index] = value;
                 }
                 SFOffset::Stack(offset) => {
                     let index = self.frame_pointer as isize + *offset;
@@ -201,18 +201,18 @@ impl<'a> Interpreter<'a> {
                 }
             },
             SLoad(offset) => match offset {
-                SFOffset::Heap(index, depth) => {
+                SFOffset::Closure(index, depth) => {
                     let mut depth = *depth;
-                    let mut frame_pointer = self.stack_frame;
+                    let mut closure_id = self.closure_id;
                     while depth > 0 {
-                        match self.stack_frames[frame_pointer].parent {
-                            Some(parent_pointer) => frame_pointer = parent_pointer,
-                            None => panic!("Invalid stack frame refernce when loading value"),
+                        match self.closures[closure_id].parent {
+                            Some(parent_pointer) => closure_id = parent_pointer,
+                            None => panic!("Invalid closure reference when loading value"),
                         }
                         depth -= 1;
                     }
-                    let stack_frame = &mut self.stack_frames[frame_pointer];
-                    let value = stack_frame.stack[*index].clone();
+                    let closure = &mut self.closures[closure_id];
+                    let value = closure.stack[*index].clone();
                     self.push_stack(value)?;
                 }
                 SFOffset::Stack(offset) => {
@@ -224,8 +224,8 @@ impl<'a> Interpreter<'a> {
             PushImmediate(primitive) => {
                 let value = match primitive {
                     Value::ProcAddress(addr, None) => {
-                        self.stack_frames[self.stack_frame].references += 1;
-                        Value::ProcAddress(*addr, Some(self.stack_frame))
+                        self.closures[self.closure_id].references += 1;
+                        Value::ProcAddress(*addr, Some(self.closure_id))
                     }
                     Value::ProcAddress(_, Some(_)) => panic!(
                         "A proc address can not contain a stack pointer before being evaluated"
@@ -282,17 +282,17 @@ impl<'a> Interpreter<'a> {
                         self.pc = Some(addr);
                         match parent_stack_frame {
                             Some(index) => {
-                                self.stack_frames[index].references += 1;
+                                self.closures[index].references += 1;
                             }
                             None => {}
                         }
-                        self.stack_frame = self.stack_frames.len();
-                        let stack_frame = StackFrame {
+                        self.closure_id = self.closures.len();
+                        let stack_frame = Closure {
                             references: 0,
                             parent: parent_stack_frame,
                             stack: Vec::new(),
                         };
-                        self.stack_frames.push(stack_frame);
+                        self.closures.push(stack_frame);
                     }
                     Value::RuntimeFn(id) => {
                         let mut args = self.get_foreign_function_arguments()?;

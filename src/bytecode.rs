@@ -42,7 +42,7 @@ pub type OPOffset = isize;
 #[derive(Debug, PartialEq, Clone)]
 pub enum SFOffset {
     Stack(OPOffset),
-    Heap(usize, usize),
+    Closure(usize, usize),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -63,7 +63,7 @@ pub enum OP {
     PopPc,
 
     PushImmediate(Value),
-    PushToStackFrame,
+    PushToClosure,
     PopStack(usize),
 
     SetStackFrame(OPOffset),
@@ -92,7 +92,7 @@ pub enum Value {
 
 #[derive(Clone, Debug, PartialEq)]
 enum ContextType {
-    StackFrame,
+    ClosureBoundary,
     Block,
     Loop { break_inst: usize },
 }
@@ -100,15 +100,15 @@ enum ContextType {
 struct ContextVariable {
     node_id: NodeID,
     offset: usize,
-    is_heap_allocated: bool,
+    requires_closure: bool,
 }
 
 impl ContextVariable {
-    fn new(node_id: NodeID, offset: usize, is_heap_allocated: bool) -> Self {
+    fn new(node_id: NodeID, offset: usize, requires_closure: bool) -> Self {
         Self {
             node_id,
             offset,
-            is_heap_allocated,
+            requires_closure,
         }
     }
 }
@@ -132,17 +132,17 @@ impl Context {
     fn local_allocations(&self) -> usize {
         let mut allocations = 0;
         for var in &self.variables {
-            if !var.is_heap_allocated {
+            if !var.requires_closure {
                 allocations += 1;
             }
         }
         allocations
     }
 
-    fn global_allocations(&self) -> usize {
+    fn closure_allocations(&self) -> usize {
         let mut allocations = 0;
         for var in &self.variables {
-            if var.is_heap_allocated {
+            if var.requires_closure {
                 allocations += 1;
             }
         }
@@ -243,24 +243,18 @@ impl<'a> BytecodeGenerator<'a> {
         scope
     }
 
-    fn get_variable_offset(&self, node_id: NodeID, var_id: NodeID) -> SFOffset {
-        let mut stack_frame_offset = 0;
+    fn get_variable_offset(&self, _: NodeID, var_id: NodeID) -> SFOffset {
+        let mut closure_offset = 0;
         for context in self.contexts.iter().rev() {
             if let Some(var) = context.variables.iter().find(|var| var.node_id == var_id) {
-                return if self.ast.get_node(var.node_id).is_referenced_globally() {
-                    SFOffset::Heap(var.offset, stack_frame_offset)
+                return if self.ast.get_node(var.node_id).has_closure_references() {
+                    SFOffset::Closure(var.offset, closure_offset)
                 } else {
                     SFOffset::Stack(var.offset as isize)
                 };
             }
-            if context.tp == ContextType::StackFrame {
-                stack_frame_offset += 1;
-                // panic!(
-                //     "\nTried to find variable but hit stackframe boundry:\n{}\n",
-                //     self.ast
-                //         .get_node(node_id)
-                //         .print_line(self.ast, "variable usage")
-                // )
+            if context.tp == ContextType::ClosureBoundary {
+                closure_offset += 1;
             }
         }
         panic!(
@@ -320,16 +314,12 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn add_var(&mut self, var_id: NodeID) {
-        let is_heap_allocated = self.ast.get_node(var_id).is_referenced_globally();
-        let offset = if is_heap_allocated {
+        let has_closure_reference = self.ast.get_node(var_id).has_closure_references();
+        let offset = if has_closure_reference {
             let mut offset = 0;
             match self.contexts.last() {
                 Some(context) => {
-                    for var in context.variables.iter() {
-                        if var.is_heap_allocated {
-                            offset += 1;
-                        }
-                    }
+                    offset += context.closure_allocations();
                 }
                 None => panic!("Context missing"),
             }
@@ -337,12 +327,8 @@ impl<'a> BytecodeGenerator<'a> {
         } else {
             let mut offset = 0;
             for context in self.contexts.iter().rev() {
-                for var in context.variables.iter() {
-                    if !var.is_heap_allocated {
-                        offset += 1;
-                    }
-                }
-                if context.tp == ContextType::StackFrame {
+                offset += context.local_allocations();
+                if context.tp == ContextType::ClosureBoundary {
                     break;
                 }
             }
@@ -350,7 +336,7 @@ impl<'a> BytecodeGenerator<'a> {
         };
 
         let context = self.get_context_mut();
-        let var = ContextVariable::new(var_id, offset, is_heap_allocated);
+        let var = ContextVariable::new(var_id, offset, has_closure_reference);
         context.variables.push(var);
     }
 
@@ -511,7 +497,7 @@ impl<'a> BytecodeGenerator<'a> {
     }
 
     fn ev_procedure(&mut self, node_id: NodeID, args: &[NodeID], body_id: NodeID) -> StackUsage {
-        let scope = self.with_scope(node_id, ContextType::StackFrame, |bc| {
+        let scope = self.with_scope(node_id, ContextType::ClosureBoundary, |bc| {
             for arg in args.iter() {
                 bc.add_var(*arg);
             }
@@ -609,13 +595,13 @@ impl<'a> BytecodeGenerator<'a> {
         let allocations = self.with_context(node_id, ContextType::Block, |bc| {
             for child_id in children {
                 let node = bc.ast.get_node(*child_id);
-                if node.is_referenced_globally() {
+                if node.has_closure_references() {
                     match &node.body {
                         NodeBody::VariableDeclaration(..)
                         | NodeBody::ConstDeclaration(..)
                         | NodeBody::Import(..) => {
                             bc.add_var(*child_id);
-                            bc.add_op(*child_id, OP::PushToStackFrame);
+                            bc.add_op(*child_id, OP::PushToClosure);
                         }
                         _ => (),
                     }

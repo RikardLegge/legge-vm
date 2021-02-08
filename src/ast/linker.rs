@@ -69,11 +69,15 @@ impl<'a, 'b> Linker<'a, 'b> {
     //     }
     // }
 
-    fn closest_variable(&self, node_id: NodeID, ident: &str) -> Result<Option<(NodeID, bool)>> {
+    fn closest_variable(
+        &self,
+        node_id: NodeID,
+        ident: &str,
+    ) -> Result<Option<(NodeID, NodeReferenceLocation)>> {
         self.ast.closest_variable(node_id, ident)
     }
 
-    fn closest_fn(&mut self, node_id: NodeID) -> Result<(NodeID, bool)> {
+    fn closest_fn(&mut self, node_id: NodeID) -> Result<(NodeID, NodeReferenceLocation)> {
         match self.ast.closest_fn(node_id) {
             Some(id) => Ok(id),
             _ => Err(self.ast.error(
@@ -84,7 +88,7 @@ impl<'a, 'b> Linker<'a, 'b> {
         }
     }
 
-    fn closest_loop(&mut self, node_id: NodeID) -> Result<(NodeID, bool)> {
+    fn closest_loop(&mut self, node_id: NodeID) -> Result<(NodeID, NodeReferenceLocation)> {
         match self.ast.closest_loop(node_id) {
             Some(id) => Ok(id),
             _ => Err(self.ast.error(
@@ -108,7 +112,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                     let new_body = match body {
                         VariableAssignment(ident, expr_id) => {
                             let expr_id = *expr_id;
-                            let (target_id, crosses_stack_frame) =
+                            let (target_id, location) =
                                 match self.closest_variable(node_id, &ident)? {
                                     Some(node_id) => node_id,
                                     None => {
@@ -121,16 +125,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                                         ))?
                                     }
                                 };
-                            let loc = if crosses_stack_frame {
-                                NodeReferenceLocation::Global
-                            } else {
-                                NodeReferenceLocation::Local
-                            };
-                            self.add_ref(target_id, node_id, ReceiveValue, loc);
+                            self.add_ref(target_id, node_id, ReceiveValue, location);
                             NodeBody::VariableAssignment(target_id, expr_id)
                         }
                         VariableValue(ident) => {
-                            let (target_id, crosses_stack_frame) =
+                            let (target_id, location) =
                                 match self.closest_variable(node_id, &ident)? {
                                     Some(node_id) => node_id,
                                     None => {
@@ -143,16 +142,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                                         ))?
                                     }
                                 };
-                            let loc = if crosses_stack_frame {
-                                NodeReferenceLocation::Global
-                            } else {
-                                NodeReferenceLocation::Local
-                            };
-                            self.add_ref(target_id, node_id, AssignValue, loc);
+                            self.add_ref(target_id, node_id, AssignValue, location);
                             NodeBody::VariableValue(target_id)
                         }
                         Call(ident, _) => {
-                            let (target_id, crosses_stack_frame) =
+                            let (target_id, location) =
                                 match self.closest_variable(node_id, &ident)? {
                                     Some(node_id) => node_id,
                                     None => Err(self.ast.error(
@@ -168,12 +162,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                                 NodeBody::Unlinked(Call(_, args)) => mem::replace(args, Vec::new()),
                                 _ => unreachable!(),
                             };
-                            let loc = if crosses_stack_frame {
-                                NodeReferenceLocation::Global
-                            } else {
-                                NodeReferenceLocation::Local
-                            };
-                            self.add_ref(target_id, node_id, GoTo, loc);
+                            self.add_ref(target_id, node_id, GoTo, location);
                             NodeBody::Call(target_id, args)
                         }
                         ImportValue(ident) => {
@@ -195,13 +184,8 @@ impl<'a, 'b> Linker<'a, 'b> {
                             }
                         }
                         Return(_) => {
-                            let (target_id, crosses_stack_frame) = self.closest_fn(node_id)?;
-                            let loc = if crosses_stack_frame {
-                                NodeReferenceLocation::Global
-                            } else {
-                                NodeReferenceLocation::Local
-                            };
-                            self.add_ref(target_id, node_id, GoTo, loc);
+                            let (target_id, location) = self.closest_fn(node_id)?;
+                            self.add_ref(target_id, node_id, GoTo, location);
                             let node = self.ast.get_node_mut(node_id);
                             let ret = match &mut node.body {
                                 NodeBody::Unlinked(Return(ret)) => mem::replace(ret, None),
@@ -210,13 +194,8 @@ impl<'a, 'b> Linker<'a, 'b> {
                             NodeBody::Return(target_id, ret)
                         }
                         Break => {
-                            let (target_id, crosses_stack_frame) = self.closest_loop(node_id)?;
-                            let loc = if crosses_stack_frame {
-                                NodeReferenceLocation::Global
-                            } else {
-                                NodeReferenceLocation::Local
-                            };
-                            self.add_ref(target_id, node_id, GoTo, loc);
+                            let (target_id, location) = self.closest_loop(node_id)?;
+                            self.add_ref(target_id, node_id, GoTo, location);
                             NodeBody::Break(target_id)
                         }
                     };

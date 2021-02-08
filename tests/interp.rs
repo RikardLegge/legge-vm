@@ -87,7 +87,7 @@ fn test_pass_function() {
 }
 
 #[test]
-fn test_access_value_of_other_stack_frame() {
+fn test_access_non_local_value() {
     run_test(
         "
         val :: 1;
@@ -100,7 +100,7 @@ fn test_access_value_of_other_stack_frame() {
 }
 
 #[test]
-fn test_modify_value_of_other_stack_frame() {
+fn test_modify_non_local_value() {
     run_test(
         "
         val := 1;
