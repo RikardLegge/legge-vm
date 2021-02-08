@@ -117,6 +117,25 @@ fn test_modify_non_local_value() {
 }
 
 #[test]
+fn test_returned_closure() {
+    run_test(
+        "
+        incrementer :: fn() -> Fn() -> int {
+            val := 0; 
+            return fn() -> int {
+                val = val + 1;
+                return val;
+            };
+        }
+        inc := incrementer();
+        inc();
+        inc();
+        exit(inc());",
+        Some(Int(3)),
+    );
+}
+
+#[test]
 fn test_comments_after_return() {
     run_test(
         "
