@@ -186,3 +186,47 @@ fn test_var_assign_other_type() {
 fn test_const_assign() {
     run_test("a :: 1; a = 2;", None);
 }
+
+#[test]
+#[should_panic]
+fn test_invalid_return_value_type_1() {
+    run_test(
+        "
+        incrementer :: fn() -> Fn() -> int {
+            return fn() {};
+        }
+        inc := incrementer();
+        val := inc();
+        exit(val);",
+        None,
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_invalid_return_value_type_2() {
+    run_test(
+        "
+        incrementer :: fn() -> Fn() -> int {
+            return fn() -> bool {return false};
+        }
+        inc := incrementer();
+        val := inc();
+        exit(val);",
+        None,
+    );
+}
+
+#[test]
+fn test_valid_return_value_type() {
+    run_test(
+        "
+        incrementer :: fn() -> Fn() -> int {
+            return fn() -> int {return 1;};
+        }
+        inc := incrementer();
+        val := inc();
+        exit(val);",
+        Some(Int(1)),
+    );
+}

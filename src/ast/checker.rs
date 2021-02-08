@@ -121,14 +121,18 @@ impl<'a> Checker<'a> {
                             _ => {
                                 if let Some(ret_id) = ret_value {
                                     let ret = self.ast.get_node(*ret_id).tp.as_ref().unwrap();
-                                    if ret.tp == func.tp {
-                                        Err(self.ast.error(
-                                            &format!("Return statement does not return the right type, {:?} expected, {:?} provided", func.tp, ret.tp),
-                                            "Wrong return type for function",
-                                            vec![*ret_id],
-                                        ))
+                                    if let NodeType::Fn(_, func_ret_tp) = &func.tp {
+                                        if ret.tp == **func_ret_tp {
+                                            Ok(())
+                                        } else {
+                                            Err(self.ast.error(
+                                                &format!("Return statement does not return the right type, {:?} expected, {:?} provided", func.tp, ret.tp),
+                                                "Wrong return type for function",
+                                                vec![*ret_id],
+                                            ))
+                                        }
                                     } else {
-                                        Ok(())
+                                        unimplemented!();
                                     }
                                 } else {
                                     Err(self.ast.error(

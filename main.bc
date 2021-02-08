@@ -5,9 +5,15 @@
 //    }
 //    i = i - 1;
 //}
-import log;
+//import log;
 //a :: 1;
 //double :: fn(i: int) -> int {
 //  return a * i;
 //}
-log(1);
+//log(1);
+
+incrementer :: fn() -> Fn() -> int {
+    return fn() {};
+}
+inc := incrementer();
+val := inc();
