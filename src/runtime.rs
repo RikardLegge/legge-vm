@@ -1,6 +1,6 @@
 use crate::ast::NodeType;
-use crate::bytecode::{Value, OP};
-use crate::interpreter::{InterpError, InterpResult, Interpreter};
+use crate::bytecode::OP;
+use crate::interpreter::{InterpError, InterpResult, Interpreter, Value};
 
 pub type FunctionReturn = InterpResult<Option<Value>>;
 pub type RuntimeFunction = &'static dyn Fn(&mut Interpreter, &mut Vec<Value>) -> FunctionReturn;

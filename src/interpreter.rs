@@ -1,16 +1,36 @@
-use crate::bytecode::{Bytecode, SFOffset, Value, OP};
+use crate::bytecode;
+use crate::bytecode::{Bytecode, SFOffset, OP};
 use crate::runtime::Runtime;
+use std::mem;
 
 struct Closure {
-    pub references: usize,
     pub parent: Option<usize>,
     pub stack: Vec<Value>,
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct StackFrame {
+    stack_pointer: usize,
+    closure_id: Option<usize>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum Value {
+    Unset,
+    Int(isize),
+    Bool(bool),
+    String(String),
+    ProcAddress(usize, Option<usize>),
+
+    PC(usize),
+    StackFrame(StackFrame),
+    RuntimeFn(usize),
+}
+
 pub struct Interpreter<'a> {
     pc: Option<usize>,
-    frame_pointer: usize,
-    closure_id: usize,
+    pending_frame: Option<StackFrame>,
+    frame: StackFrame,
     closures: Vec<Closure>,
     pub stack: Vec<Value>,
     pub runtime: &'a Runtime,
@@ -46,17 +66,15 @@ pub type InterpResult<V = Value> = Result<V, InterpError>;
 impl<'a> Interpreter<'a> {
     pub fn new(runtime: &'a Runtime) -> Self {
         let stack_size = 20;
-        let root_frame = Closure {
-            parent: None,
-            references: 0,
-            stack: Vec::new(),
-        };
         Interpreter {
-            frame_pointer: 0,
+            pending_frame: None,
+            frame: StackFrame {
+                stack_pointer: 0,
+                closure_id: None,
+            },
             pc: Some(0),
             stack: Vec::with_capacity(stack_size),
-            closure_id: 0,
-            closures: vec![root_frame],
+            closures: Vec::new(),
             runtime,
             log_level: InterpLogLevel::LogNone,
             stack_max: stack_size,
@@ -112,7 +130,7 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn get_foreign_function_arguments(&mut self) -> Result<Vec<Value>, InterpError> {
-        let count = self.stack.len() - self.frame_pointer;
+        let count = self.stack.len() - self.frame.stack_pointer;
         let mut arguments = Vec::with_capacity(count);
         for _ in 0..count {
             let argument = self.pop_stack()?;
@@ -127,20 +145,21 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn execute(&mut self, cmd: &OP) -> InterpResult<()> {
+        self.executed_instructions += 1;
+        let result = self.run_command(cmd);
         if self.log_level >= InterpLogLevel::LogEval {
             self.debug_log(
                 InterpLogLevel::LogEval,
                 &format!(
                     "PC: {:>4} SP: {:>4} Inst: {:<40} Stack: {:?}",
                     format!("{:?}", self.pc),
-                    self.frame_pointer,
+                    self.frame.stack_pointer,
                     format!("{:?}", cmd),
                     self.stack
                 ),
             );
         }
-        self.executed_instructions += 1;
-        self.run_command(cmd)
+        result
     }
 
     fn run_command(&mut self, cmd: &OP) -> InterpResult<()> {
@@ -177,25 +196,27 @@ impl<'a> Interpreter<'a> {
                 self.push_stack(Value::Bool(eq))?;
             }
             PushToClosure => {
-                self.closures[self.closure_id].stack.push(Value::Unset);
+                self.closures[self.frame.closure_id.unwrap()]
+                    .stack
+                    .push(Value::Unset);
             }
             SStore(offset) => match offset {
                 SFOffset::Closure(index, depth) => {
                     let mut depth = *depth;
-                    let mut closuer_id = self.closure_id;
+                    let mut closure_id = self.frame.closure_id.unwrap();
                     while depth > 0 {
-                        match self.closures[closuer_id].parent {
-                            Some(parent_pointer) => closuer_id = parent_pointer,
+                        match self.closures[closure_id].parent {
+                            Some(parent_pointer) => closure_id = parent_pointer,
                             None => panic!("Invalid closure reference when storing value"),
                         }
                         depth -= 1;
                     }
                     let value = self.pop_stack()?;
-                    let closure = &mut self.closures[closuer_id];
+                    let closure = &mut self.closures[closure_id];
                     closure.stack[*index] = value;
                 }
                 SFOffset::Stack(offset) => {
-                    let index = self.frame_pointer as isize + *offset;
+                    let index = self.frame.stack_pointer as isize + *offset;
                     assert!(index >= 0);
                     self.stack[index as usize] = self.pop_stack()?;
                 }
@@ -203,7 +224,7 @@ impl<'a> Interpreter<'a> {
             SLoad(offset) => match offset {
                 SFOffset::Closure(index, depth) => {
                     let mut depth = *depth;
-                    let mut closure_id = self.closure_id;
+                    let mut closure_id = self.frame.closure_id.unwrap();
                     while depth > 0 {
                         match self.closures[closure_id].parent {
                             Some(parent_pointer) => closure_id = parent_pointer,
@@ -216,26 +237,29 @@ impl<'a> Interpreter<'a> {
                     self.push_stack(value)?;
                 }
                 SFOffset::Stack(offset) => {
-                    let index = self.frame_pointer as isize + *offset;
+                    let index = self.frame.stack_pointer as isize + *offset;
                     let value = self.stack[index as usize].clone();
                     self.push_stack(value)?;
                 }
             },
-            PushImmediate(primitive) => {
+            PushImmediateBytecode(primitive) => {
                 let value = match primitive {
-                    Value::ProcAddress(addr, None) => {
-                        self.closures[self.closure_id].references += 1;
-                        Value::ProcAddress(*addr, Some(self.closure_id))
+                    bytecode::Value::ProcAddress(addr) => {
+                        Value::ProcAddress(*addr, self.frame.closure_id)
                     }
-                    Value::ProcAddress(_, Some(_)) => panic!(
-                        "A proc address can not contain a stack pointer before being evaluated"
-                    ),
-                    // We clone here since all immediate values are constants and
-                    // should never change.
-                    value => (*value).clone(),
+                    bytecode::Value::Unset => Value::Unset,
+                    bytecode::Value::Int(val) => Value::Int(*val),
+                    bytecode::Value::Bool(val) => Value::Bool(*val),
+                    bytecode::Value::String(val) => Value::String(val.clone()),
+                    bytecode::Value::RuntimeFn(val) => Value::RuntimeFn(*val),
                 };
                 self.push_stack(value)?;
             }
+            PushImmediate(primitive) => {
+                let value = (*primitive).clone();
+                self.push_stack(value)?;
+            }
+
             PopStack(count) => {
                 self.pop_stack_count(*count)?;
             }
@@ -277,22 +301,24 @@ impl<'a> Interpreter<'a> {
             },
             Jump => {
                 let val = self.pop_stack()?;
+
+                assert!(self.pending_frame.is_some());
+                let frame = mem::replace(&mut self.pending_frame, None);
+                self.frame = frame.unwrap();
+
+                let closure_id = self.closures.len();
+                let closure = Closure {
+                    parent: None,
+                    stack: Vec::new(),
+                };
+                self.closures.push(closure);
+                assert!(self.frame.closure_id.is_none());
+                self.frame.closure_id = Some(closure_id);
+
                 match val {
                     Value::ProcAddress(addr, parent_stack_frame) => {
+                        self.closures[self.frame.closure_id.unwrap()].parent = parent_stack_frame;
                         self.pc = Some(addr);
-                        match parent_stack_frame {
-                            Some(index) => {
-                                self.closures[index].references += 1;
-                            }
-                            None => {}
-                        }
-                        self.closure_id = self.closures.len();
-                        let stack_frame = Closure {
-                            references: 0,
-                            parent: parent_stack_frame,
-                            stack: Vec::new(),
-                        };
-                        self.closures.push(stack_frame);
                     }
                     Value::RuntimeFn(id) => {
                         let mut args = self.get_foreign_function_arguments()?;
@@ -301,7 +327,7 @@ impl<'a> Interpreter<'a> {
                         // Just make sure that the function has not set the pc to None
                         // If pc is none then we will terminate
                         if self.pc != None {
-                            self.run_command(&PopFramePointer)?;
+                            self.run_command(&PopStackFrame)?;
                             self.run_command(&PopPc)?;
                             if let Some(returns) = returns {
                                 self.push_stack(returns)?;
@@ -311,16 +337,20 @@ impl<'a> Interpreter<'a> {
                     _ => unimplemented!(),
                 }
             }
-            PushFramePointer => {
-                self.push_stack(Value::StackFrame(self.frame_pointer))?;
+            PrepareStackFrame(arg_count) => {
+                let frame = StackFrame {
+                    stack_pointer: self.stack.len() - arg_count,
+                    closure_id: None,
+                };
+                self.pending_frame = Some(frame);
             }
-            SetStackFrame(offset) => {
-                let end = self.stack.len() as isize;
-                self.frame_pointer = (end + *offset) as usize;
+            PushStackFrame => {
+                let frame = self.frame.clone();
+                self.push_stack(Value::StackFrame(frame))?;
             }
-            PopFramePointer => match self.pop_stack()? {
-                Value::StackFrame(addr) => {
-                    self.frame_pointer = addr;
+            PopStackFrame => match self.pop_stack()? {
+                Value::StackFrame(frame) => {
+                    self.frame = frame;
                 }
                 _ => unreachable!(),
             },

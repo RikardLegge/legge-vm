@@ -1,4 +1,5 @@
 use crate::ast::{Ast, NodeBody, NodeID, NodeType, NodeValue};
+use crate::interpreter;
 use crate::token::ArithmeticOP;
 use std::fmt;
 use std::fmt::Formatter;
@@ -62,13 +63,14 @@ pub enum OP {
     PushPc(OPOffset),
     PopPc,
 
-    PushImmediate(Value),
+    PushImmediateBytecode(Value),
+    PushImmediate(interpreter::Value),
     PushToClosure,
     PopStack(usize),
 
-    SetStackFrame(OPOffset),
-    PushFramePointer,
-    PopFramePointer,
+    PrepareStackFrame(usize),
+    PushStackFrame,
+    PopStackFrame,
 
     Jump,
 
@@ -83,10 +85,7 @@ pub enum Value {
     Int(isize),
     Bool(bool),
     String(String),
-    ProcAddress(usize, Option<usize>),
-
-    PC(usize),
-    StackFrame(usize),
+    ProcAddress(usize),
     RuntimeFn(usize),
 }
 
@@ -205,7 +204,7 @@ impl<'a> BytecodeGenerator<'a> {
         };
         BytecodeGenerator {
             ast,
-            procedures: vec![placeholder.clone(), placeholder],
+            procedures: vec![placeholder.clone(), placeholder.clone(), placeholder],
             scopes: Vec::new(),
             contexts: Vec::new(),
         }
@@ -218,9 +217,13 @@ impl<'a> BytecodeGenerator<'a> {
         // Patch entrypoint instructions
         code[0] = Instruction {
             node_id: scope.node_id,
-            op: OP::PushImmediate(Value::ProcAddress(entrypoint, None)),
+            op: OP::PrepareStackFrame(0),
         };
         code[1] = Instruction {
+            node_id: scope.node_id,
+            op: OP::PushImmediateBytecode(Value::ProcAddress(entrypoint)),
+        };
+        code[2] = Instruction {
             node_id: scope.node_id,
             op: OP::Jump,
         };
@@ -491,7 +494,7 @@ impl<'a> BytecodeGenerator<'a> {
         if allocations > 0 {
             self.add_op(node_id, OP::PopStack(allocations));
         }
-        self.add_op(node_id, OP::PopFramePointer);
+        self.add_op(node_id, OP::PopStackFrame);
         self.add_op(node_id, OP::PopPc);
         StackUsage::new(0, 0)
     }
@@ -513,7 +516,7 @@ impl<'a> BytecodeGenerator<'a> {
         let proc_index = self.add_proc(scope);
         self.add_op(
             node_id,
-            OP::PushImmediate(Value::ProcAddress(proc_index, None)),
+            OP::PushImmediateBytecode(Value::ProcAddress(proc_index)),
         );
         StackUsage::new(0, 1)
     }
@@ -562,21 +565,21 @@ impl<'a> BytecodeGenerator<'a> {
         };
 
         if return_values > 0 {
-            self.add_op(node_id, OP::PushImmediate(Value::Unset));
+            self.add_op(node_id, OP::PushImmediateBytecode(Value::Unset));
         }
 
         let pc_index = self.add_op(node_id, OP::Panic);
-        self.add_op(node_id, OP::PushFramePointer);
+        self.add_op(node_id, OP::PushStackFrame);
         for arg in args {
             let usage = self.ev_expression(*arg);
             assert_eq!(1, usage.pushed);
             assert_eq!(0, usage.popped);
         }
+        self.add_op(node_id, OP::PrepareStackFrame(args.len()));
         self.add_op(
             node_id,
             OP::SLoad(self.get_variable_offset(node_id, proc_var_id)),
         );
-        self.add_op(node_id, OP::SetStackFrame(-(args.len() as isize + 1)));
         self.add_op(node_id, OP::Jump);
         let offset = self.op_index() - pc_index - 1;
         self.set_op(pc_index, OP::PushPc(offset as isize));
@@ -611,7 +614,7 @@ impl<'a> BytecodeGenerator<'a> {
                         | NodeBody::ConstDeclaration(..)
                         | NodeBody::Import(..) => {
                             bc.add_var(*child_id);
-                            bc.add_op(*child_id, OP::PushImmediate(Value::Unset));
+                            bc.add_op(*child_id, OP::PushImmediateBytecode(Value::Unset));
                         }
                         _ => (),
                     }
@@ -643,7 +646,7 @@ impl<'a> BytecodeGenerator<'a> {
         match op {
             ArithmeticOP::Add => self.ev_expression(expr_id),
             ArithmeticOP::Sub => {
-                self.add_op(node_id, OP::PushImmediate(Value::Int(0)));
+                self.add_op(node_id, OP::PushImmediateBytecode(Value::Int(0)));
                 let usage = self.ev_expression(expr_id);
                 assert_eq!(1, usage.pushed);
                 self.add_op(node_id, OP::SubI);
@@ -698,7 +701,7 @@ impl<'a> BytecodeGenerator<'a> {
             String(val) => Value::String(val.clone()),
             RuntimeFn(id) => Value::RuntimeFn(*id),
         };
-        self.add_op(node_id, OP::PushImmediate(value));
+        self.add_op(node_id, OP::PushImmediateBytecode(value));
         StackUsage::new(0, 1)
     }
 }

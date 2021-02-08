@@ -1,4 +1,5 @@
-use crate::bytecode::{Bytecode, Value};
+use crate::bytecode::Bytecode;
+use crate::interpreter::Value;
 use interpreter::{InterpLogLevel, Interpreter};
 use token::Tokenizer;
 
@@ -40,7 +41,7 @@ where
     let runtime = runtime::get();
 
     let log_level = if logging {
-        InterpLogLevel::LogDebug
+        InterpLogLevel::LogEval
     } else {
         InterpLogLevel::LogNone
     };
