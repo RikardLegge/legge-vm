@@ -236,7 +236,7 @@ impl<'a> Interpreter<'a> {
             SStore(offset) => match offset {
                 SFOffset::Closure(index, depth) => {
                     let mut depth = *depth;
-                    let mut closure = self.frame.closure.as_ref().unwrap().clone();
+                    let mut closure = Rc::clone(self.frame.closure.as_ref().unwrap());
                     while depth > 0 {
                         let parent_closure;
                         match &closure.as_ref().borrow().parent {
@@ -258,7 +258,7 @@ impl<'a> Interpreter<'a> {
             SLoad(offset) => match offset {
                 SFOffset::Closure(index, depth) => {
                     let mut depth = *depth;
-                    let mut closure = self.frame.closure.as_ref().unwrap().clone();
+                    let mut closure = Rc::clone(self.frame.closure.as_ref().unwrap());
                     while depth > 0 {
                         let parent_closure;
                         match &closure.as_ref().borrow().parent {
