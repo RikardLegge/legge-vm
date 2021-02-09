@@ -1,17 +1,9 @@
-use crate::bytecode;
 use crate::bytecode::{Bytecode, SFOffset, OP};
 use crate::runtime::Runtime;
+use crate::{bytecode, LogLevel};
 use std::cell::RefCell;
 use std::mem;
 use std::rc::Rc;
-
-#[allow(dead_code)]
-#[derive(Debug, PartialOrd, PartialEq)]
-pub enum InterpLogLevel {
-    LogNone = 0,
-    LogDebug = 1,
-    LogEval = 2,
-}
 
 #[derive(Debug)]
 pub struct Err {
@@ -34,7 +26,7 @@ pub struct Interpreter<'a> {
     frame: StackFrame,
     stack: Vec<Value>,
     pub runtime: &'a Runtime,
-    pub log_level: InterpLogLevel,
+    pub log_level: LogLevel,
     pub stack_max: usize,
     pub executed_instructions: usize,
     pub interrupt: &'a dyn Fn(bytecode::Value),
@@ -52,7 +44,7 @@ impl<'a> Interpreter<'a> {
             pc: Some(0),
             stack: Vec::with_capacity(stack_size),
             runtime,
-            log_level: InterpLogLevel::LogNone,
+            log_level: LogLevel::LogNone,
             stack_max: stack_size,
             executed_instructions: 0,
             interrupt: &|_| {},
@@ -71,9 +63,9 @@ impl<'a> Interpreter<'a> {
     pub fn execute(&mut self, cmd: &OP) -> Result {
         self.executed_instructions += 1;
         let result = self.run_command(cmd);
-        if self.log_level >= InterpLogLevel::LogEval {
+        if self.log_level >= LogLevel::LogEval {
             self.debug_log(
-                InterpLogLevel::LogEval,
+                LogLevel::LogEval,
                 &format!(
                     "PC: {:>4} SP: {:>4} Inst: {:<40} Stack: {:?}",
                     format!("{:?}", self.pc),
@@ -110,7 +102,7 @@ impl<'a> Interpreter<'a> {
 }
 
 impl<'a> Interpreter<'a> {
-    fn debug_log(&self, level: InterpLogLevel, info: &str) {
+    fn debug_log(&self, level: LogLevel, info: &str) {
         if self.log_level >= level {
             println!("{}", info);
         }

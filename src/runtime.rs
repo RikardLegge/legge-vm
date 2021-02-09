@@ -1,4 +1,5 @@
 use crate::ast::NodeType;
+use crate::bytecode::Value::Int;
 use crate::bytecode::{Value, OP};
 use crate::interpreter::{Err, Interpreter, Result};
 
@@ -21,6 +22,7 @@ pub fn get() -> Runtime {
     use crate::ast::NodeType::*;
     let functions = vec![
         ff("log", vec![VarArg(Box::new(Any))], Void, &log),
+        ff("sin", vec![Int], Int, &sin),
         ff("assert", vec![Any, Any], Void, &assert),
         ff("exit", vec![Any], Void, &exit),
     ];
@@ -41,6 +43,17 @@ fn ff(
         function,
         tp,
     }
+}
+
+fn sin(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
+    if args.len() != 1 {
+        panic!("Assert must be called with one arguments")
+    }
+    let result = match args[0] {
+        Value::Int(angle) => (angle as f64).sin(),
+        _ => panic!("invalid value type passed to sin: {:?}", args[0]),
+    };
+    Ok(Some(Int(result.round() as isize)))
 }
 
 fn assert(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {

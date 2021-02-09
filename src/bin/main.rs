@@ -1,4 +1,5 @@
 use leggevm::run_code;
+use leggevm::LogLevel;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -10,5 +11,5 @@ fn main() {
     f.read_to_string(&mut contents)
         .expect("something went wrong reading the file");
 
-    run_code(contents, true, &|v| println!("{:?}", v))
+    run_code(contents, LogLevel::LogEval, &|v| println!("{:?}", v))
 }

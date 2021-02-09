@@ -1,5 +1,5 @@
 use crate::bytecode::{Bytecode, Value};
-use interpreter::{InterpLogLevel, Interpreter};
+use interpreter::Interpreter;
 
 mod ast;
 pub mod bytecode;
@@ -8,7 +8,16 @@ mod interpreter;
 mod runtime;
 mod token;
 
-pub fn compile(timing: &mut debug::Timing, logging: bool, code: String) -> Bytecode {
+#[allow(dead_code)]
+#[derive(Debug, PartialOrd, PartialEq, Copy, Clone)]
+pub enum LogLevel {
+    LogNone = 0,
+    LogDebug = 1,
+    LogTiming = 2,
+    LogEval = 3,
+}
+
+pub fn compile(timing: &mut debug::Timing, log_level: LogLevel, code: String) -> Bytecode {
     let runtime = runtime::get();
 
     let start = debug::start_timer();
@@ -16,7 +25,7 @@ pub fn compile(timing: &mut debug::Timing, logging: bool, code: String) -> Bytec
     timing.token = debug::stop_timer(start);
 
     let (ast, ast_timing) = ast::from_tokens(tokens.into_iter(), &runtime).unwrap();
-    if logging {
+    if log_level >= LogLevel::LogTiming {
         println!("{:?}", ast);
     }
     timing.ast = ast_timing;
@@ -24,25 +33,20 @@ pub fn compile(timing: &mut debug::Timing, logging: bool, code: String) -> Bytec
     let start = debug::start_timer();
     let bytecode = bytecode::from_ast(&ast);
     timing.bytecode = debug::stop_timer(start);
-    if logging {
+    if log_level >= LogLevel::LogTiming {
         println!("{:?}", bytecode);
     }
     return bytecode;
 }
 
-pub fn run_code<F>(code: String, logging: bool, interrupt: F)
+pub fn run_code<F>(code: String, log_level: LogLevel, interrupt: F)
 where
     F: Fn(Value),
 {
     let mut timing = debug::Timing::default();
-    let bytecode = compile(&mut timing, logging, code);
+    let bytecode = compile(&mut timing, log_level, code);
     let runtime = runtime::get();
 
-    let log_level = if logging {
-        InterpLogLevel::LogEval
-    } else {
-        InterpLogLevel::LogNone
-    };
     let mut interpreter = Interpreter::new(&runtime);
     interpreter.log_level = log_level;
     interpreter.interrupt = &interrupt;
@@ -52,7 +56,7 @@ where
     timing.interpreter = debug::stop_timer(start);
     timing.avg_instruction = timing.interpreter / timing.instructions as u32;
 
-    if logging {
+    if log_level >= LogLevel::LogTiming {
         dbg!(timing);
     }
 }

@@ -4,12 +4,13 @@ use std::rc::Rc;
 use leggevm::bytecode::Value;
 use leggevm::bytecode::Value::*;
 use leggevm::run_code;
+use leggevm::LogLevel;
 
 fn run_test(code: &str, expected_result: Option<Value>) {
     let code = format!("import exit;{}", code);
     let result = Rc::new(RefCell::new(None));
     let assign_result = result.clone();
-    run_code(code.into(), false, move |v| {
+    run_code(code.into(), LogLevel::LogNone, move |v| {
         *assign_result.borrow_mut() = Some(v);
     });
     let result = result.borrow();
