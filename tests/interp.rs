@@ -170,18 +170,18 @@ fn test_var_assign() {
 
 #[test]
 fn test_call_builtin() {
-    run_test("import sin; exit(sin(sin(0)));", Some(Int(0)));
+    run_test("import sin; exit(sin(sin(sin(0))));", Some(Int(0)));
 }
 
 #[test]
 fn test_call_multiple() {
     run_test(
         "\
-        pass :: fn(a: int) -> int {\
-            return a;
+        inc :: fn(a: int) -> int {\
+            return a + 1;
         } \
-        exit(pass(pass(pass(0))));",
-        Some(Int(0)),
+        exit(inc(inc(inc(0))));",
+        Some(Int(3)),
     );
 }
 

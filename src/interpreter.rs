@@ -314,7 +314,12 @@ impl<'a> Interpreter<'a> {
                             self.run_command(&PopPc)?;
                             if let Some(returns) = returns {
                                 let value = Value::from(returns, &self.frame.closure);
-                                self.push_stack(value)?;
+                                if let Some(&Value::Unset) = self.stack.last() {
+                                    let return_index = self.stack.len() - 1;
+                                    self.stack[return_index] = value;
+                                } else {
+                                    panic!("Invalid stack value");
+                                }
                             }
                         }
                     }

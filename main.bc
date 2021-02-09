@@ -13,5 +13,4 @@
 //}
 import log;
 import sin;
-v := sin(0);
-log(v);
+log(sin(0));
