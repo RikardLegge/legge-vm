@@ -1,19 +1,18 @@
 use crate::bytecode::{Bytecode, Value};
 use interpreter::{InterpLogLevel, Interpreter};
-use token::Tokenizer;
 
 mod ast;
 pub mod bytecode;
-pub mod debug;
-pub mod interpreter;
-pub mod runtime;
+mod debug;
+mod interpreter;
+mod runtime;
 mod token;
 
 pub fn compile(timing: &mut debug::Timing, logging: bool, code: String) -> Bytecode {
     let runtime = runtime::get();
 
     let start = debug::start_timer();
-    let tokens = Tokenizer::parse(code.chars());
+    let tokens = token::from_chars(code.chars());
     timing.token = debug::stop_timer(start);
 
     let (ast, ast_timing) = ast::from_tokens(tokens.into_iter(), &runtime).unwrap();

@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::mem;
 use std::rc::Rc;
 
+#[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq)]
 pub enum InterpLogLevel {
     LogNone = 0,

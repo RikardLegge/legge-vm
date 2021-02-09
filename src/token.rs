@@ -3,6 +3,24 @@ use std::fmt::Formatter;
 use std::iter::Peekable;
 use std::str::Chars;
 
+pub fn from_chars(iter: Chars) -> Vec<Token> {
+    let mut iter = iter.peekable();
+    let mut parser = Tokenizer {
+        iter: &mut iter,
+        line_number: 1,
+        last_id: 0,
+        index: 0,
+    };
+    let mut tokens = Vec::new();
+
+    while parser.peek().is_some() {
+        if let Some(token) = parser.parse_global() {
+            tokens.push(token);
+        }
+    }
+    tokens
+}
+
 #[derive(Copy, Clone, PartialEq)]
 pub enum ArithmeticOP {
     Add,
@@ -96,24 +114,6 @@ pub struct Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
-    pub fn parse(iter: Chars<'a>) -> Vec<Token> {
-        let mut iter = iter.peekable();
-        let mut parser = Tokenizer {
-            iter: &mut iter,
-            line_number: 1,
-            last_id: 0,
-            index: 0,
-        };
-        let mut tokens = Vec::new();
-
-        while parser.peek().is_some() {
-            if let Some(token) = parser.parse_global() {
-                tokens.push(token);
-            }
-        }
-        tokens
-    }
-
     fn peek(&mut self) -> Option<char> {
         let ch = self.iter.peek()?;
         Some(*ch)
