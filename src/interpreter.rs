@@ -1,37 +1,67 @@
 use crate::bytecode;
 use crate::bytecode::{Bytecode, SFOffset, OP};
 use crate::runtime::Runtime;
+use std::cell::RefCell;
 use std::mem;
+use std::rc::Rc;
 
-struct Closure {
-    pub parent: Option<usize>,
+#[derive(Debug, Clone)]
+pub struct Closure {
+    pub parent: Option<Rc<RefCell<Closure>>>,
     pub stack: Vec<Value>,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct StackFrame {
     stack_pointer: usize,
-    closure_id: Option<usize>,
+    closure: Option<Rc<RefCell<Closure>>>,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Unset,
     Int(isize),
     Bool(bool),
     String(String),
-    ProcAddress(usize, Option<usize>),
+    ProcAddress(usize, Option<Rc<RefCell<Closure>>>),
 
     PC(usize),
     StackFrame(StackFrame),
     RuntimeFn(usize),
 }
 
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        use Value::*;
+        match (self, other) {
+            (Int(a), Int(b)) => a == b,
+            (Bool(a), Bool(b)) => a == b,
+            (String(a), String(b)) => a == b,
+            (ProcAddress(a, _), ProcAddress(b, _)) => a == b,
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl Value {
+    pub fn into_bytecode(self) -> Option<bytecode::Value> {
+        match self {
+            Value::Unset => Some(bytecode::Value::Unset),
+            Value::Int(val) => Some(bytecode::Value::Int(val)),
+            Value::Bool(val) => Some(bytecode::Value::Bool(val)),
+            Value::String(val) => Some(bytecode::Value::String(val)),
+            Value::ProcAddress(addr, _) => Some(bytecode::Value::ProcAddress(addr)),
+            Value::RuntimeFn(addr) => Some(bytecode::Value::RuntimeFn(addr)),
+            Value::PC(_) => None,
+            Value::StackFrame(_) => None,
+        }
+    }
+}
+
 pub struct Interpreter<'a> {
     pc: Option<usize>,
     pending_frame: Option<StackFrame>,
     frame: StackFrame,
-    closures: Vec<Closure>,
     pub stack: Vec<Value>,
     pub runtime: &'a Runtime,
     pub log_level: InterpLogLevel,
@@ -70,11 +100,10 @@ impl<'a> Interpreter<'a> {
             pending_frame: None,
             frame: StackFrame {
                 stack_pointer: 0,
-                closure_id: None,
+                closure: None,
             },
             pc: Some(0),
             stack: Vec::with_capacity(stack_size),
-            closures: Vec::new(),
             runtime,
             log_level: InterpLogLevel::LogNone,
             stack_max: stack_size,
@@ -196,24 +225,29 @@ impl<'a> Interpreter<'a> {
                 self.push_stack(Value::Bool(eq))?;
             }
             PushToClosure => {
-                self.closures[self.frame.closure_id.unwrap()]
+                self.frame
+                    .closure
+                    .as_ref()
+                    .unwrap()
+                    .borrow_mut()
                     .stack
                     .push(Value::Unset);
             }
             SStore(offset) => match offset {
                 SFOffset::Closure(index, depth) => {
                     let mut depth = *depth;
-                    let mut closure_id = self.frame.closure_id.unwrap();
+                    let mut closure = self.frame.closure.as_ref().unwrap().clone();
                     while depth > 0 {
-                        match self.closures[closure_id].parent {
-                            Some(parent_pointer) => closure_id = parent_pointer,
+                        let parent_closure;
+                        match &closure.as_ref().borrow().parent {
+                            Some(parent_pointer) => parent_closure = Rc::clone(parent_pointer),
                             None => panic!("Invalid closure reference when storing value"),
                         }
+                        closure = parent_closure;
                         depth -= 1;
                     }
                     let value = self.pop_stack()?;
-                    let closure = &mut self.closures[closure_id];
-                    closure.stack[*index] = value;
+                    closure.borrow_mut().stack[*index] = value;
                 }
                 SFOffset::Stack(offset) => {
                     let index = self.frame.stack_pointer as isize + *offset;
@@ -224,16 +258,17 @@ impl<'a> Interpreter<'a> {
             SLoad(offset) => match offset {
                 SFOffset::Closure(index, depth) => {
                     let mut depth = *depth;
-                    let mut closure_id = self.frame.closure_id.unwrap();
+                    let mut closure = self.frame.closure.as_ref().unwrap().clone();
                     while depth > 0 {
-                        match self.closures[closure_id].parent {
-                            Some(parent_pointer) => closure_id = parent_pointer,
-                            None => panic!("Invalid closure reference when loading value"),
+                        let parent_closure;
+                        match &closure.as_ref().borrow().parent {
+                            Some(parent_pointer) => parent_closure = Rc::clone(parent_pointer),
+                            None => panic!("Invalid closure reference when storing value"),
                         }
+                        closure = parent_closure;
                         depth -= 1;
                     }
-                    let closure = &mut self.closures[closure_id];
-                    let value = closure.stack[*index].clone();
+                    let value = closure.as_ref().borrow().stack[*index].clone();
                     self.push_stack(value)?;
                 }
                 SFOffset::Stack(offset) => {
@@ -242,10 +277,10 @@ impl<'a> Interpreter<'a> {
                     self.push_stack(value)?;
                 }
             },
-            PushImmediateBytecode(primitive) => {
+            PushImmediate(primitive) => {
                 let value = match primitive {
                     bytecode::Value::ProcAddress(addr) => {
-                        Value::ProcAddress(*addr, self.frame.closure_id)
+                        Value::ProcAddress(*addr, self.frame.closure.clone())
                     }
                     bytecode::Value::Unset => Value::Unset,
                     bytecode::Value::Int(val) => Value::Int(*val),
@@ -255,11 +290,6 @@ impl<'a> Interpreter<'a> {
                 };
                 self.push_stack(value)?;
             }
-            PushImmediate(primitive) => {
-                let value = (*primitive).clone();
-                self.push_stack(value)?;
-            }
-
             PopStack(count) => {
                 self.pop_stack_count(*count)?;
             }
@@ -306,18 +336,17 @@ impl<'a> Interpreter<'a> {
                 let frame = mem::replace(&mut self.pending_frame, None);
                 self.frame = frame.unwrap();
 
-                let closure_id = self.closures.len();
+                assert!(self.frame.closure.is_none());
                 let closure = Closure {
                     parent: None,
                     stack: Vec::new(),
                 };
-                self.closures.push(closure);
-                assert!(self.frame.closure_id.is_none());
-                self.frame.closure_id = Some(closure_id);
+                self.frame.closure = Some(Rc::new(RefCell::new(closure)));
 
                 match val {
                     Value::ProcAddress(addr, parent_stack_frame) => {
-                        self.closures[self.frame.closure_id.unwrap()].parent = parent_stack_frame;
+                        self.frame.closure.as_ref().unwrap().borrow_mut().parent =
+                            parent_stack_frame;
                         self.pc = Some(addr);
                     }
                     Value::RuntimeFn(id) => {
@@ -340,7 +369,7 @@ impl<'a> Interpreter<'a> {
             PrepareStackFrame(arg_count) => {
                 let frame = StackFrame {
                     stack_pointer: self.stack.len() - arg_count,
-                    closure_id: None,
+                    closure: None,
                 };
                 self.pending_frame = Some(frame);
             }

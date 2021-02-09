@@ -71,7 +71,7 @@ fn exit(interp: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
     } else {
         let value = args.pop().unwrap();
         interp.pop_stack_count(interp.stack.len())?;
-        interp.execute(&OP::PushImmediate(value))?;
+        interp.execute(&OP::PushImmediate(value.into_bytecode().unwrap()))?;
         interp.execute(&OP::Yield)?;
         interp.exit();
         Ok(None)
