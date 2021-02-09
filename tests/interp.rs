@@ -169,6 +169,11 @@ fn test_var_assign() {
 }
 
 #[test]
+fn test_call_builtin() {
+    run_test("import sin; exit(sin(sin(0)));", Some(Int(0)));
+}
+
+#[test]
 fn test_loop() {
     run_test(
         "i := 0; loop { if(i == 100) {break;} i = i + 1;} exit(i);",
