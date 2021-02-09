@@ -5,72 +5,6 @@ use std::cell::RefCell;
 use std::mem;
 use std::rc::Rc;
 
-#[derive(Debug, Clone)]
-pub struct Closure {
-    pub parent: Option<Rc<RefCell<Closure>>>,
-    pub stack: Vec<Value>,
-}
-
-#[derive(Debug, Clone)]
-pub struct StackFrame {
-    stack_pointer: usize,
-    closure: Option<Rc<RefCell<Closure>>>,
-}
-
-#[derive(Debug, Clone)]
-pub enum Value {
-    Unset,
-    Int(isize),
-    Bool(bool),
-    String(String),
-    ProcAddress(usize, Option<Rc<RefCell<Closure>>>),
-
-    PC(usize),
-    StackFrame(StackFrame),
-    RuntimeFn(usize),
-}
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        use Value::*;
-        match (self, other) {
-            (Int(a), Int(b)) => a == b,
-            (Bool(a), Bool(b)) => a == b,
-            (String(a), String(b)) => a == b,
-            (ProcAddress(a, _), ProcAddress(b, _)) => a == b,
-            _ => unimplemented!(),
-        }
-    }
-}
-
-impl Value {
-    pub fn into_bytecode(self) -> Option<bytecode::Value> {
-        match self {
-            Value::Unset => Some(bytecode::Value::Unset),
-            Value::Int(val) => Some(bytecode::Value::Int(val)),
-            Value::Bool(val) => Some(bytecode::Value::Bool(val)),
-            Value::String(val) => Some(bytecode::Value::String(val)),
-            Value::ProcAddress(addr, _) => Some(bytecode::Value::ProcAddress(addr)),
-            Value::RuntimeFn(addr) => Some(bytecode::Value::RuntimeFn(addr)),
-            Value::PC(_) => None,
-            Value::StackFrame(_) => None,
-        }
-    }
-}
-
-pub struct Interpreter<'a> {
-    pc: Option<usize>,
-    pending_frame: Option<StackFrame>,
-    frame: StackFrame,
-    pub stack: Vec<Value>,
-    pub runtime: &'a Runtime,
-    pub log_level: InterpLogLevel,
-    pub stack_max: usize,
-    pub executed_instructions: usize,
-    pub interrupt: &'a dyn Fn(Value),
-}
-
-#[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq)]
 pub enum InterpLogLevel {
     LogNone = 0,
@@ -79,19 +13,31 @@ pub enum InterpLogLevel {
 }
 
 #[derive(Debug)]
-pub struct InterpError {
+pub struct Err {
     details: String,
 }
 
-impl InterpError {
-    pub fn new(details: &str) -> InterpError {
-        InterpError {
+impl Err {
+    pub fn new(details: &str) -> Err {
+        Err {
             details: details.to_string(),
         }
     }
 }
 
-pub type InterpResult<V = Value> = Result<V, InterpError>;
+pub type Result<V = ()> = std::result::Result<V, Err>;
+
+pub struct Interpreter<'a> {
+    pc: Option<usize>,
+    pending_frame: Option<StackFrame>,
+    frame: StackFrame,
+    stack: Vec<Value>,
+    pub runtime: &'a Runtime,
+    pub log_level: InterpLogLevel,
+    pub stack_max: usize,
+    pub executed_instructions: usize,
+    pub interrupt: &'a dyn Fn(bytecode::Value),
+}
 
 impl<'a> Interpreter<'a> {
     pub fn new(runtime: &'a Runtime) -> Self {
@@ -112,68 +58,16 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn set_log_level(&mut self, level: InterpLogLevel) {
-        self.log_level = level;
-    }
-
-    fn debug_log(&self, level: InterpLogLevel, info: &str) {
-        if self.log_level >= level {
-            println!("{}", info);
-        }
-    }
-
-    pub fn pop_stack_count(&mut self, count: usize) -> InterpResult<()> {
-        for _ in 0..count {
-            let ok = self.stack.pop();
-            if ok.is_none() {
-                return Err(InterpError::new("Stack empty, can not pop"));
-            }
-        }
-        Ok(())
-    }
-
-    pub fn pop_stack(&mut self) -> InterpResult {
-        match self.stack.pop() {
-            Some(val) => Ok(val),
-            None => Err(InterpError::new("Stack empty, can not pop")),
-        }
-    }
-
-    pub fn pop_stack_int(&mut self) -> InterpResult<isize> {
-        match self.pop_stack()? {
-            Value::Int(int) => Ok(int),
-            val => Err(InterpError::new(&format!(
-                "Stack value is not of type int {:?}",
-                val
-            ))),
-        }
-    }
-
-    pub fn push_stack(&mut self, value: Value) -> InterpResult<()> {
-        if self.stack.len() < self.stack_max {
-            self.stack.push(value);
-            Ok(())
-        } else {
-            Err(InterpError::new("Stack overflow"))
-        }
-    }
-
-    pub fn get_foreign_function_arguments(&mut self) -> Result<Vec<Value>, InterpError> {
-        let count = self.stack.len() - self.frame.stack_pointer;
-        let mut arguments = Vec::with_capacity(count);
-        for _ in 0..count {
-            let argument = self.pop_stack()?;
-            arguments.push(argument);
-        }
-        arguments.reverse();
-        Ok(arguments)
-    }
-
     pub fn exit(&mut self) {
+        self.pop_stack_count(self.stack.len()).unwrap();
+        self.frame = StackFrame {
+            stack_pointer: 0,
+            closure: None,
+        };
         self.pc = None;
     }
 
-    pub fn execute(&mut self, cmd: &OP) -> InterpResult<()> {
+    pub fn execute(&mut self, cmd: &OP) -> Result {
         self.executed_instructions += 1;
         let result = self.run_command(cmd);
         if self.log_level >= InterpLogLevel::LogEval {
@@ -191,7 +85,84 @@ impl<'a> Interpreter<'a> {
         result
     }
 
-    fn run_command(&mut self, cmd: &OP) -> InterpResult<()> {
+    pub fn run(mut self, code: &Bytecode) -> usize {
+        loop {
+            if let Some(pc) = self.pc {
+                if let Some(cmd) = code.code.get(pc) {
+                    self.pc = Some(pc + 1);
+                    if let Err(err) = self.execute(&cmd.op) {
+                        panic!("{:?}", err);
+                    }
+                } else {
+                    panic!("Invalid PC");
+                }
+            } else {
+                break;
+            }
+        }
+        if self.stack.len() > 0 {
+            dbg!(&self.stack);
+            panic!("Interpreter stopped without an empty stack")
+        }
+        self.executed_instructions
+    }
+}
+
+impl<'a> Interpreter<'a> {
+    fn debug_log(&self, level: InterpLogLevel, info: &str) {
+        if self.log_level >= level {
+            println!("{}", info);
+        }
+    }
+
+    fn pop_stack_count(&mut self, count: usize) -> Result {
+        for _ in 0..count {
+            let ok = self.stack.pop();
+            if ok.is_none() {
+                return Err(Err::new("Stack empty, can not pop"));
+            }
+        }
+        Ok(())
+    }
+
+    fn pop_stack(&mut self) -> Result<Value> {
+        match self.stack.pop() {
+            Some(val) => Ok(val),
+            None => Err(Err::new("Stack empty, can not pop")),
+        }
+    }
+
+    fn pop_stack_int(&mut self) -> Result<isize> {
+        match self.pop_stack()? {
+            Value::Int(int) => Ok(int),
+            val => Err(Err::new(&format!(
+                "Stack value is not of type int {:?}",
+                val
+            ))),
+        }
+    }
+
+    fn push_stack(&mut self, value: Value) -> Result {
+        if self.stack.len() < self.stack_max {
+            self.stack.push(value);
+            Ok(())
+        } else {
+            Err(Err::new("Stack overflow"))
+        }
+    }
+
+    fn get_foreign_function_arguments(&mut self) -> Result<Vec<bytecode::Value>> {
+        let count = self.stack.len() - self.frame.stack_pointer;
+        let mut arguments = Vec::with_capacity(count);
+        for _ in 0..count {
+            let argument = self.pop_stack()?;
+            arguments.push(argument.into_bytecode().unwrap());
+        }
+        arguments.reverse();
+        Ok(arguments)
+    }
+
+    fn run_command(&mut self, cmd: &OP) -> Result {
         use self::OP::*;
         match cmd {
             AddI => {
@@ -278,17 +249,7 @@ impl<'a> Interpreter<'a> {
                 }
             },
             PushImmediate(primitive) => {
-                let value = match primitive {
-                    bytecode::Value::ProcAddress(addr) => {
-                        Value::ProcAddress(*addr, self.frame.closure.clone())
-                    }
-                    bytecode::Value::Unset => Value::Unset,
-                    bytecode::Value::Int(val) => Value::Int(*val),
-                    bytecode::Value::Bool(val) => Value::Bool(*val),
-                    bytecode::Value::String(val) => Value::String(val.clone()),
-                    bytecode::Value::RuntimeFn(val) => Value::RuntimeFn(*val),
-                };
-                self.push_stack(value)?;
+                self.push_stack(Value::from(primitive.clone(), &self.frame.closure))?;
             }
             PopStack(count) => {
                 self.pop_stack_count(*count)?;
@@ -359,7 +320,8 @@ impl<'a> Interpreter<'a> {
                             self.run_command(&PopStackFrame)?;
                             self.run_command(&PopPc)?;
                             if let Some(returns) = returns {
-                                self.push_stack(returns)?;
+                                let value = Value::from(returns, &self.frame.closure);
+                                self.push_stack(value)?;
                             }
                         }
                     }
@@ -388,32 +350,74 @@ impl<'a> Interpreter<'a> {
             }
             Yield => {
                 let value = self.pop_stack()?;
-                (self.interrupt)(value);
+                (self.interrupt)(value.into_bytecode().unwrap());
             }
             _ => panic!("Instruction not implemented: {:?}", cmd),
         }
         Ok(())
     }
+}
 
-    pub fn run(mut self, code: &Bytecode) -> usize {
-        loop {
-            if let Some(pc) = self.pc {
-                if let Some(cmd) = code.code.get(pc) {
-                    self.pc = Some(pc + 1);
-                    if let Err(err) = self.execute(&cmd.op) {
-                        panic!("{:?}", err);
-                    }
-                } else {
-                    panic!("Invalid PC");
-                }
-            } else {
-                break;
-            }
+#[derive(Debug, Clone)]
+struct Closure {
+    pub parent: Option<Rc<RefCell<Closure>>>,
+    pub stack: Vec<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct StackFrame {
+    stack_pointer: usize,
+    closure: Option<Rc<RefCell<Closure>>>,
+}
+
+#[derive(Debug, Clone)]
+enum Value {
+    Unset,
+    Int(isize),
+    Bool(bool),
+    String(String),
+    ProcAddress(usize, Option<Rc<RefCell<Closure>>>),
+
+    PC(usize),
+    StackFrame(StackFrame),
+    RuntimeFn(usize),
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        use Value::*;
+        match (self, other) {
+            (Int(a), Int(b)) => a == b,
+            (Bool(a), Bool(b)) => a == b,
+            (String(a), String(b)) => a == b,
+            (ProcAddress(a, _), ProcAddress(b, _)) => a == b,
+            _ => unimplemented!(),
         }
-        if self.stack.len() > 0 {
-            dbg!(&self.stack);
-            panic!("Interpreter stopped without an empty stack")
+    }
+}
+
+impl Value {
+    fn into_bytecode(self) -> Option<bytecode::Value> {
+        match self {
+            Value::Unset => Some(bytecode::Value::Unset),
+            Value::Int(val) => Some(bytecode::Value::Int(val)),
+            Value::Bool(val) => Some(bytecode::Value::Bool(val)),
+            Value::String(val) => Some(bytecode::Value::String(val)),
+            Value::ProcAddress(addr, _) => Some(bytecode::Value::ProcAddress(addr)),
+            Value::RuntimeFn(addr) => Some(bytecode::Value::RuntimeFn(addr)),
+            Value::PC(_) => None,
+            Value::StackFrame(_) => None,
         }
-        self.executed_instructions
+    }
+
+    fn from(value: bytecode::Value, closure: &Option<Rc<RefCell<Closure>>>) -> Self {
+        match value {
+            bytecode::Value::ProcAddress(addr) => Value::ProcAddress(addr, closure.clone()),
+            bytecode::Value::Unset => Value::Unset,
+            bytecode::Value::Int(val) => Value::Int(val),
+            bytecode::Value::Bool(val) => Value::Bool(val),
+            bytecode::Value::String(val) => Value::String(val),
+            bytecode::Value::RuntimeFn(val) => Value::RuntimeFn(val),
+        }
     }
 }

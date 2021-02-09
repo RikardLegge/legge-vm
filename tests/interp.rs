@@ -1,8 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use leggevm::interpreter::Value;
-use leggevm::interpreter::Value::*;
+use leggevm::bytecode::Value;
+use leggevm::bytecode::Value::*;
 use leggevm::run_code;
 
 fn run_test(code: &str, expected_result: Option<Value>) {

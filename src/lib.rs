@@ -1,5 +1,4 @@
-use crate::bytecode::Bytecode;
-use crate::interpreter::Value;
+use crate::bytecode::{Bytecode, Value};
 use interpreter::{InterpLogLevel, Interpreter};
 use token::Tokenizer;
 
@@ -46,7 +45,7 @@ where
         InterpLogLevel::LogNone
     };
     let mut interpreter = Interpreter::new(&runtime);
-    interpreter.set_log_level(log_level);
+    interpreter.log_level = log_level;
     interpreter.interrupt = &interrupt;
 
     let start = debug::start_timer();

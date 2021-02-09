@@ -1,8 +1,8 @@
 use crate::ast::NodeType;
-use crate::bytecode::OP;
-use crate::interpreter::{InterpError, InterpResult, Interpreter, Value};
+use crate::bytecode::{Value, OP};
+use crate::interpreter::{Err, Interpreter, Result};
 
-pub type FunctionReturn = InterpResult<Option<Value>>;
+pub type FunctionReturn = Result<Option<Value>>;
 pub type RuntimeFunction = &'static dyn Fn(&mut Interpreter, &mut Vec<Value>) -> FunctionReturn;
 
 pub struct Runtime {
@@ -66,14 +66,13 @@ fn log(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
 }
 
 fn exit(interp: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
-    if args.len() != 1 {
-        Err(InterpError::new("Exit must be called with one argument"))
-    } else {
+    if args.len() == 1 {
         let value = args.pop().unwrap();
-        interp.pop_stack_count(interp.stack.len())?;
-        interp.execute(&OP::PushImmediate(value.into_bytecode().unwrap()))?;
+        interp.execute(&OP::PushImmediate(value))?;
         interp.execute(&OP::Yield)?;
         interp.exit();
         Ok(None)
+    } else {
+        Err(Err::new("Exit must be called with one argument"))
     }
 }
