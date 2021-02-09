@@ -174,6 +174,18 @@ fn test_call_builtin() {
 }
 
 #[test]
+fn test_call_multiple() {
+    run_test(
+        "\
+        pass :: fn(a: int) -> int {\
+            return a;
+        } \
+        exit(pass(pass(pass(0))));",
+        Some(Int(0)),
+    );
+}
+
+#[test]
 fn test_loop() {
     run_test(
         "i := 0; loop { if(i == 100) {break;} i = i + 1;} exit(i);",
