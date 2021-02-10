@@ -29,6 +29,7 @@ impl<'a> Checker<'a> {
                 | Expression(..)
                 | VariableValue(..)
                 | ProcedureDeclaration(..)
+                | TypeDeclaration(..)
                 | Import(..) => Ok(()),
                 Op(op, lhs, rhs) => {
                     let lhs_tp = self.ast.get_node(*lhs).tp.as_ref().unwrap();

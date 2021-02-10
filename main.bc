@@ -11,6 +11,13 @@
 //    //next();
 //    i = i - 1;
 //}
-import log;
-import sin;
-log(sin(0));
+//import log;
+//import sin;
+//log(sin(0));
+
+Example -> type {
+  number: int,
+  text: string,
+}
+
+//ex := Example();

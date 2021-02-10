@@ -146,7 +146,12 @@ where
             ConstDeclaration(.., child_node) | VariableDeclaration(.., Some(child_node)) => {
                 self.should_terminate_statement(child_node)
             }
-            Block(..) | ProcedureDeclaration(..) | If(..) | Loop(..) | Comment(..) => false,
+            TypeDeclaration(..)
+            | Block(..)
+            | ProcedureDeclaration(..)
+            | If(..)
+            | Loop(..)
+            | Comment(..) => false,
             _ => true,
         }
     }
@@ -364,6 +369,35 @@ where
         Ok(tp)
     }
 
+    fn do_type_definition(&mut self, node: PendingNode, ident: &str) -> Result {
+        self.ensure_next_token(&node, TokenType::LeftCurlyBrace)?;
+
+        let mut key_values = Vec::new();
+
+        loop {
+            match self.next_token(&node)? {
+                TokenType::Name(key) => {
+                    self.ensure_next_token(&node, TokenType::TypeDeclaration)?;
+                    let tp = self.do_type(&node)?;
+                    key_values.push((key, tp));
+                }
+                TokenType::RightCurlyBrace => break,
+                _ => Err(self.ast.error(
+                    &format!("Invalid token found in place of '}}' or field"),
+                    "",
+                    vec![node.id],
+                ))?,
+            }
+            if self.peek_token()? == &TokenType::ListSeparator {
+                self.next_token(&node)?;
+            }
+        }
+
+        let body = NodeBody::TypeDeclaration(ident.into(), key_values);
+        let node_id = self.add_node(node, body);
+        Ok(node_id)
+    }
+
     fn do_procedure(&mut self, node: PendingNode) -> Result {
         self.ensure_next_token(&node, TokenType::LeftBrace)?;
         let mut arguments = Vec::new();
@@ -487,6 +521,11 @@ where
 
         let token = self.peek_token()?;
         match token {
+            ReturnTypes => {
+                self.next_token(&node)?;
+                self.ensure_next_token(&node, TokenType::KeyName("type".into()))?;
+                self.do_type_definition(node, ident)
+            }
             StaticDeclaration => {
                 self.next_token(&node)?;
                 let expression = self.do_expression(node.id)?;

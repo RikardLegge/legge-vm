@@ -177,6 +177,8 @@ pub enum NodeType {
     Bool,
     String,
     Fn(Vec<NodeType>, Box<NodeType>),
+    Type(Box<NodeType>),
+    UserDefined(Vec<(String, NodeType)>),
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +202,8 @@ pub enum NodeBody {
     Expression(NodeID),
     Comment(String),
     Import(String, NodeID),
+
+    TypeDeclaration(String, Vec<(String, NodeType)>),
 
     VariableDeclaration(String, Option<NodeType>, Option<NodeID>),
     ConstDeclaration(String, Option<NodeType>, NodeID),
@@ -448,6 +452,7 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
                     None
                 }
             }
+            TypeDeclaration(..) => None,
             Block(children) => children.get(self.index),
             Call(_, args) => args.get(self.index),
 

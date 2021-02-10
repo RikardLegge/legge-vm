@@ -1,6 +1,5 @@
 use crate::ast::ast::InferredType;
-use crate::ast::ast::NodeTypeSource::Usage;
-use crate::ast::{Ast, Node, NodeID, NodeType, NodeValue, Result};
+use crate::ast::{Ast, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
 use std::collections::VecDeque;
@@ -58,7 +57,13 @@ impl<'a> Typer<'a> {
 
     fn get_type(&self, node_id: &NodeID) -> Option<NodeType> {
         match self.get_inferred_type(node_id) {
-            Some(inf) => Some(inf.tp.clone()),
+            Some(inf) => {
+                if let NodeType::Type(inner_tp) = &inf.tp {
+                    Some(*inner_tp.clone())
+                } else {
+                    Some(inf.tp.clone())
+                }
+            }
             None => None,
         }
     }
@@ -113,6 +118,10 @@ impl<'a> Typer<'a> {
                     }
                 }
             }
+            TypeDeclaration(_, key_values) => Some(InferredType::new(
+                Type(Box::new(UserDefined(key_values.clone()))),
+                Declared,
+            )),
             ProcedureDeclaration(args, returns, _) => {
                 let arg_types: Vec<Option<NodeType>> =
                     args.iter().map(|id| self.get_type(id)).collect();
@@ -257,7 +266,7 @@ impl<'a> Typer<'a> {
                 let node = self.ast.get_node_mut(node_id);
                 node.tp = Some(tp);
                 // Do not mark values which are only used as type checked
-                if source != Usage {
+                if source != NodeTypeSource::Usage {
                     self.since_last_changed = 0;
                     continue;
                 }

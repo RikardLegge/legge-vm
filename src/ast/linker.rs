@@ -39,36 +39,6 @@ impl<'a, 'b> Linker<'a, 'b> {
             .insert(node_ref);
     }
 
-    // fn add_runtime_variable(&mut self, ident: String) -> Result {
-    //     if let Some(f) = self.runtime.functions.iter().find(|f| f.name == ident) {
-    //         let node_id = self.ast.add_node(self.ast.root());
-    //         let root_node = self.ast.get_node_mut(self.ast.root());
-    //         match &mut root_node.body {
-    //             NodeBody::Block(children) => children.push(node_id),
-    //             _ => unimplemented!(),
-    //         }
-    //         let tp = NodeType::Fn(f.arguments.clone(), Box::new(f.returns.clone()));
-    //         let inf_tp = InferredType::new(tp, NodeTypeSource::Declared);
-    //         let body_id = {
-    //             let node_id = self.ast.add_node(node_id);
-    //             let node = self.ast.get_node_mut(node_id);
-    //             node.body = NodeBody::RuntimeReference(ident.clone());
-    //             node.tp = Some(inf_tp.clone());
-    //             node.id
-    //         };
-    //         let node = self.ast.get_node_mut(node_id);
-    //         node.body = NodeBody::ConstDeclaration(ident, None, body_id);
-    //         node.tp = Some(inf_tp);
-    //         Ok(node.id)
-    //     } else {
-    //         Err(self.ast.error(
-    //             &format!("Variable missing from scope and runtime: {:?}", ident),
-    //             "",
-    //             vec![],
-    //         ))
-    //     }
-    // }
-
     fn closest_variable(
         &self,
         node_id: NodeID,
