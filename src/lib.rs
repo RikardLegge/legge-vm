@@ -1,12 +1,11 @@
-use crate::bytecode::{Bytecode, Value};
-use interpreter::Interpreter;
-
-mod ast;
+pub mod ast;
 pub mod bytecode;
 mod debug;
-mod interpreter;
-mod runtime;
-mod token;
+pub mod interpreter;
+pub mod runtime;
+pub mod token;
+
+pub use debug::Timing;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq, Copy, Clone)]
@@ -17,9 +16,12 @@ pub enum LogLevel {
     LogEval = 3,
 }
 
-pub fn compile(timing: &mut debug::Timing, log_level: LogLevel, code: String) -> Bytecode {
-    let runtime = runtime::get();
-
+pub fn compile(
+    timing: &mut Timing,
+    runtime: &runtime::Runtime,
+    log_level: LogLevel,
+    code: String,
+) -> bytecode::Bytecode {
     let start = debug::start_timer();
     let tokens = token::from_chars(code.chars());
     timing.token = debug::stop_timer(start);
@@ -41,13 +43,13 @@ pub fn compile(timing: &mut debug::Timing, log_level: LogLevel, code: String) ->
 
 pub fn run_code<F>(code: String, log_level: LogLevel, interrupt: F)
 where
-    F: Fn(Value),
+    F: Fn(bytecode::Value),
 {
+    let runtime = runtime::std();
     let mut timing = debug::Timing::default();
-    let bytecode = compile(&mut timing, log_level, code);
-    let runtime = runtime::get();
+    let bytecode = compile(&mut timing, &runtime, log_level, code);
 
-    let mut interpreter = Interpreter::new(&runtime);
+    let mut interpreter = interpreter::Interpreter::new(&runtime);
     interpreter.log_level = log_level;
     interpreter.interrupt = &interrupt;
 

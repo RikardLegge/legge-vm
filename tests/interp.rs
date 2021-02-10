@@ -3,8 +3,7 @@ use std::rc::Rc;
 
 use leggevm::bytecode::Value;
 use leggevm::bytecode::Value::*;
-use leggevm::run_code;
-use leggevm::LogLevel;
+use leggevm::{run_code, LogLevel};
 
 fn run_test(code: &str, expected_result: Option<Value>) {
     let code = format!("import exit;{}", code);

@@ -1,5 +1,5 @@
 use super::Result;
-use crate::ast::Error;
+use crate::ast::Err;
 use crate::token::{ArithmeticOP, Token};
 use std::collections::HashSet;
 use std::fmt;
@@ -254,8 +254,8 @@ impl fmt::Debug for Ast {
 }
 
 impl Ast {
-    pub fn error(&self, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Error {
-        Error::new(self, details, row_details, nodes)
+    pub fn error(&self, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Err {
+        Err::new(self, details, row_details, nodes)
     }
 
     pub fn new() -> Self {

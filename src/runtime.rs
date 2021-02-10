@@ -4,21 +4,21 @@ use crate::bytecode::{Value, OP};
 use crate::interpreter::{Err, Interpreter, Result};
 
 pub type FunctionReturn = Result<Option<Value>>;
-pub type RuntimeFunction = &'static dyn Fn(&mut Interpreter, &mut Vec<Value>) -> FunctionReturn;
+pub type Function = &'static dyn Fn(&mut Interpreter, &mut Vec<Value>) -> FunctionReturn;
 
 pub struct Runtime {
-    pub functions: Vec<RuntimeFunctionDefinition>,
+    pub functions: Vec<FunctionDefinition>,
 }
 
-pub struct RuntimeFunctionDefinition {
+pub struct FunctionDefinition {
     pub name: String,
     pub arguments: Vec<NodeType>,
     pub returns: NodeType,
     pub tp: NodeType,
-    pub function: RuntimeFunction,
+    pub function: Function,
 }
 
-pub fn get() -> Runtime {
+pub fn std() -> Runtime {
     use crate::ast::NodeType::*;
     let functions = vec![
         ff("log", vec![VarArg(Box::new(Any))], Void, &log),
@@ -33,10 +33,10 @@ fn ff(
     name: &str,
     arguments: Vec<NodeType>,
     returns: NodeType,
-    function: RuntimeFunction,
-) -> RuntimeFunctionDefinition {
+    function: Function,
+) -> FunctionDefinition {
     let tp = NodeType::Fn(arguments.clone(), Box::new(returns.clone()));
-    RuntimeFunctionDefinition {
+    FunctionDefinition {
         name: name.to_string(),
         arguments,
         returns,

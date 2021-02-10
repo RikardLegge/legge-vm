@@ -14,14 +14,14 @@ pub use ast::{
     UnlinkedNodeBody,
 };
 
-pub type Result<N = NodeID> = result::Result<N, Error>;
+pub type Result<N = NodeID> = result::Result<N, Err>;
 
 #[derive(Debug)]
-pub struct Error {
+pub struct Err {
     details: String,
 }
 
-impl Error {
+impl Err {
     pub fn new(ast: &Ast, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Self {
         let node_info: Vec<String> = nodes
             .into_iter()

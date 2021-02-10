@@ -5,12 +5,7 @@ use std::str::Chars;
 
 pub fn from_chars(iter: Chars) -> Vec<Token> {
     let mut iter = iter.peekable();
-    let mut parser = Tokenizer {
-        iter: &mut iter,
-        line_number: 1,
-        last_id: 0,
-        index: 0,
-    };
+    let mut parser = Tokenizer::new(&mut iter);
     let mut tokens = Vec::new();
 
     while parser.peek().is_some() {
@@ -114,6 +109,15 @@ pub struct Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
+    fn new<'b>(iter: &'b mut Peekable<Chars<'b>>) -> Tokenizer<'b> {
+        Tokenizer {
+            iter,
+            line_number: 1,
+            last_id: 0,
+            index: 0,
+        }
+    }
+
     fn peek(&mut self) -> Option<char> {
         let ch = self.iter.peek()?;
         Some(*ch)

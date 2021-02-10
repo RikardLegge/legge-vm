@@ -1,12 +1,13 @@
+use crate::ast;
 use crate::ast::{Ast, NodeBody, NodeID, NodeType, NodeValue};
 use crate::token::ArithmeticOP;
 use std::fmt;
 use std::fmt::Formatter;
 use std::ops::AddAssign;
 
-pub fn from_ast(ast: &Ast) -> Bytecode {
+pub fn from_ast(ast: &ast::Ast) -> Bytecode {
     let root_id = ast.root();
-    let mut bc = BytecodeGenerator::new(ast);
+    let mut bc = Generator::new(ast);
     let root_scope = bc.evaluate(root_id);
     bc.get_bytecode(root_scope)
 }
@@ -187,20 +188,20 @@ impl StackUsage {
     }
 }
 
-struct BytecodeGenerator<'a> {
+struct Generator<'a> {
     procedures: Vec<Instruction>,
     ast: &'a Ast,
     scopes: Vec<Scope>,
     contexts: Vec<Context>,
 }
 
-impl<'a> BytecodeGenerator<'a> {
+impl<'a> Generator<'a> {
     fn new(ast: &'a Ast) -> Self {
         let placeholder = Instruction {
             node_id: ast.root(),
             op: OP::Panic,
         };
-        BytecodeGenerator {
+        Generator {
             ast,
             procedures: vec![placeholder.clone(), placeholder.clone(), placeholder],
             scopes: Vec::new(),
