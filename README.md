@@ -13,3 +13,7 @@ Should probably not be used in production but that might not stop some very brav
 - [x] External functions
 - [x] Bugs
 - [ ] Custom types
+
+## Benchmarks 
+
+From our super scientific benchmarks looping in Legge VM is about 100x slower than looping in pure rust.

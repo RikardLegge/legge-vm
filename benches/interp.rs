@@ -4,7 +4,7 @@ use leggevm::{compile, interpreter, runtime, LogLevel, Timing};
 pub fn compare(c: &mut Criterion) {
     c.bench_function("reference", |b| {
         b.iter(|| {
-            let mut i = 100000;
+            let mut i = 1000000;
             loop {
                 if i == 0 {
                     break;
@@ -21,7 +21,7 @@ pub fn compare(c: &mut Criterion) {
         &runtime,
         LogLevel::LogNone,
         "
-            i := 100000;
+            i := 1000000;
             loop {
                 if(i == 0) {
                     break;
