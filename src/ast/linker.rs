@@ -1,6 +1,6 @@
 use super::{Ast, NodeBody, NodeID, Result};
 use crate::ast::ast::{NodeReference, NodeReferenceLocation};
-use crate::ast::{NodeReferenceType, NodeValue};
+use crate::ast::{NodeReferenceType, NodeType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
 use std::mem;
@@ -80,25 +80,22 @@ impl<'a, 'b> Linker<'a, 'b> {
                     use super::NodeReferenceType::*;
                     use super::UnlinkedNodeBody::*;
                     let new_body = match body {
-                        VariableAssignment(ident, expr_id) => {
+                        VariableAssignment(ident, path, expr_id) => {
                             let expr_id = *expr_id;
                             let (target_id, location) =
                                 match self.closest_variable(node_id, &ident)? {
                                     Some(node_id) => node_id,
-                                    None => {
-                                        // let ident = ident.into();
-                                        // self.add_runtime_variable(ident)?
-                                        Err(self.ast.error(
-                                            "Failed to find variable to assign to",
-                                            "variable not found",
-                                            vec![node_id],
-                                        ))?
-                                    }
+                                    None => Err(self.ast.error(
+                                        "Failed to find variable to assign to",
+                                        "variable not found",
+                                        vec![node_id],
+                                    ))?,
                                 };
+                            let path = path.clone();
                             self.add_ref(target_id, node_id, ReceiveValue, location);
-                            NodeBody::VariableAssignment(target_id, expr_id)
+                            NodeBody::VariableAssignment(target_id, path, expr_id)
                         }
-                        VariableValue(ident) => {
+                        VariableValue(ident, path) => {
                             let (target_id, location) =
                                 match self.closest_variable(node_id, &ident)? {
                                     Some(node_id) => node_id,
@@ -112,8 +109,9 @@ impl<'a, 'b> Linker<'a, 'b> {
                                         ))?
                                     }
                                 };
+                            let path = path.clone();
                             self.add_ref(target_id, node_id, AssignValue, location);
-                            NodeBody::VariableValue(target_id)
+                            NodeBody::VariableValue(target_id, path)
                         }
                         Call(ident, _) => {
                             let (target_id, location) =

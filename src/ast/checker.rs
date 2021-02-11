@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
                         ))
                     }
                 }
-                VariableAssignment(lhs, rhs) => {
+                VariableAssignment(lhs, path, rhs) => {
                     let lhs_node = self.ast.get_node(*lhs);
                     match lhs_node.body {
                         NodeBody::ConstDeclaration(..) => Err(self.ast.error(
@@ -56,13 +56,43 @@ impl<'a> Checker<'a> {
                         ))?,
                         _ => (),
                     }
-                    let lhs_tp = lhs_node.tp.as_ref().unwrap();
-                    let rhs_tp = self.ast.get_node(*rhs).tp.as_ref().unwrap();
-                    if lhs_tp.tp == rhs_tp.tp {
+                    let mut lhs_tp = &lhs_node.tp.as_ref().unwrap().tp;
+                    if let Some(path) = path {
+                        for path_field in path {
+                            if let NodeType::Struct(fields) = &lhs_tp {
+                                let mut tp = None;
+                                for (field, field_tp) in fields {
+                                    if path_field == field {
+                                        tp = Some(field_tp);
+                                        break;
+                                    }
+                                }
+                                match tp {
+                                    Some(tp) => {
+                                        lhs_tp = tp;
+                                    }
+                                    None => {
+                                        return Err(self.ast.error(
+                                            &format!(
+                                                "Struct does not have the field '{}'",
+                                                path_field
+                                            ),
+                                            "",
+                                            vec![node.id],
+                                        ))
+                                    }
+                                }
+                            } else {
+                                unimplemented!()
+                            }
+                        }
+                    }
+                    let rhs_tp = &self.ast.get_node(*rhs).tp.as_ref().unwrap().tp;
+                    if lhs_tp == rhs_tp {
                         Ok(())
                     } else {
                         Err(self.ast.error(
-                            &format!("Types for left and right hand side of assignment do not match ({:?} != {:?})",                                 lhs_tp.tp, rhs_tp.tp
+                            &format!("Types for left and right hand side of assignment do not match ({:?} != {:?})",                                 lhs_tp, rhs_tp
                             ),
                             "Both sides of an assignment must have the same type",
                             vec![node.id],

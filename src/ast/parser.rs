@@ -202,7 +202,7 @@ where
             Int(value) => self.add_node(node, NodeBody::ConstValue(NodeValue::Int(value))),
             String(value) => self.add_node(node, NodeBody::ConstValue(NodeValue::String(value))),
             Op(op) => self.do_operation(node, op, None)?,
-            Name(symbol) => self.do_expression_symbol(node, &symbol)?,
+            Name(symbol) => self.do_expression_symbol(node, &symbol, None)?,
             LeftCurlyBrace => self.do_block(node)?,
             KeyName(key) => match key.as_ref() {
                 "fn" => self.do_procedure(node)?,
@@ -551,6 +551,33 @@ where
         }
     }
 
+    fn get_traverse_path(&mut self, node: &PendingNode) -> Result<Vec<String>> {
+        use crate::token::TokenType::*;
+        let mut path = Vec::new();
+
+        loop {
+            match self.peek_token()? {
+                Dot => {
+                    self.next_token(node)?;
+                    match self.next_token(node)? {
+                        Name(field) => {
+                            path.push(field);
+                        }
+                        _ => {
+                            return Err(self.ast.error(
+                                "A name is require after a '.' operator",
+                                "",
+                                vec![node.id],
+                            ))
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+        Ok(path)
+    }
+
     fn do_variable_or_assignment(
         &mut self,
         node: PendingNode,
@@ -589,9 +616,28 @@ where
                 let expression = self.do_expression(node.id)?;
                 let node = self.add_uncomplete_node(
                     node,
-                    UnlinkedNodeBody::VariableAssignment(ident.into(), expression),
+                    UnlinkedNodeBody::VariableAssignment(ident.into(), None, expression),
                 );
                 Ok(node)
+            }
+            Dot => {
+                let path = self.get_traverse_path(&node)?;
+                match self.peek_token()? {
+                    Assignment => {
+                        self.next_token(&node)?;
+                        let expression = self.do_expression(node.id)?;
+                        let node = self.add_uncomplete_node(
+                            node,
+                            UnlinkedNodeBody::VariableAssignment(
+                                ident.into(),
+                                Some(path),
+                                expression,
+                            ),
+                        );
+                        Ok(node)
+                    }
+                    _ => unimplemented!(),
+                }
             }
             _ => {
                 let details = &format!(
@@ -603,14 +649,22 @@ where
         }
     }
 
-    fn do_expression_symbol(&mut self, node: PendingNode, symbol: &str) -> Result {
+    fn do_expression_symbol(
+        &mut self,
+        node: PendingNode,
+        symbol: &str,
+        path: Option<Vec<String>>,
+    ) -> Result {
         use crate::token::TokenType::*;
 
         let token = self.peek_token()?;
         match token {
             LeftBrace => self.do_function_call(node, symbol),
-            Op(_) | RightBrace | EndStatement | ListSeparator => {
-                Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::VariableValue(symbol.into())))
+            Op(_) | RightBrace | EndStatement | ListSeparator => Ok(self
+                .add_uncomplete_node(node, UnlinkedNodeBody::VariableValue(symbol.into(), path))),
+            Dot => {
+                let path = self.get_traverse_path(&node)?;
+                self.do_expression_symbol(node, symbol, Some(path))
             }
             _ => {
                 let details = &format!(

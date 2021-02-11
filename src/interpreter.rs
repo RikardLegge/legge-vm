@@ -155,6 +155,19 @@ impl<'a> Interpreter<'a> {
         Ok(arguments)
     }
 
+    fn get_value<'b>(mut value: &'b mut Value, struct_index: &Option<Vec<usize>>) -> &'b mut Value {
+        if let Some(struct_index) = struct_index {
+            for index in struct_index {
+                if let Value::Struct(fields) = value {
+                    value = &mut fields[*index];
+                } else {
+                    unreachable!()
+                }
+            }
+        }
+        value
+    }
+
     fn run_command(&mut self, cmd: &OP) -> Result {
         use self::OP::*;
         match cmd {
@@ -198,7 +211,12 @@ impl<'a> Interpreter<'a> {
                     .push(Value::Unset);
             }
             SStore(offset) => match offset {
-                SFOffset::Closure(index, depth) => {
+                SFOffset::Closure {
+                    offset,
+                    depth,
+                    field,
+                } => {
+                    let index = *offset;
                     let mut depth = *depth;
                     let mut closure = Rc::clone(self.frame.closure.as_ref().unwrap());
                     while depth > 0 {
@@ -211,16 +229,24 @@ impl<'a> Interpreter<'a> {
                         depth -= 1;
                     }
                     let value = self.pop_stack()?;
-                    closure.borrow_mut().stack[*index] = value;
+                    let target_root = &mut closure.borrow_mut().stack[index];
+                    let target = Self::get_value(target_root, field);
+                    *target = value;
                 }
-                SFOffset::Stack(offset) => {
-                    let index = self.frame.stack_pointer as isize + *offset;
-                    assert!(index >= 0);
-                    self.stack[index as usize] = self.pop_stack()?;
+                SFOffset::Stack { offset, field } => {
+                    let index = (self.frame.stack_pointer as isize + *offset) as usize;
+                    let value = self.pop_stack()?;
+                    let target_root = &mut self.stack[index];
+                    let target = Self::get_value(target_root, field);
+                    *target = value;
                 }
             },
             SLoad(offset) => match offset {
-                SFOffset::Closure(index, depth) => {
+                SFOffset::Closure {
+                    offset: index,
+                    depth,
+                    field,
+                } => {
                     let mut depth = *depth;
                     let mut closure = Rc::clone(self.frame.closure.as_ref().unwrap());
                     while depth > 0 {
@@ -232,12 +258,15 @@ impl<'a> Interpreter<'a> {
                         closure = parent_closure;
                         depth -= 1;
                     }
-                    let value = closure.as_ref().borrow().stack[*index].clone();
-                    self.push_stack(value)?;
+                    let value_root = &mut closure.as_ref().borrow_mut().stack[*index];
+                    let value = Self::get_value(value_root, field);
+                    self.push_stack(value.clone())?;
                 }
-                SFOffset::Stack(offset) => {
+                SFOffset::Stack { offset, field } => {
                     let index = self.frame.stack_pointer as isize + *offset;
-                    let value = self.stack[index as usize].clone();
+                    let value_root = &mut self.stack[index as usize];
+                    let value = Self::get_value(value_root, field);
+                    let value = value.clone();
                     self.push_stack(value)?;
                 }
             },

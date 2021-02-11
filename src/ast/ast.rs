@@ -206,8 +206,8 @@ pub enum NodeBody {
 
     VariableDeclaration(String, Option<NodeType>, Option<NodeID>),
     ConstDeclaration(String, Option<NodeType>, NodeID),
-    VariableAssignment(NodeID, NodeID),
-    VariableValue(NodeID),
+    VariableAssignment(NodeID, Option<Vec<String>>, NodeID),
+    VariableValue(NodeID, Option<Vec<String>>),
     Return(NodeID, Option<NodeID>),
     Break(NodeID),
     Call(NodeID, Vec<NodeID>),
@@ -227,8 +227,8 @@ impl NodeBody {
 
 #[derive(Debug, Clone)]
 pub enum UnlinkedNodeBody {
-    VariableAssignment(String, NodeID),
-    VariableValue(String),
+    VariableAssignment(String, Option<Vec<String>>, NodeID),
+    VariableValue(String, Option<Vec<String>>),
     Return(Option<NodeID>),
     Break,
     Call(String, Vec<NodeID>),
@@ -462,12 +462,12 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
             | Loop(value)
             | Expression(value)
             | ConstDeclaration(.., value)
-            | VariableAssignment(_, value)
+            | VariableAssignment(_, _, value)
             | Import(_, value) => match self.index {
                 0 => Some(value),
                 _ => None,
             },
-            VariableValue(_) | Comment(_) | Break(_) | ConstValue(_) | Empty => None,
+            VariableValue(_, _) | Comment(_) | Break(_) | ConstValue(_) | Empty => None,
             Unlinked(body) => {
                 if let None = self.unlinked {
                     self.unlinked = Some(body.children());
@@ -496,7 +496,7 @@ impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
     fn next(&mut self) -> Option<&'a NodeID> {
         use UnlinkedNodeBody::*;
         let option = match self.body {
-            VariableAssignment(_, value) => match self.index {
+            VariableAssignment(_, _, value) => match self.index {
                 0 => Some(value),
                 _ => None,
             },
@@ -505,7 +505,7 @@ impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
                 _ => None,
             },
             Call(_, args) => args.get(self.index),
-            VariableValue(_) | Break | ImportValue(_) => None,
+            VariableValue(_, _) | Break | ImportValue(_) => None,
         };
         if option.is_some() {
             self.index += 1;

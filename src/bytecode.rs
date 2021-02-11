@@ -42,8 +42,15 @@ pub type OPOffset = isize;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum SFOffset {
-    Stack(OPOffset),
-    Closure(usize, usize),
+    Stack {
+        offset: OPOffset,
+        field: Option<Vec<usize>>,
+    },
+    Closure {
+        offset: usize,
+        depth: usize,
+        field: Option<Vec<usize>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -246,14 +253,26 @@ impl<'a> Generator<'a> {
         scope
     }
 
-    fn get_variable_offset(&self, _: NodeID, var_id: NodeID) -> SFOffset {
+    fn get_variable_offset(
+        &self,
+        _: NodeID,
+        var_id: NodeID,
+        field: Option<Vec<usize>>,
+    ) -> SFOffset {
         let mut closure_offset = 0;
         for context in self.contexts.iter().rev() {
             if let Some(var) = context.variables.iter().find(|var| var.node_id == var_id) {
                 return if self.ast.get_node(var.node_id).has_closure_references() {
-                    SFOffset::Closure(var.offset, closure_offset)
+                    SFOffset::Closure {
+                        offset: var.offset,
+                        depth: closure_offset,
+                        field,
+                    }
                 } else {
-                    SFOffset::Stack(var.offset as isize)
+                    SFOffset::Stack {
+                        offset: var.offset as isize,
+                        field,
+                    }
                 };
             }
             if context.tp == ContextType::ClosureBoundary {
@@ -406,11 +425,11 @@ impl<'a> Generator<'a> {
             PrefixOp(op, expr1) => self.ev_prefix_operation(node_id, *op, *expr1),
             Block(children) => self.ev_block(node_id, children),
             Call(proc_id, args) => self.ev_call(node_id, *proc_id, args, true),
-            VariableValue(val) => self.ev_variable_value(node_id, *val),
+            VariableValue(val, field) => self.ev_variable_value(node_id, *val, field),
             ConstDeclaration(_, _, expr) => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
             Import(_, value) => self.ev_declaration(node_id, Some(*value)),
-            VariableAssignment(var, value) => self.ev_assignment(node_id, *var, *value),
+            VariableAssignment(var, path, value) => self.ev_assignment(node_id, *var, path, *value),
             ProcedureDeclaration(args, _, body_id) => self.ev_procedure(node_id, args, *body_id),
             Return(proc_id, ret_id) => self.ev_return(node_id, *proc_id, *ret_id),
             If(condition, body) => self.ev_if(node_id, *condition, *body),
@@ -488,7 +507,13 @@ impl<'a> Generator<'a> {
             let usage = self.ev_expression(ret_id);
             assert_eq!(usage.pushed, 1);
             assert_eq!(usage.popped, 0);
-            self.add_op(ret_id, OP::SStore(SFOffset::Stack(-3)));
+            self.add_op(
+                ret_id,
+                OP::SStore(SFOffset::Stack {
+                    offset: -3,
+                    field: None,
+                }),
+            );
         }
         let allocations = self.get_allocations(proc_id);
         if allocations > 0 {
@@ -518,28 +543,64 @@ impl<'a> Generator<'a> {
         StackUsage::new(0, 1)
     }
 
-    fn ev_variable_value(&mut self, node_id: NodeID, val_id: NodeID) -> StackUsage {
+    fn ev_variable_value(
+        &mut self,
+        node_id: NodeID,
+        val_id: NodeID,
+        path: &Option<Vec<String>>,
+    ) -> StackUsage {
+        let index = self.get_field_index(val_id, path);
+
         self.add_op(
             node_id,
-            OP::SLoad(self.get_variable_offset(node_id, val_id)),
+            OP::SLoad(self.get_variable_offset(node_id, val_id, index)),
         );
         StackUsage::new(0, 1)
     }
 
-    fn ev_assignment(&mut self, node_id: NodeID, var_id: NodeID, expr_id: NodeID) -> StackUsage {
+    fn get_field_index(&self, var_id: NodeID, path: &Option<Vec<String>>) -> Option<Vec<usize>> {
+        if let Some(path) = path {
+            let mut index_path = Vec::with_capacity(path.len());
+            let tp = &self.ast.get_node(var_id).tp.as_ref().unwrap().tp;
+            for path_name in path {
+                match tp {
+                    NodeType::Struct(fields) => {
+                        let index = fields
+                            .iter()
+                            .position(|(name, _)| name == path_name)
+                            .unwrap();
+                        index_path.push(index);
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            Some(index_path)
+        } else {
+            None
+        }
+    }
+
+    fn ev_assignment(
+        &mut self,
+        node_id: NodeID,
+        var_id: NodeID,
+        path: &Option<Vec<String>>,
+        expr_id: NodeID,
+    ) -> StackUsage {
         let usage = self.ev_expression(expr_id);
         assert_eq!(usage.pushed, 1);
 
+        let index = self.get_field_index(var_id, path);
         self.add_op(
             node_id,
-            OP::SStore(self.get_variable_offset(node_id, var_id)),
+            OP::SStore(self.get_variable_offset(node_id, var_id, index)),
         );
         StackUsage::new(usage.popped, 0)
     }
 
     fn ev_declaration(&mut self, node_id: NodeID, expr: Option<NodeID>) -> StackUsage {
         if let Some(expr_id) = expr {
-            self.ev_assignment(node_id, node_id, expr_id)
+            self.ev_assignment(node_id, node_id, &None, expr_id)
         } else {
             StackUsage::zero()
         }
@@ -576,7 +637,7 @@ impl<'a> Generator<'a> {
         self.add_op(node_id, OP::PrepareStackFrame(args.len()));
         self.add_op(
             node_id,
-            OP::SLoad(self.get_variable_offset(node_id, proc_var_id)),
+            OP::SLoad(self.get_variable_offset(node_id, proc_var_id, None)),
         );
         self.add_op(node_id, OP::Jump);
         let offset = self.op_index() - pc_index - 1;
@@ -685,7 +746,7 @@ impl<'a> Generator<'a> {
             Op(op, expr1, expr2) => self.ev_operation(expr_id, *op, *expr1, *expr2),
             ConstValue(value) => self.ev_const(expr_id, value),
             ProcedureDeclaration(args, _, body_id) => self.ev_procedure(expr_id, args, *body_id),
-            VariableValue(value) => self.ev_variable_value(expr_id, *value),
+            VariableValue(value, field) => self.ev_variable_value(expr_id, *value, field),
             Call(proc_id, args) => self.ev_call(expr_id, *proc_id, args, false),
             _ => panic!("Unsupported node {:?} used as expression", expr),
         }

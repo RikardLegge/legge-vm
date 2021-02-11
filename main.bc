@@ -1,23 +1,14 @@
-//i := 1000000;
-//
-//next :: fn() {
-//  //i = i - 1;
-//}
-//
-//loop {
-//    if(i == 0) {
-//        break;
-//    }
-//    //next();
-//    i = i - 1;
-//}
-//import log;
-//import sin;
-//log(sin(0));
-
 Example -> type {
   number: int,
   text: string,
 }
 
-ex := Example();
+b := Example;
+a := b();
+a.number = 10;
+
+c := Example();
+
+import log;
+log(a);
+log(c);

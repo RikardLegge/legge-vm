@@ -1,5 +1,5 @@
 use crate::ast::ast::InferredType;
-use crate::ast::{Ast, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
+use crate::ast::{Ast, Node, NodeBody, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
 use std::collections::VecDeque;
@@ -57,13 +57,7 @@ impl<'a> Typer<'a> {
 
     fn get_type(&self, node_id: &NodeID) -> Option<NodeType> {
         match self.get_inferred_type(node_id) {
-            Some(inf) => {
-                if let NodeType::Type(inner_tp) = &inf.tp {
-                    Some(*inner_tp.clone())
-                } else {
-                    Some(inf.tp.clone())
-                }
-            }
+            Some(inf) => Some(inf.tp.clone()),
             None => None,
         }
     }
@@ -152,7 +146,44 @@ impl<'a> Typer<'a> {
                 }
             }
             PrefixOp(_, node_id) => InferredType::maybe(self.get_type(node_id), Value),
-            VariableValue(value) => InferredType::maybe(self.get_type(value), Value),
+            VariableValue(value, path) => {
+                if let Some(value_tp) = self.get_type(value) {
+                    let mut value_tp = value_tp;
+                    if let NodeType::Type(tp) = value_tp {
+                        match &self.ast.get_node(*value).body {
+                            NodeBody::ConstDeclaration(_, _, constructor) => {
+                                value_tp = self.get_type(constructor).unwrap();
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let mut value_tp = &value_tp;
+                    if let Some(path) = path {
+                        for path_field in path {
+                            if let NodeType::Struct(fields) = &value_tp {
+                                let mut tp = None;
+                                for (field, field_tp) in fields {
+                                    if path_field == field {
+                                        tp = Some(field_tp);
+                                        break;
+                                    }
+                                }
+                                match tp {
+                                    Some(tp) => {
+                                        value_tp = tp;
+                                    }
+                                    None => unreachable!(),
+                                }
+                            } else {
+                                unimplemented!()
+                            }
+                        }
+                    }
+                    Some(InferredType::new(value_tp.clone(), Value))
+                } else {
+                    None
+                }
+            }
             Expression(_) => Some(InferredType::new(NotYetImplemented, Declared)),
             VariableDeclaration(_, declared, value) => {
                 if let Some(declared) = declared {
@@ -164,7 +195,6 @@ impl<'a> Typer<'a> {
                     self.not_void(value)?;
                     InferredType::maybe(self.get_type(value), Value)
                 } else {
-                    // InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
                     None
                 }
             }
@@ -178,7 +208,6 @@ impl<'a> Typer<'a> {
                     self.not_void(value)?;
                     InferredType::maybe(Some(tp), Value)
                 } else {
-                    // InferredType::maybe(self.get_ref_type(&node.id, ReceiveValue), Usage)
                     None
                 }
             }
@@ -189,14 +218,7 @@ impl<'a> Typer<'a> {
                     None
                 }
             }
-            VariableAssignment(var, value) => {
-                if let Some(tp) = self.get_type(var) {
-                    InferredType::maybe(Some(tp), Variable)
-                } else {
-                    self.not_void(value)?;
-                    InferredType::maybe(self.get_type(value), Value)
-                }
-            }
+            VariableAssignment(..) => InferredType::maybe(Some(Void), Declared),
             Call(var_id, _) => {
                 let var = self.ast.get_node(*var_id);
                 if let Some(tp) = &var.tp {
@@ -219,43 +241,6 @@ impl<'a> Typer<'a> {
                 } else {
                     None
                 }
-                // match var.body {
-                //     ConstDeclaration(.., proc_id)
-                //     | VariableDeclaration(.., Some(proc_id))
-                //     | Import(.., proc_id) => {
-                //         let proc = self.ast.get_node(*proc_id);
-                //         match &proc.body {
-                //             ProcedureDeclaration(_, return_type, _) => match return_type {
-                //                 Some(return_type) => InferredType::maybe(
-                //                     self.get_type_from_declaration(&proc.id, &return_type)?,
-                //                     Value,
-                //                 ),
-                //                 None => InferredType::maybe(Some(Void), Value),
-                //             },
-                //             ConstValue(NodeValue::RuntimeFn(id)) => {
-                //                 let tp = self.runtime.functions[*id].returns.clone();
-                //                 InferredType::maybe(Some(tp), Value)
-                //             }
-                //             _ => Err(self.ast.error(
-                //                 &format!(
-                //                     "It's currently only possible to call functions, tried to call {:?}",
-                //                     var
-                //                 ),
-                //                 "",
-                //                 vec![node.id, *var_id],
-                //             ))?,
-                //         }
-                //     }
-                //     VariableDeclaration(..) => None,
-                //     _ => Err(self.ast.error(
-                //         &format!(
-                //             "Call must be referencing a variable declaration, {:?} found",
-                //             var
-                //         ),
-                //         "",
-                //         vec![node.id],
-                //     ))?,
-                // };
             }
             Empty | Break(..) | Return(..) | Block(..) | If(..) | Loop(..) | Comment(..) => {
                 InferredType::maybe(Some(Void), Declared)

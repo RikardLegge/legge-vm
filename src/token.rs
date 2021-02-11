@@ -62,6 +62,7 @@ pub enum TokenType {
     RightCurlyBrace,
     ListSeparator,
     EndStatement,
+    Dot,
     LeftBrace,
     RightBrace,
     StaticDeclaration,
@@ -92,6 +93,7 @@ impl fmt::Debug for TokenType {
             TypeDeclaration => write!(f, ":"),
             Assignment => write!(f, "="),
             ReturnTypes => write!(f, "->"),
+            Dot => write!(f, "."),
             Name(ident) => write!(f, "{}", ident),
             KeyName(key) => write!(f, "{}", key),
             String(str) => write!(f, "{}", str),
@@ -181,6 +183,10 @@ impl<'a> Tokenizer<'a> {
             ';' => {
                 self.next()?;
                 TokenType::EndStatement
+            }
+            '.' => {
+                self.next()?;
+                TokenType::Dot
             }
             '"' => self.parse_string()?,
             _ => panic!("Encountered invalid character in global scope '{}'", ch),
