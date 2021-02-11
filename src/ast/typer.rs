@@ -149,7 +149,7 @@ impl<'a> Typer<'a> {
             VariableValue(value, path) => {
                 if let Some(value_tp) = self.get_type(value) {
                     let mut value_tp = value_tp;
-                    if let NodeType::Type(tp) = value_tp {
+                    if let NodeType::Type(_) = value_tp {
                         match &self.ast.get_node(*value).body {
                             NodeBody::ConstDeclaration(_, _, constructor) => {
                                 value_tp = self.get_type(constructor).unwrap();

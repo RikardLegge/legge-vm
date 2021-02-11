@@ -1,6 +1,6 @@
 use super::{Ast, NodeBody, NodeID, Result};
 use crate::ast::ast::{NodeReference, NodeReferenceLocation};
-use crate::ast::{NodeReferenceType, NodeType, NodeValue};
+use crate::ast::{NodeReferenceType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
 use std::mem;
