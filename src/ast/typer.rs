@@ -69,7 +69,8 @@ impl<'a> Typer<'a> {
     }
 
     fn get_inferred_type(&self, node_id: &NodeID) -> &Option<InferredType> {
-        &self.ast.get_node(*node_id).tp
+        let node = self.ast.get_node(*node_id);
+        &node.tp
     }
 
     // fn get_ref_type(&self, node_id: &NodeID, ref_tp: NodeReferenceType) -> Option<NodeType> {
@@ -201,6 +202,9 @@ impl<'a> Typer<'a> {
                 if let Some(tp) = &var.tp {
                     match &tp.tp {
                         Fn(_, ret) => {
+                            InferredType::maybe(Some((**ret).clone()), Value)
+                        }
+                        Type(ret) => {
                             InferredType::maybe(Some((**ret).clone()), Value)
                         }
                         _ => Err(self.ast.error(

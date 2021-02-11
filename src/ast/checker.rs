@@ -164,6 +164,7 @@ impl<'a> Checker<'a> {
                         .collect();
                     let call = &match func {
                         Fn(_, ret) => Fn(args, ret.clone()),
+                        Type(ret) => Fn(Vec::new(), ret.clone()),
                         _ => unreachable!(),
                     };
                     self.fits(node, func, call)?;
@@ -188,6 +189,24 @@ impl<'a> Checker<'a> {
         use NodeType::*;
         let fits = match (&hole, &shape) {
             (&Any, &shape) if shape != &Void => true,
+            (&Type(fields), &Fn(shape_args, shape_ret)) => {
+                if shape_args.len() > 0 {
+                    return Err(self.ast.error(
+                        "Type constructor can not have arguments",
+                        "",
+                        vec![node.id],
+                    ));
+                }
+
+                if fields != shape_ret {
+                    return Err(self.ast.error(
+                        "type and constructor does not have the same number of types",
+                        "",
+                        vec![node.id],
+                    ));
+                }
+                true
+            }
             (&Fn(hole_args, hole_ret), &Fn(shape_args, shape_ret)) => {
                 self.fits(node, &*hole_ret, &*shape_ret)?;
                 if hole_args.len() < shape_args.len() {

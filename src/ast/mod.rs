@@ -29,7 +29,7 @@ impl Err {
             .collect();
         let details = format!("\nAst Error: {}\n{}\n", details, node_info.join("\n\n"));
         panic!(details);
-        // Error { details }
+        // Err { details }
     }
 }
 

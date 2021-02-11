@@ -558,6 +558,7 @@ impl<'a> Generator<'a> {
                 NodeType::Void => 0,
                 _ => 1,
             },
+            NodeType::Type(..) => 1,
             _ => unreachable!(),
         };
 

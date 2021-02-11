@@ -379,6 +379,7 @@ enum Value {
     PC(usize),
     StackFrame(StackFrame),
     RuntimeFn(usize),
+    Struct(Vec<Value>),
 }
 
 impl PartialEq for Value {
@@ -403,6 +404,16 @@ impl Value {
             Value::String(val) => Some(bytecode::Value::String(val)),
             Value::ProcAddress(addr, _) => Some(bytecode::Value::ProcAddress(addr)),
             Value::RuntimeFn(addr) => Some(bytecode::Value::RuntimeFn(addr)),
+            Value::Struct(vals) => {
+                let mut bc_vals = Vec::with_capacity(vals.len());
+                for val in vals {
+                    match val.into_bytecode() {
+                        Some(bc_val) => bc_vals.push(bc_val),
+                        None => return None,
+                    }
+                }
+                Some(bytecode::Value::Struct(bc_vals))
+            }
             Value::PC(_) => None,
             Value::StackFrame(_) => None,
         }
@@ -416,7 +427,13 @@ impl Value {
             bytecode::Value::Bool(val) => Value::Bool(val),
             bytecode::Value::String(val) => Value::String(val),
             bytecode::Value::RuntimeFn(val) => Value::RuntimeFn(val),
-            bytecode::Value::Struct(..) => unimplemented!(),
+            bytecode::Value::Struct(bc_vals) => {
+                let val = bc_vals
+                    .iter()
+                    .map(|val| Value::from(val.clone(), closure))
+                    .collect();
+                Value::Struct(val)
+            }
         }
     }
 }

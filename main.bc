@@ -20,4 +20,4 @@ Example -> type {
   text: string,
 }
 
-//ex := Example();
+ex := Example();
