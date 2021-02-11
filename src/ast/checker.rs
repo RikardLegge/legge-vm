@@ -29,7 +29,6 @@ impl<'a> Checker<'a> {
                 | Expression(..)
                 | VariableValue(..)
                 | ProcedureDeclaration(..)
-                | TypeDeclaration(..)
                 | Import(..) => Ok(()),
                 Op(op, lhs, rhs) => {
                     let lhs_tp = self.ast.get_node(*lhs).tp.as_ref().unwrap();
@@ -98,6 +97,16 @@ impl<'a> Checker<'a> {
                 ConstDeclaration(_, _, value) => {
                     let lhs = node.tp.as_ref().unwrap();
                     let rhs = self.ast.get_node(*value).tp.as_ref().unwrap();
+                    if let Type(fields_tp) = &lhs.tp {
+                        if let Fn(_, ret_tp) = &rhs.tp {
+                            if fields_tp == ret_tp {
+                                return Ok(());
+                            } else {
+                                println!("{:?} != {:?}", lhs.tp, rhs.tp);
+                                panic!();
+                            }
+                        }
+                    }
                     if lhs.tp == rhs.tp {
                         Ok(())
                     } else {

@@ -146,12 +146,7 @@ where
             ConstDeclaration(.., child_node) | VariableDeclaration(.., Some(child_node)) => {
                 self.should_terminate_statement(child_node)
             }
-            TypeDeclaration(..)
-            | Block(..)
-            | ProcedureDeclaration(..)
-            | If(..)
-            | Loop(..)
-            | Comment(..) => false,
+            Block(..) | ProcedureDeclaration(..) | If(..) | Loop(..) | Comment(..) => false,
             _ => true,
         }
     }
@@ -369,17 +364,32 @@ where
         Ok(tp)
     }
 
+    fn default_value(&self, tp: &NodeType) -> NodeValue {
+        match tp {
+            NodeType::Int => NodeValue::Int(0),
+            NodeType::Bool => NodeValue::Bool(false),
+            NodeType::String => NodeValue::String("".into()),
+            NodeType::Struct(fields) => NodeValue::Struct(
+                fields
+                    .iter()
+                    .map(|(name, tp)| (name.clone(), self.default_value(tp)))
+                    .collect(),
+            ),
+            _ => unimplemented!(),
+        }
+    }
+
     fn do_type_definition(&mut self, node: PendingNode, ident: &str) -> Result {
         self.ensure_next_token(&node, TokenType::LeftCurlyBrace)?;
 
-        let mut key_values = Vec::new();
+        let mut fields = Vec::new();
 
         loop {
             match self.next_token(&node)? {
                 TokenType::Name(key) => {
                     self.ensure_next_token(&node, TokenType::TypeDeclaration)?;
                     let tp = self.do_type(&node)?;
-                    key_values.push((key, tp));
+                    fields.push((key, tp));
                 }
                 TokenType::RightCurlyBrace => break,
                 _ => Err(self.ast.error(
@@ -393,8 +403,38 @@ where
             }
         }
 
-        let body = NodeBody::TypeDeclaration(ident.into(), key_values);
-        let node_id = self.add_node(node, body);
+        let inner_tp = NodeType::Struct(fields);
+        let constructor_id = {
+            let node = self.node(node.id);
+
+            let body_id = {
+                let node = self.node(node.id);
+
+                let ret_id = {
+                    let node = self.node(node.id);
+
+                    let value_id = {
+                        let node = self.node(node.id);
+                        let value = NodeBody::ConstValue(self.default_value(&inner_tp));
+                        self.add_node(node, value)
+                    };
+
+                    let ret = NodeBody::Unlinked(UnlinkedNodeBody::Return(Some(value_id)));
+                    self.add_node(node, ret)
+                };
+
+                let body = NodeBody::Block(vec![ret_id]);
+                self.add_node(node, body)
+            };
+
+            let constructor =
+                NodeBody::ProcedureDeclaration(Vec::new(), Some(inner_tp.clone()), body_id);
+            self.add_node(node, constructor)
+        };
+
+        let tp = NodeType::Type(Box::new(inner_tp));
+        let variable = NodeBody::ConstDeclaration(ident.into(), Some(tp), constructor_id);
+        let node_id = self.add_node(node, variable);
         Ok(node_id)
     }
 

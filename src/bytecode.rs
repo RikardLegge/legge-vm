@@ -86,6 +86,7 @@ pub enum Value {
     String(String),
     ProcAddress(usize),
     RuntimeFn(usize),
+    Struct(Vec<Value>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -689,14 +690,19 @@ impl<'a> Generator<'a> {
         }
     }
 
-    fn ev_const(&mut self, node_id: NodeID, node_value: &NodeValue) -> StackUsage {
+    fn default_value(&self, node_value: &NodeValue) -> Value {
         use NodeValue::*;
-        let value = match node_value {
+        match node_value {
             Int(val) => Value::Int(*val),
             Bool(val) => Value::Bool(*val),
             String(val) => Value::String(val.clone()),
             RuntimeFn(id) => Value::RuntimeFn(*id),
-        };
+            Struct(val) => Value::Struct(val.iter().map(|(_, v)| self.default_value(v)).collect()),
+        }
+    }
+
+    fn ev_const(&mut self, node_id: NodeID, node_value: &NodeValue) -> StackUsage {
+        let value = self.default_value(node_value);
         self.add_op(node_id, OP::PushImmediate(value));
         StackUsage::new(0, 1)
     }

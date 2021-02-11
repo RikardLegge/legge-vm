@@ -416,6 +416,7 @@ impl Value {
             bytecode::Value::Bool(val) => Value::Bool(val),
             bytecode::Value::String(val) => Value::String(val),
             bytecode::Value::RuntimeFn(val) => Value::RuntimeFn(val),
+            bytecode::Value::Struct(..) => unimplemented!(),
         }
     }
 }

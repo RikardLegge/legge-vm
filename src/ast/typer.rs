@@ -91,21 +91,34 @@ impl<'a> Typer<'a> {
         Ok(Some(tp.clone()))
     }
 
+    fn node_value_type(&self, value: &NodeValue) -> NodeType {
+        match value {
+            NodeValue::Int(..) => NodeType::Int,
+            NodeValue::String(..) => NodeType::String,
+            NodeValue::Bool(..) => NodeType::Bool,
+            NodeValue::Struct(fields) => {
+                let field_types = fields
+                    .iter()
+                    .map(|(name, value)| {
+                        let tp = self.node_value_type(value);
+                        (name.clone(), tp)
+                    })
+                    .collect();
+                NodeType::Struct(field_types)
+            }
+            NodeValue::RuntimeFn(id) => {
+                let func = &self.runtime.functions[*id];
+                func.tp.clone()
+            }
+        }
+    }
+
     pub fn infer_type(&self, node: &Node) -> Result<Option<InferredType>> {
         use super::NodeBody::*;
         use super::NodeType::*;
         use super::NodeTypeSource::*;
         let tp = match &node.body {
-            ConstValue(value) => match value {
-                NodeValue::Int(..) => Some(InferredType::new(Int, Declared)),
-                NodeValue::String(..) => Some(InferredType::new(String, Declared)),
-                NodeValue::Bool(..) => Some(InferredType::new(Bool, Declared)),
-                NodeValue::RuntimeFn(id) => {
-                    let func = &self.runtime.functions[*id];
-                    let tp = func.tp.clone();
-                    Some(InferredType::new(tp, Declared))
-                }
-            },
+            ConstValue(value) => Some(InferredType::new(self.node_value_type(value), Declared)),
             Op(op, lhs, rhs) => {
                 use ArithmeticOP::*;
                 match op {
@@ -118,10 +131,6 @@ impl<'a> Typer<'a> {
                     }
                 }
             }
-            TypeDeclaration(_, key_values) => Some(InferredType::new(
-                Type(Box::new(UserDefined(key_values.clone()))),
-                Declared,
-            )),
             ProcedureDeclaration(args, returns, _) => {
                 let arg_types: Vec<Option<NodeType>> =
                     args.iter().map(|id| self.get_type(id)).collect();
