@@ -46,8 +46,6 @@ where
     linker::link(&mut ast, runtime)?;
     timing.linker = debug::stop_timer(start);
 
-    println!("{:?}", ast);
-
     let start = debug::start_timer();
     typer::infer_types(&mut ast, runtime)?;
     timing.type_inference = debug::stop_timer(start);

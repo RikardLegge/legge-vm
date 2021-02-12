@@ -13,6 +13,7 @@ Should probably not be used in production but that might not stop some very brav
 - [x] External functions
 - [x] Bugs
 - [x] Custom types
+- [ ] Test to se if it actually works
 
 ## Benchmarks 
 

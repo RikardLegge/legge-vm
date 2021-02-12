@@ -70,7 +70,6 @@ impl<'a, 'b> Linker<'a, 'b> {
     }
 
     fn fix_unknown_fields(&mut self, node_id: NodeID, value: NodeValue) -> Result<NodeValue> {
-        use super::NodeReferenceType::*;
         match value {
             NodeValue::Int(_)
             | NodeValue::Bool(_)
@@ -85,7 +84,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                 Ok(NodeValue::Struct(new_fields))
             }
             NodeValue::Unlinked(ident) => {
-                let (target_id, location) = match self.closest_variable(node_id, &ident)? {
+                let (target_id, _) = match self.closest_variable(node_id, &ident)? {
                     Some(target) => target,
                     None => {
                         Err(self
@@ -119,7 +118,6 @@ impl<'a, 'b> Linker<'a, 'b> {
                 NodeType::Struct(new_tps)
             }
             NodeType::Unknown(ident) => {
-                println!("{:?}", self.ast);
                 let (target_id, _) = match self.closest_variable(node_id, &ident)? {
                     Some(target) => target,
                     None => {
