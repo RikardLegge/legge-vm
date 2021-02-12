@@ -178,6 +178,7 @@ pub enum NodeType {
     String,
     Fn(Vec<NodeType>, Box<NodeType>),
     Type(Box<NodeType>),
+    Unknown(String),
     Struct(Vec<(String, NodeType)>),
 }
 
@@ -188,6 +189,7 @@ pub enum NodeValue {
     String(String),
     RuntimeFn(usize),
     Struct(Vec<(String, NodeValue)>),
+    Unlinked(String),
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +208,7 @@ pub enum NodeBody {
 
     VariableDeclaration(String, Option<NodeType>, Option<NodeID>),
     ConstDeclaration(String, Option<NodeType>, NodeID),
+    TypeDeclaration(String, NodeType, NodeID, Option<NodeValue>),
     VariableAssignment(NodeID, Option<Vec<String>>, NodeID),
     VariableValue(NodeID, Option<Vec<String>>),
     Return(NodeID, Option<NodeID>),
@@ -228,7 +231,9 @@ impl NodeBody {
 #[derive(Debug, Clone)]
 pub enum UnlinkedNodeBody {
     VariableAssignment(String, Option<Vec<String>>, NodeID),
+    Value(NodeValue),
     VariableValue(String, Option<Vec<String>>),
+    Type(Box<NodeBody>, Option<NodeID>),
     Return(Option<NodeID>),
     Break,
     Call(String, Vec<NodeID>),
@@ -370,6 +375,7 @@ impl Ast {
                 match &child.body {
                     VariableDeclaration(ident, ..)
                     | ConstDeclaration(ident, ..)
+                    | TypeDeclaration(ident, ..)
                     | Import(ident, _) => {
                         if ident == target_ident {
                             if let Some(closest_id) = closest_id {
@@ -461,6 +467,7 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
             PrefixOp(_, value)
             | Loop(value)
             | Expression(value)
+            | TypeDeclaration(_, _, value, ..)
             | ConstDeclaration(.., value)
             | VariableAssignment(_, _, value)
             | Import(_, value) => match self.index {
@@ -504,8 +511,12 @@ impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
                 0 => value.as_ref(),
                 _ => None,
             },
+            Type(_, children) => match self.index {
+                0 => children.as_ref(),
+                _ => None,
+            },
             Call(_, args) => args.get(self.index),
-            VariableValue(_, _) | Break | ImportValue(_) => None,
+            VariableValue(_, _) | Break | ImportValue(_) | Value(_) => None,
         };
         if option.is_some() {
             self.index += 1;

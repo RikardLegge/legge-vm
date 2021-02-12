@@ -12,7 +12,7 @@ Should probably not be used in production but that might not stop some very brav
 - [x] Closures
 - [x] External functions
 - [x] Bugs
-- [ ] Custom types
+- [x] Custom types
 
 ## Benchmarks 
 

@@ -1,6 +1,6 @@
 use super::{Ast, NodeBody, NodeID, Result};
 use crate::ast::ast::{NodeReference, NodeReferenceLocation};
-use crate::ast::{NodeReferenceType, NodeValue};
+use crate::ast::{NodeReferenceType, NodeType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
 use std::mem;
@@ -69,6 +69,75 @@ impl<'a, 'b> Linker<'a, 'b> {
         }
     }
 
+    fn fix_unknown_fields(&mut self, node_id: NodeID, value: NodeValue) -> Result<NodeValue> {
+        use super::NodeReferenceType::*;
+        match value {
+            NodeValue::Int(_)
+            | NodeValue::Bool(_)
+            | NodeValue::String(_)
+            | NodeValue::RuntimeFn(_) => Ok(value),
+            NodeValue::Struct(fields) => {
+                let mut new_fields = Vec::with_capacity(fields.len());
+                for (name, field) in fields {
+                    let new_value = self.fix_unknown_fields(node_id, field)?;
+                    new_fields.push((name, new_value));
+                }
+                Ok(NodeValue::Struct(new_fields))
+            }
+            NodeValue::Unlinked(ident) => {
+                let (target_id, location) = match self.closest_variable(node_id, &ident)? {
+                    Some(target) => target,
+                    None => {
+                        Err(self
+                            .ast
+                            .error("Failed to find type", "type not found", vec![node_id]))?
+                    }
+                };
+                let value = match &self.ast.get_node(target_id).body {
+                    NodeBody::TypeDeclaration(_, _, _, default_value) => match default_value {
+                        Some(default_value) => default_value.clone(),
+                        None => unreachable!(),
+                    },
+                    _ => unreachable!(),
+                };
+                Ok(value)
+            }
+        }
+    }
+
+    fn fix_unknown_types(&self, node_id: NodeID, tp: NodeType) -> Result<NodeType> {
+        let tp = match tp {
+            NodeType::Void | NodeType::Int | NodeType::Bool | NodeType::String => tp,
+            NodeType::Fn(_, _) => unimplemented!(),
+            NodeType::Type(tp) => NodeType::Type(Box::new(self.fix_unknown_types(node_id, *tp)?)),
+            NodeType::Struct(tps) => {
+                let mut new_tps = Vec::with_capacity(tps.len());
+                for (name, tp) in tps {
+                    let new_value = self.fix_unknown_types(node_id, tp)?;
+                    new_tps.push((name, new_value));
+                }
+                NodeType::Struct(new_tps)
+            }
+            NodeType::Unknown(ident) => {
+                println!("{:?}", self.ast);
+                let (target_id, _) = match self.closest_variable(node_id, &ident)? {
+                    Some(target) => target,
+                    None => {
+                        Err(self
+                            .ast
+                            .error("Failed to find type", "type not found", vec![node_id]))?
+                    }
+                };
+                match &self.ast.get_node(target_id).body {
+                    NodeBody::TypeDeclaration(_, NodeType::Type(tp), _, _) => (**tp).clone(),
+                    _ => unreachable!(),
+                }
+            }
+            _ => unimplemented!("{:?}", tp),
+        };
+        Ok(tp)
+    }
+
     fn link(mut self) -> Result<()> {
         while let Some(node_id) = self.queue.pop_front() {
             let node = self.ast.get_node(node_id);
@@ -95,19 +164,36 @@ impl<'a, 'b> Linker<'a, 'b> {
                             self.add_ref(target_id, node_id, ReceiveValue, location);
                             NodeBody::VariableAssignment(target_id, path, expr_id)
                         }
+                        Value(value) => {
+                            let value = value.clone();
+                            let new_value = self.fix_unknown_fields(node_id, value)?;
+                            NodeBody::ConstValue(new_value)
+                        }
+                        Type(body, _) => match &**body {
+                            NodeBody::TypeDeclaration(ident, tp, constructor, default_value) => {
+                                let tp = self.fix_unknown_types(node_id, tp.clone())?;
+                                NodeBody::TypeDeclaration(
+                                    ident.clone(),
+                                    tp,
+                                    *constructor,
+                                    default_value.clone(),
+                                )
+                            }
+                            NodeBody::ProcedureDeclaration(args, tp, ret) => {
+                                let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
+                                NodeBody::ProcedureDeclaration(args.clone(), Some(tp), ret.clone())
+                            }
+                            _ => unimplemented!("{:?}", body),
+                        },
                         VariableValue(ident, path) => {
                             let (target_id, location) =
                                 match self.closest_variable(node_id, &ident)? {
-                                    Some(node_id) => node_id,
-                                    None => {
-                                        // let ident = ident.into();
-                                        // self.add_runtime_variable(ident)?
-                                        Err(self.ast.error(
-                                            "Failed to find variable",
-                                            "variable not found",
-                                            vec![node_id],
-                                        ))?
-                                    }
+                                    Some(target) => target,
+                                    None => Err(self.ast.error(
+                                        "Failed to find variable",
+                                        "variable not found",
+                                        vec![node_id],
+                                    ))?,
                                 };
                             let path = path.clone();
                             self.add_ref(target_id, node_id, AssignValue, location);

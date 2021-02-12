@@ -105,6 +105,7 @@ impl<'a> Typer<'a> {
                 let func = &self.runtime.functions[*id];
                 func.tp.clone()
             }
+            NodeValue::Unlinked(_) => unreachable!(),
         }
     }
 
@@ -211,6 +212,10 @@ impl<'a> Typer<'a> {
                     None
                 }
             }
+            TypeDeclaration(_, declared, ..) => InferredType::maybe(
+                self.get_type_from_declaration(&node.id, declared)?,
+                Declared,
+            ),
             Import(_, value) => {
                 if let Some(tp) = self.get_type(value) {
                     InferredType::maybe(Some(tp), Value)

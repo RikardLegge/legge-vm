@@ -143,10 +143,17 @@ where
         use self::NodeBody::*;
 
         match self.ast.get_node(node).body {
-            ConstDeclaration(.., child_node) | VariableDeclaration(.., Some(child_node)) => {
+            TypeDeclaration(_, _, child_node, ..)
+            | ConstDeclaration(.., child_node)
+            | VariableDeclaration(.., Some(child_node)) => {
                 self.should_terminate_statement(child_node)
             }
-            Block(..) | ProcedureDeclaration(..) | If(..) | Loop(..) | Comment(..) => false,
+            Block(..)
+            | ProcedureDeclaration(..)
+            | If(..)
+            | Loop(..)
+            | Comment(..)
+            | Unlinked(UnlinkedNodeBody::Type(..)) => false,
             _ => true,
         }
     }
@@ -357,26 +364,38 @@ where
                     }
                     NodeType::Fn(args, Box::new(ret))
                 }
-                _ => unimplemented!(),
+                _ => NodeType::Unknown(name),
             },
             _ => unimplemented!(),
         };
         Ok(tp)
     }
 
-    fn default_value(&self, tp: &NodeType) -> NodeValue {
-        match tp {
+    fn default_value(&self, tp: &NodeType) -> (NodeValue, bool) {
+        let mut linked = true;
+        let value = match tp {
             NodeType::Int => NodeValue::Int(0),
             NodeType::Bool => NodeValue::Bool(false),
             NodeType::String => NodeValue::String("".into()),
             NodeType::Struct(fields) => NodeValue::Struct(
                 fields
                     .iter()
-                    .map(|(name, tp)| (name.clone(), self.default_value(tp)))
+                    .map(|(name, tp)| {
+                        let (tp, is_linked) = self.default_value(tp);
+                        if !is_linked {
+                            linked = false;
+                        }
+                        (name.clone(), tp)
+                    })
                     .collect(),
             ),
+            NodeType::Unknown(name) => {
+                linked = false;
+                NodeValue::Unlinked(name.clone())
+            }
             _ => unimplemented!(),
-        }
+        };
+        (value, linked)
     }
 
     fn do_type_definition(&mut self, node: PendingNode, ident: &str) -> Result {
@@ -404,6 +423,8 @@ where
         }
 
         let inner_tp = NodeType::Struct(fields);
+        let known_type;
+        let mut default_value = None;
         let constructor_id = {
             let node = self.node(node.id);
 
@@ -415,8 +436,16 @@ where
 
                     let value_id = {
                         let node = self.node(node.id);
-                        let value = NodeBody::ConstValue(self.default_value(&inner_tp));
-                        self.add_node(node, value)
+                        let (value, linked) = self.default_value(&inner_tp);
+                        known_type = linked;
+                        if known_type {
+                            default_value = Some(value.clone());
+                            let value = NodeBody::ConstValue(value);
+                            self.add_node(node, value)
+                        } else {
+                            let value = UnlinkedNodeBody::Value(value);
+                            self.add_uncomplete_node(node, value)
+                        }
                     };
 
                     let ret = NodeBody::Unlinked(UnlinkedNodeBody::Return(Some(value_id)));
@@ -429,13 +458,28 @@ where
 
             let constructor =
                 NodeBody::ProcedureDeclaration(Vec::new(), Some(inner_tp.clone()), body_id);
-            self.add_node(node, constructor)
+            if known_type {
+                self.add_node(node, constructor)
+            } else {
+                self.add_uncomplete_node(
+                    node,
+                    UnlinkedNodeBody::Type(Box::new(constructor), Some(body_id)),
+                )
+            }
         };
 
         let tp = NodeType::Type(Box::new(inner_tp));
-        let variable = NodeBody::ConstDeclaration(ident.into(), Some(tp), constructor_id);
-        let node_id = self.add_node(node, variable);
-        Ok(node_id)
+        let variable = NodeBody::TypeDeclaration(ident.into(), tp, constructor_id, default_value);
+        if known_type {
+            let node_id = self.add_node(node, variable);
+            Ok(node_id)
+        } else {
+            let node_id = self.add_uncomplete_node(
+                node,
+                UnlinkedNodeBody::Type(Box::new(variable), Some(constructor_id)),
+            );
+            Ok(node_id)
+        }
     }
 
     fn do_procedure(&mut self, node: PendingNode) -> Result {

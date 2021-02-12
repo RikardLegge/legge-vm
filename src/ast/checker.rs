@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
                         Ok(())
                     }
                 }
-                ConstDeclaration(_, _, value) => {
+                TypeDeclaration(_, _, value, ..) => {
                     let lhs = node.tp.as_ref().unwrap();
                     let rhs = self.ast.get_node(*value).tp.as_ref().unwrap();
                     if let Type(fields_tp) = &lhs.tp {
@@ -137,6 +137,12 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
+                    unreachable!()
+                }
+
+                ConstDeclaration(_, _, value) => {
+                    let lhs = node.tp.as_ref().unwrap();
+                    let rhs = self.ast.get_node(*value).tp.as_ref().unwrap();
                     if lhs.tp == rhs.tp {
                         Ok(())
                     } else {

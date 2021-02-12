@@ -427,6 +427,7 @@ impl<'a> Generator<'a> {
             Call(proc_id, args) => self.ev_call(node_id, *proc_id, args, true),
             VariableValue(val, field) => self.ev_variable_value(node_id, *val, field),
             ConstDeclaration(_, _, expr) => self.ev_declaration(node_id, Some(*expr)),
+            TypeDeclaration(_, _, expr, _) => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
             Import(_, value) => self.ev_declaration(node_id, Some(*value)),
             VariableAssignment(var, path, value) => self.ev_assignment(node_id, *var, path, *value),
@@ -561,15 +562,18 @@ impl<'a> Generator<'a> {
     fn get_field_index(&self, var_id: NodeID, path: &Option<Vec<String>>) -> Option<Vec<usize>> {
         if let Some(path) = path {
             let mut index_path = Vec::with_capacity(path.len());
-            let tp = &self.ast.get_node(var_id).tp.as_ref().unwrap().tp;
+            let mut tp = &self.ast.get_node(var_id).tp.as_ref().unwrap().tp;
             for path_name in path {
                 match tp {
                     NodeType::Struct(fields) => {
-                        let index = fields
-                            .iter()
-                            .position(|(name, _)| name == path_name)
-                            .unwrap();
-                        index_path.push(index);
+                        let index = fields.iter().position(|(name, _)| name == path_name);
+                        match index {
+                            Some(index) => {
+                                tp = &fields[index].1;
+                                index_path.push(index)
+                            }
+                            None => unimplemented!(),
+                        }
                     }
                     _ => unreachable!(),
                 }
@@ -661,6 +665,7 @@ impl<'a> Generator<'a> {
                     match &node.body {
                         NodeBody::VariableDeclaration(..)
                         | NodeBody::ConstDeclaration(..)
+                        | NodeBody::TypeDeclaration(..)
                         | NodeBody::Import(..) => {
                             bc.add_var(*child_id);
                             bc.add_op(*child_id, OP::PushToClosure);
@@ -671,6 +676,7 @@ impl<'a> Generator<'a> {
                     match &node.body {
                         NodeBody::VariableDeclaration(..)
                         | NodeBody::ConstDeclaration(..)
+                        | NodeBody::TypeDeclaration(..)
                         | NodeBody::Import(..) => {
                             bc.add_var(*child_id);
                             bc.add_op(*child_id, OP::PushImmediate(Value::Unset));
@@ -760,6 +766,7 @@ impl<'a> Generator<'a> {
             String(val) => Value::String(val.clone()),
             RuntimeFn(id) => Value::RuntimeFn(*id),
             Struct(val) => Value::Struct(val.iter().map(|(_, v)| self.default_value(v)).collect()),
+            Unlinked(_) => unreachable!(),
         }
     }
 

@@ -1,14 +1,13 @@
-Example -> type {
-  number: int,
-  text: string,
+import log;
+
+A -> type {
+  a: int
 }
 
-b := Example;
-a := b();
-a.number = 10;
+B -> type {
+  to_a: A
+}
 
-c := Example();
-
-import log;
-log(a);
-log(c);
+b := B();
+b.to_a.a = 10;
+log(b);
