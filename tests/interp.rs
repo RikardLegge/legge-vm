@@ -193,6 +193,63 @@ fn test_loop() {
 }
 
 #[test]
+fn test_custom_type() {
+    run_test(
+        "
+         A -> type {
+            a: int
+         }
+         a :: A();
+        exit(a);",
+        Some(Struct(vec![Int(0)])),
+    );
+}
+
+#[test]
+fn test_custom_type_set() {
+    run_test(
+        "
+         A -> type {
+            a: int
+         }
+         a := A();
+         a.a = 10;
+        exit(a);",
+        Some(Struct(vec![Int(10)])),
+    );
+}
+
+#[test]
+fn test_custom_type_get() {
+    run_test(
+        "
+         A -> type {
+            a: int
+         }
+         a :: A();
+        exit(a.a);",
+        Some(Int(0)),
+    );
+}
+
+#[test]
+fn test_custom_type_nested() {
+    run_test(
+        "
+         A -> type {
+            a: int
+         }
+         B -> type {
+            to_a: A
+        }
+        b := B();
+        b.to_a.a = 10;
+        exit(b);",
+        Some(Struct(vec![Struct(vec![Int(10)])])),
+    );
+}
+
+#[test]
 #[should_panic]
 fn test_var_assign_other_type() {
     run_test("a := 1; a = true;", None);
