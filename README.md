@@ -1,5 +1,5 @@
 # Legge Virtual Machine, attempt nr. ~8
-Compilter, typechecker and stackbased virtual machine.
+Compiler, type-checker and stack-based virtual machine.
 A bit more fun than cleaning the house this exam period.
 
 Should probably not be used in production but that might not stop some very brave people.
