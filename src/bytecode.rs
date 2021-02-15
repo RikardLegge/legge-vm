@@ -85,10 +85,11 @@ pub enum OP {
     Panic,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     Unset,
     Int(isize),
+    Float(f64),
     Bool(bool),
     String(String),
     ProcAddress(usize),
@@ -762,6 +763,7 @@ impl<'a> Generator<'a> {
         use NodeValue::*;
         match node_value {
             Int(val) => Value::Int(*val),
+            Float(val) => Value::Float(*val),
             Bool(val) => Value::Bool(*val),
             String(val) => Value::String(val.clone()),
             RuntimeFn(id) => Value::RuntimeFn(*id),

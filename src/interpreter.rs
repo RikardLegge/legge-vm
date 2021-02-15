@@ -3,6 +3,7 @@ use crate::runtime::Runtime;
 use crate::{bytecode, LogLevel};
 use std::cell::RefCell;
 use std::mem;
+use std::ops::{Add, Div, Mul, Sub};
 use std::rc::Rc;
 
 #[derive(Debug)]
@@ -125,16 +126,6 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn pop_stack_int(&mut self) -> Result<isize> {
-        match self.pop_stack()? {
-            Value::Int(int) => Ok(int),
-            val => Err(Err::new(&format!(
-                "Stack value is not of type int {:?}",
-                val
-            ))),
-        }
-    }
-
     fn push_stack(&mut self, value: Value) -> Result {
         if self.stack.len() < self.stack_max {
             self.stack.push(value);
@@ -172,28 +163,28 @@ impl<'a> Interpreter<'a> {
         use self::OP::*;
         match cmd {
             AddI => {
-                let n1 = self.pop_stack_int()?;
-                let n2 = self.pop_stack_int()?;
+                let n1 = self.pop_stack()?;
+                let n2 = self.pop_stack()?;
                 let sum = n2 + n1;
-                self.push_stack(Value::Int(sum))?;
+                self.push_stack(sum)?;
             }
             SubI => {
-                let n1 = self.pop_stack_int()?;
-                let n2 = self.pop_stack_int()?;
+                let n1 = self.pop_stack()?;
+                let n2 = self.pop_stack()?;
                 let diff = n2 - n1;
-                self.push_stack(Value::Int(diff))?;
+                self.push_stack(diff)?;
             }
             MulI => {
-                let n1 = self.pop_stack_int()?;
-                let n2 = self.pop_stack_int()?;
+                let n1 = self.pop_stack()?;
+                let n2 = self.pop_stack()?;
                 let prod = n2 * n1;
-                self.push_stack(Value::Int(prod))?;
+                self.push_stack(prod)?;
             }
             DivI => {
-                let n1 = self.pop_stack_int()?;
-                let n2 = self.pop_stack_int()?;
+                let n1 = self.pop_stack()?;
+                let n2 = self.pop_stack()?;
                 let kvote = n2 / n1;
-                self.push_stack(Value::Int(kvote))?;
+                self.push_stack(kvote)?;
             }
             Eq => {
                 let n1 = self.pop_stack()?;
@@ -401,6 +392,7 @@ struct StackFrame {
 enum Value {
     Unset,
     Int(isize),
+    Float(f64),
     Bool(bool),
     String(String),
     ProcAddress(usize, Option<Rc<RefCell<Closure>>>),
@@ -424,11 +416,65 @@ impl PartialEq for Value {
     }
 }
 
+impl Add for Value {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        use Value::*;
+        match (self, other) {
+            (Int(a), Int(b)) => Value::Int(a + b),
+            (Float(a), Float(b)) => Value::Float(a + b),
+            (String(a), String(b)) => Value::String(a + &b),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl Sub for Value {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        use Value::*;
+        match (self, other) {
+            (Int(a), Int(b)) => Value::Int(a - b),
+            (Float(a), Float(b)) => Value::Float(a - b),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl Div for Value {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self::Output {
+        use Value::*;
+        match (self, other) {
+            (Int(a), Int(b)) => Value::Int(a / b),
+            (Float(a), Float(b)) => Value::Float(a / b),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl Mul for Value {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self::Output {
+        use Value::*;
+        match (self, other) {
+            (Int(a), Int(b)) => Value::Int(a * b),
+            (Float(a), Float(b)) => Value::Float(a * b),
+            _ => unimplemented!(),
+        }
+    }
+}
+
 impl Value {
     fn into_bytecode(self) -> Option<bytecode::Value> {
         match self {
             Value::Unset => Some(bytecode::Value::Unset),
             Value::Int(val) => Some(bytecode::Value::Int(val)),
+            Value::Float(val) => Some(bytecode::Value::Float(val)),
             Value::Bool(val) => Some(bytecode::Value::Bool(val)),
             Value::String(val) => Some(bytecode::Value::String(val)),
             Value::ProcAddress(addr, _) => Some(bytecode::Value::ProcAddress(addr)),
@@ -453,6 +499,7 @@ impl Value {
             bytecode::Value::ProcAddress(addr) => Value::ProcAddress(addr, closure.clone()),
             bytecode::Value::Unset => Value::Unset,
             bytecode::Value::Int(val) => Value::Int(val),
+            bytecode::Value::Float(val) => Value::Float(val),
             bytecode::Value::Bool(val) => Value::Bool(val),
             bytecode::Value::String(val) => Value::String(val),
             bytecode::Value::RuntimeFn(val) => Value::RuntimeFn(val),

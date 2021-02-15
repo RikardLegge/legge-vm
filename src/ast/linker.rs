@@ -74,6 +74,7 @@ impl<'a, 'b> Linker<'a, 'b> {
             NodeValue::Int(_)
             | NodeValue::Bool(_)
             | NodeValue::String(_)
+            | NodeValue::Float(_)
             | NodeValue::RuntimeFn(_) => Ok(value),
             NodeValue::Struct(fields) => {
                 let mut new_fields = Vec::with_capacity(fields.len());

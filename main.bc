@@ -1,7 +1,7 @@
 import log;
 
 A -> type {
-  a: int
+  a: float
 }
 
 B -> type {
@@ -9,5 +9,5 @@ B -> type {
 }
 
 b := B();
-b.to_a.a = 10;
+b.to_a.a = 10.100 + 1.0;
 log(b);

@@ -89,6 +89,7 @@ impl<'a> Typer<'a> {
     fn node_value_type(&self, value: &NodeValue) -> NodeType {
         match value {
             NodeValue::Int(..) => NodeType::Int,
+            NodeValue::Float(..) => NodeType::Float,
             NodeValue::String(..) => NodeType::String,
             NodeValue::Bool(..) => NodeType::Bool,
             NodeValue::Struct(fields) => {

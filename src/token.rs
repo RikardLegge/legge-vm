@@ -74,6 +74,7 @@ pub enum TokenType {
     KeyName(String),
     String(String),
     Int(isize),
+    Float(f64),
     Op(ArithmeticOP),
 }
 
@@ -98,6 +99,7 @@ impl fmt::Debug for TokenType {
             KeyName(key) => write!(f, "{}", key),
             String(str) => write!(f, "{}", str),
             Int(num) => write!(f, "{}", num),
+            Float(num) => write!(f, "{}", num),
             Op(op) => write!(f, "{:?}", op),
         }
     }
@@ -293,17 +295,34 @@ impl<'a> Tokenizer<'a> {
     }
 
     fn parse_number(&mut self) -> Option<TokenType> {
-        let mut num = 0 as isize;
+        let mut int = 0 as isize;
         while let Some(ch) = self.peek() {
             match ch {
                 '0'..='9' => {
-                    num *= 10;
-                    num += self.next().unwrap().to_digit(10)? as isize
+                    int *= 10;
+                    int += self.next().unwrap().to_digit(10)? as isize
                 }
                 _ => break,
             };
         }
-
-        Some(TokenType::Int(num))
+        match self.peek()? {
+            '.' => {
+                self.next();
+                let float = match self.peek()? {
+                    '0'..='9' => match self.parse_number() {
+                        Some(TokenType::Int(decimal)) => {
+                            let decimal = decimal as f64;
+                            let pow = (decimal + 1.0).log10().ceil() as u32;
+                            let divisor = (10 as usize).pow(pow);
+                            int as f64 + decimal / divisor as f64
+                        }
+                        _ => unimplemented!(),
+                    },
+                    _ => int as f64,
+                };
+                Some(TokenType::Float(float))
+            }
+            _ => Some(TokenType::Int(int)),
+        }
     }
 }

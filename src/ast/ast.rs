@@ -174,6 +174,7 @@ pub enum NodeType {
     NotYetImplemented,
     Void,
     Int,
+    Float,
     Bool,
     String,
     Fn(Vec<NodeType>, Box<NodeType>),
@@ -185,6 +186,7 @@ pub enum NodeType {
 #[derive(Debug, Clone)]
 pub enum NodeValue {
     Int(isize),
+    Float(f64),
     Bool(bool),
     String(String),
     RuntimeFn(usize),
