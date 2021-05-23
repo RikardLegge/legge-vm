@@ -11,7 +11,7 @@ fn run_test(code: &str, expected_result: Option<Value>) {
     let assign_result = result.clone();
     run_code(code.into(), LogLevel::LogNone, move |v| {
         *assign_result.borrow_mut() = Some(v);
-    });
+    }).unwrap();
     let result = result.borrow();
     assert_eq!(*result, expected_result);
 }

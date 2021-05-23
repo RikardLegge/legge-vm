@@ -11,5 +11,5 @@ fn main() {
     f.read_to_string(&mut contents)
         .expect("something went wrong reading the file");
 
-    run_code(contents, LogLevel::LogEval, &|v| println!("{:?}", v))
+    run_code(contents, LogLevel::LogEval, &|v| println!("{:?}", v)).unwrap()
 }

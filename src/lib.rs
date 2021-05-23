@@ -21,7 +21,7 @@ pub fn compile(
     runtime: &runtime::Runtime,
     log_level: LogLevel,
     code: String,
-) -> bytecode::Bytecode {
+) -> Option<bytecode::Bytecode> {
     let start = debug::start_timer();
     let tokens = token::from_chars(code.chars());
     timing.token = debug::stop_timer(start);
@@ -31,7 +31,7 @@ pub fn compile(
         Ok((ast, ast_timing)) => (ast, ast_timing),
         Err(e) => {
             println!("Ast Error: {}\n{}\n",e.details, e.node_info.join("\n\n"));
-            std::process::exit(1);
+            return None;
         }
     };
     if log_level >= LogLevel::LogTiming {
@@ -45,16 +45,20 @@ pub fn compile(
     if log_level >= LogLevel::LogTiming {
         println!("{:?}", bytecode);
     }
-    return bytecode;
+    return Some(bytecode);
 }
 
-pub fn run_code<F>(code: String, log_level: LogLevel, interrupt: F)
+pub fn run_code<F>(code: String, log_level: LogLevel, interrupt: F) -> Option<()>
 where
     F: Fn(bytecode::Value),
 {
     let runtime = runtime::std();
     let mut timing = debug::Timing::default();
     let bytecode = compile(&mut timing, &runtime, log_level, code);
+    if bytecode.is_none() {
+        return None;
+    }
+    let bytecode = bytecode.unwrap();
 
     let mut interpreter = interpreter::Interpreter::new(&runtime);
     interpreter.log_level = log_level;
@@ -68,4 +72,5 @@ where
     if log_level >= LogLevel::LogTiming {
         dbg!(timing);
     }
+    return Some(());
 }

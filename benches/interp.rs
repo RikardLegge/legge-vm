@@ -30,7 +30,7 @@ pub fn compare(c: &mut Criterion) {
             }
         "
         .into(),
-    );
+    ).unwrap();
 
     c.bench_function("interpreter", |b| {
         b.iter(|| {
