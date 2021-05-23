@@ -26,7 +26,14 @@ pub fn compile(
     let tokens = token::from_chars(code.chars());
     timing.token = debug::stop_timer(start);
 
-    let (ast, ast_timing) = ast::from_tokens(tokens.into_iter(), &runtime).unwrap();
+    let result = ast::from_tokens(tokens.into_iter(), &runtime);
+    let (ast, ast_timing) = match result {
+        Ok((ast, ast_timing)) => (ast, ast_timing),
+        Err(e) => {
+            println!("Ast Error: {}\n{}\n",e.details, e.node_info.join("\n\n"));
+            std::process::exit(1);
+        }
+    };
     if log_level >= LogLevel::LogTiming {
         println!("{:?}", ast);
     }

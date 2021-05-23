@@ -224,9 +224,21 @@ impl<I> Parser<I>
                 ))?,
             },
             LeftBrace => {
-                let expr_node = self.do_expression(node.id)?;
-                self.ensure_next_token(&node, RightBrace)?;
-                self.add_node(node, NodeBody::Expression(expr_node))
+                match self.peek_token()? {
+                    RightBrace => {
+                        let left = node;
+                        let right = self.node(left.id);
+                        self.next_token(&right)?;
+                        Err(self
+                            .ast
+                            .error(&format!("Empty parenthesis are not allowed as expressions"), "Invalid expression", vec![left.id, right.id]))?
+                    }
+                    _ => {
+                        let expr_node = self.do_expression(node.id)?;
+                        self.ensure_next_token(&node, RightBrace)?;
+                        self.add_node(node, NodeBody::Expression(expr_node))
+                    }
+                }
             }
             other => Err(self
                 .ast
