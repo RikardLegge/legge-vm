@@ -60,18 +60,18 @@ impl<I> Parser<I>
     }
 
     fn ensure_next_token(&mut self, node: &PendingNode, tp: TokenType) -> Result<()> {
-        self.ensure_next_token_for_id(node.id, tp)
+        self.ensure_next_token_for_id(node.id, tp, "")
     }
 
     fn next_token(&mut self, node: &PendingNode) -> Result<TokenType> {
         self.next_token_for_id(node.id)
     }
 
-    fn ensure_next_token_for_id(&mut self, node_id: NodeID, tp: TokenType) -> Result<()> {
+    fn ensure_next_token_for_id(&mut self, node_id: NodeID, tp: TokenType, error_description: &str) -> Result<()> {
         let token = self.next_token_for_id(node_id);
         if token.is_err() {
             return Err(self.ast.error(
-                &format!("Expected token {:?} but got to the end of the file", tp),
+                &format!("Expected token {} but got to the end of the file", tp),
                 "",
                 vec![node_id],
             ));
@@ -79,15 +79,21 @@ impl<I> Parser<I>
         let token = token.unwrap();
         match token == tp {
             true => Ok(()),
-            false => Err(self.ast.error(
-                &format!(
-                    "Expected token {:?}, found {:?}",
-                    tp,
-                    self.ast.get_node(node_id).tokens.last().unwrap()
-                ),
-                "",
-                vec![node_id],
-            )),
+            false => {
+                let last = self.ast.get_node_mut(node_id).tokens.pop().unwrap();
+                let error_node = self.any_node(Some(node_id));
+                let error_node_id = self.add_node(error_node, NodeBody::Empty);
+                self.ast.get_node_mut(error_node_id).tokens.push(last);
+                Err(self.ast.error(
+                    &format!(
+                        "Expected token '{}', found '{}'",
+                        tp,
+                        token,
+                    ),
+                    error_description,
+                    vec![error_node_id],
+                ))
+            },
         }
     }
 
@@ -197,7 +203,7 @@ impl<I> Parser<I>
                 .error(&format!("Unknown token {:?}", other), "", vec![node.id])),
         }?;
         if self.should_terminate_statement(node) {
-            self.ensure_next_token_for_id(node, EndStatement)?;
+            self.ensure_next_token_for_id(node, EndStatement, "The statement is expected to end here. Maybe add a ; before this token?")?;
         }
         Ok(node)
     }

@@ -38,7 +38,7 @@ impl fmt::Debug for ArithmeticOP {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 pub struct TokenID(usize);
 impl TokenID {
     fn new(id: usize) -> Self {
@@ -55,7 +55,7 @@ pub struct Token {
     pub tp: TokenType,
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TokenType {
     Comment(String),
     LeftCurlyBrace,
@@ -78,7 +78,7 @@ pub enum TokenType {
     Op(ArithmeticOP),
 }
 
-impl fmt::Debug for TokenType {
+impl fmt::Display for TokenType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use TokenType::*;
         match self {

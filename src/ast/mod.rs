@@ -13,6 +13,8 @@ pub use ast::{
     Ast, Node, NodeBody, NodeID, NodeReferenceType, NodeType, NodeTypeSource, NodeValue,
     UnlinkedNodeBody,
 };
+use std::collections::HashSet;
+use colored::*;
 
 pub type Result<N = NodeID> = result::Result<N, Err>;
 
@@ -30,28 +32,45 @@ impl Err {
     }
 
     pub fn print_line(nodes: Vec<NodeID>, ast: &Ast, msg: &str) -> String {
-        let mut tokens = Vec::new();
-        for node_id in nodes.iter() {
-            let node = ast.get_node(*node_id);
-            tokens.append(&mut node.tokens.clone());
-            for child_id in node.body.children() {
-                let child = ast.get_node(*child_id);
-                tokens.append(&mut child.tokens.clone());
-                tokens.append(&mut child.child_tokens(ast));
+        let all_tokens = {
+            let mut tokens = Vec::new();
+            let mut ids = HashSet::new();
+            for node_id in nodes.iter() {
+                let mut curr = ast.get_node(*node_id);
+                let line = curr.tokens.first().unwrap().line;
+                loop {
+                    // Inefficient but it works since the parent node might not yet have a reference to it's children.
+                    for token in curr.tokens.iter().chain(curr.child_tokens(ast).iter()) {
+                        if !ids.contains(&token.id) {
+                            ids.insert(token.id);
+                            tokens.push(token.clone());
+                        }
+                    }
+                    if curr.parent_id.is_none() {
+                        break
+                    }
+                    let first_token = curr.tokens.first();
+                    let last_token = curr.tokens.last();
+                    if !first_token.is_none() {
+                        if first_token.unwrap().line != line && last_token.unwrap().line != line {
+                            break
+                        }
+                    }
+                    curr = ast.get_node(curr.parent_id.unwrap());
+                }
             }
-        }
-        tokens.sort_by(|t1, t2| t1.start.cmp(&t2.start));
-        tokens.sort_by(|t1, t2| t1.line.cmp(&t2.line));
-        if tokens.len() == 0 {
-            return "generated (More details should be added in the future)".into();
-        }
-        let mut line = tokens[0].line;
+            tokens.sort_by(|t1, t2| t1.start.cmp(&t2.start));
+            tokens.sort_by(|t1, t2| t1.line.cmp(&t2.line));
+            tokens
+        };
+
+        let mut line = all_tokens[0].line;
         let mut end = 0;
         let mut builder = vec![format!("{:>4} | ", line)];
 
         let mut underline = Vec::new();
         let mut do_underline = false;
-        for t in tokens.iter() {
+        for t in all_tokens.iter() {
             let mut line_offset = t.line - line;
             while line_offset > 0 {
                 if do_underline {
@@ -72,7 +91,7 @@ impl Err {
                 builder.push(" ".repeat(char_offset));
                 underline.push(" ".repeat(char_offset));
             }
-            let token_str = format!("{:?}", t.tp);
+            let mut token_str = format!("{}", t.tp);
             let contains_token = nodes
                 .iter()
                 .filter(|n| ast.get_node(**n).tokens.contains(t))
@@ -81,6 +100,7 @@ impl Err {
             if contains_token {
                 underline.push("^".repeat(token_str.len()));
                 do_underline = true;
+                token_str = token_str.red().to_string()
             } else {
                 underline.push(" ".repeat(token_str.len()));
             }

@@ -5,6 +5,7 @@ version = "0.1.0"
 authors = ["Rikard Legge <rikard@legge.se>"]
 
 [dependencies]
+colored = "2"
 
 [dev-dependencies]
 criterion = "0.3.3"

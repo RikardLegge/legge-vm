@@ -22,6 +22,11 @@ fn test_variable() {
 }
 
 #[test]
+fn test_variable_parenthesis() {
+    run_test("a :: (1); exit(a);", Some(Int(1)));
+}
+
+#[test]
 fn test_add() {
     run_test("a :: 1; b :: 2; c :: a + b; exit(c);", Some(Int(3)));
 }

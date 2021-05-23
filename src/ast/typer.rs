@@ -186,7 +186,13 @@ impl<'a> Typer<'a> {
                     None
                 }
             }
-            Expression(_) => Some(InferredType::new(NotYetImplemented, Declared)),
+            Expression(value) => {
+                let tp = self.infer_type(self.ast.get_node(*value))?;
+                match tp {
+                    Some(tp) => Some(InferredType::new(tp.tp, Value)),
+                    None => None
+                }
+            },
             VariableDeclaration(_, declared, value) => {
                 if let Some(declared) = declared {
                     InferredType::maybe(

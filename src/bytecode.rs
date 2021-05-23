@@ -755,6 +755,7 @@ impl<'a> Generator<'a> {
             ProcedureDeclaration(args, _, body_id) => self.ev_procedure(expr_id, args, *body_id),
             VariableValue(value, field) => self.ev_variable_value(expr_id, *value, field),
             Call(proc_id, args) => self.ev_call(expr_id, *proc_id, args, false),
+            Expression(value) => self.ev_expression(*value),
             _ => panic!("Unsupported node {:?} used as expression", expr),
         }
     }
