@@ -2,7 +2,7 @@
 edition = "2018"
 name = "leggevm"
 version = "0.1.0"
-authors = ["Rikard Legge <rikard.legge@gmail.com>"]
+authors = ["Rikard Legge <rikard@legge.se>"]
 
 [dependencies]
 

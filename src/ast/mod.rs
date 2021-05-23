@@ -27,8 +27,7 @@ impl Err {
             .into_iter()
             .map(|n| ast.get_node(n).print_line(ast, row_details))
             .collect();
-        let details = format!("\nAst Error: {}\n{}\n", details, node_info.join("\n\n"));
-        panic!(details);
+        panic!("\nAst Error: {}\n{}\n", details, node_info.join("\n\n"));
         // Err { details }
     }
 }

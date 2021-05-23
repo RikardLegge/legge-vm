@@ -8,6 +8,10 @@ B -> type {
   to_a: A
 }
 
+a :: fn () {
+
+}
+
 b := B();
 b.to_a.a = 10.100 + 1.0;
 log(b);

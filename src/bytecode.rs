@@ -652,7 +652,7 @@ impl<'a> Generator<'a> {
             StackUsage::zero()
         } else if ignore_return {
             self.add_op(node_id, OP::PopStack(return_values));
-            StackUsage::new(0, 0)
+            StackUsage::zero()
         } else {
             StackUsage::new(0, return_values)
         }

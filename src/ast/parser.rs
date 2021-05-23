@@ -5,8 +5,8 @@ use crate::token::{ArithmeticOP, Token, TokenType};
 use std::iter::Peekable;
 
 pub fn ast_from_tokens<I>(iter: I) -> Result<Ast>
-where
-    I: Iterator<Item = Token>,
+    where
+        I: Iterator<Item=Token>,
 {
     Parser::new(iter.peekable()).parse()
 }
@@ -17,14 +17,14 @@ struct PendingNode {
 }
 
 #[derive(Debug)]
-struct Parser<I: Iterator<Item = Token>> {
+struct Parser<I: Iterator<Item=Token>> {
     ast: Ast,
     iter: Peekable<I>,
 }
 
 impl<I> Parser<I>
-where
-    I: Iterator<Item = Token>,
+    where
+        I: Iterator<Item=Token>,
 {
     fn new(iter: Peekable<I>) -> Self {
         let ast = Ast::new();
@@ -616,7 +616,7 @@ where
                                 "A name is require after a '.' operator",
                                 "",
                                 vec![node.id],
-                            ))
+                            ));
                         }
                     }
                 }
