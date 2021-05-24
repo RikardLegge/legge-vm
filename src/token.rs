@@ -99,7 +99,7 @@ impl fmt::Display for TokenType {
             Dot => write!(f, "."),
             Name(ident) => write!(f, "{}", ident),
             KeyName(key) => write!(f, "{}", key),
-            String(str) => write!(f, "{}", str),
+            String(str) => write!(f, "\"{}\"", str),
             Int(num) => write!(f, "{}", num),
             Float(num) => write!(f, "{}", num),
             Op(op) => write!(f, "{:?}", op),

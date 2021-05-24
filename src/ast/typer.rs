@@ -284,7 +284,7 @@ impl<'a> Typer<'a> {
 
             self.since_last_changed += 1;
             self.queue.push_back(node_id);
-            if self.since_last_changed > self.queue.len() + 1 {
+            if self.since_last_changed > 2 * self.queue.len() {
                 println!("{:?}", self.ast);
                 return Err(self.ast.error(
                     "Failed to complete type check, unable to infer the type of the following expressions",

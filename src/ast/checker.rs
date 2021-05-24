@@ -95,7 +95,7 @@ impl<'a> Checker<'a> {
                             &format!("Types for left and right hand side of assignment do not match ({:?} != {:?})",                                 lhs_tp, rhs_tp
                             ),
                             "Both sides of an assignment must have the same type",
-                            vec![node.id],
+                            vec![self.ast.get_node(*rhs).parent_id.unwrap(), *rhs],
                         ))
                     }
                 }

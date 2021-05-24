@@ -41,19 +41,23 @@ impl Err {
                 loop {
                     // Inefficient but it works since the parent node might not yet have a reference to it's children.
                     for token in curr.tokens.iter().chain(curr.child_tokens(ast).iter()) {
-                        if !ids.contains(&token.id) {
-                            ids.insert(token.id);
-                            tokens.push(token.clone());
+                        if ids.contains(&token.id) {
+                            continue;
                         }
+                        if (token.line as isize - line as isize).abs() > 1 {
+                            continue;
+                        }
+                        ids.insert(token.id);
+                        tokens.push(token.clone());
                     }
                     if curr.parent_id.is_none() {
-                        break
+                        break;
                     }
                     let first_token = curr.tokens.first();
                     let last_token = curr.tokens.last();
                     if !first_token.is_none() {
                         if first_token.unwrap().line != line && last_token.unwrap().line != line {
-                            break
+                            break;
                         }
                     }
                     curr = ast.get_node(curr.parent_id.unwrap());
@@ -71,7 +75,7 @@ impl Err {
         let mut underline = Vec::new();
         let mut do_underline = false;
         for t in all_tokens.iter() {
-            let mut line_offset = t.line - line;
+            let mut line_offset = t.line as isize - line as isize;
             while line_offset > 0 {
                 if do_underline {
                     builder.push(format!(
@@ -80,11 +84,13 @@ impl Err {
                         msg.to_string()
                     ));
                 }
-                builder.push(format!("\n{:>4} | ", t.line));
+
                 end = 0;
                 line_offset -= 1;
                 underline.clear();
                 do_underline = false;
+
+                builder.push(format!("\n{:>4} | ", t.line as isize - line_offset));
             }
             let char_offset = t.start - end;
             if char_offset > 0 {
@@ -129,15 +135,24 @@ pub fn from_tokens<I>(iter: I, runtime: &Runtime) -> Result<(Ast, debug::AstTimi
     timing.from_tokens = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    linker::link(&mut ast, runtime)?;
+    if let Err(err) = linker::link(&mut ast, runtime) {
+        println!("{:?}", ast);
+        Err(err)?;
+    }
     timing.linker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    typer::infer_types(&mut ast, runtime)?;
+    if let Err(err) = typer::infer_types(&mut ast, runtime) {
+        println!("{:?}", ast);
+        Err(err)?;
+    }
     timing.type_inference = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    checker::check_types(&ast)?;
+    if let Err(err) = checker::check_types(&ast) {
+        println!("{:?}", ast);
+        Err(err)?;
+    }
     timing.type_checker = debug::stop_timer(start);
 
     Ok((ast, timing))
