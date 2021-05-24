@@ -60,6 +60,7 @@ pub enum OP {
     MulI,
     DivI,
     Eq,
+    GEq,
 
     SLoad(SFOffset),
     SStore(SFOffset),
@@ -742,6 +743,7 @@ impl<'a> Generator<'a> {
             ArithmeticOP::Mul => self.add_op(node_id, OP::MulI),
             ArithmeticOP::Div => self.add_op(node_id, OP::DivI),
             ArithmeticOP::Eq => self.add_op(node_id, OP::Eq),
+            ArithmeticOP::GEq => self.add_op(node_id, OP::GEq),
         };
         StackUsage::new(usage1.popped + usage2.popped, 1)
     }

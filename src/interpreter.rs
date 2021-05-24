@@ -2,9 +2,11 @@ use crate::bytecode::{Bytecode, SFOffset, OP};
 use crate::runtime::Runtime;
 use crate::{bytecode, LogLevel};
 use std::cell::RefCell;
-use std::mem;
+use std::{mem, fmt};
 use std::ops::{Add, Div, Mul, Sub};
 use std::rc::Rc;
+use std::cmp::Ordering;
+use std::fmt::Formatter;
 
 #[derive(Debug)]
 pub struct Err {
@@ -35,7 +37,7 @@ pub struct Interpreter<'a> {
 
 impl<'a> Interpreter<'a> {
     pub fn new(runtime: &'a Runtime) -> Self {
-        let stack_size = 20;
+        let stack_size = 10000000;
         Interpreter {
             pending_frame: None,
             frame: StackFrame {
@@ -63,19 +65,19 @@ impl<'a> Interpreter<'a> {
 
     pub fn execute(&mut self, cmd: &OP) -> Result {
         self.executed_instructions += 1;
-        let result = self.run_command(cmd);
         if self.log_level >= LogLevel::LogEval {
             self.debug_log(
                 LogLevel::LogEval,
                 &format!(
-                    "PC: {:>4} SP: {:>4} Inst: {:<40} Stack: {:?}",
+                    "PC: {:>4} SP: {:>4} Stack: {:?} Inst: {:<40}",
                     format!("{:?}", self.pc),
                     self.frame.stack_pointer,
-                    format!("{:?}", cmd),
-                    self.stack
+                    self.stack,
+                    format!("{:?}", cmd)
                 ),
             );
         }
+        let result = self.run_command(cmd);
         result
     }
 
@@ -190,6 +192,12 @@ impl<'a> Interpreter<'a> {
                 let n1 = self.pop_stack()?;
                 let n2 = self.pop_stack()?;
                 let eq = n1 == n2;
+                self.push_stack(Value::Bool(eq))?;
+            }
+            GEq => {
+                let n2 = self.pop_stack()?;
+                let n1 = self.pop_stack()?;
+                let eq = n1 >= n2;
                 self.push_stack(Value::Bool(eq))?;
             }
             PushToClosure => {
@@ -388,7 +396,7 @@ struct StackFrame {
     closure: Option<Rc<RefCell<Closure>>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum Value {
     Unset,
     Int(isize),
@@ -403,6 +411,28 @@ enum Value {
     Struct(Vec<Value>),
 }
 
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::ProcAddress(id, _) => {
+                write!(f, "Fn_{:?}", id)
+            }
+            Value::StackFrame(_) => {
+                write!(f, "Frame {{ ... }}")
+            }
+            Value::Unset => write!(f, "_"),
+            Value::Int(val) => write!(f, "{:?}", val),
+             Value::Float(val) => write!(f, "{:?}", val),
+            Value::Bool(val) => write!(f, "{:?}", val),
+            Value::String(val) => write!(f, "{:?}", val),
+            Value::PC(val) => write!(f, "{:?}", val),
+            Value::RuntimeFn(val) => write!(f, "{:?}", val),
+            Value::Struct(val) => write!(f, "{:?}", val),
+        }
+    }
+}
+
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         use Value::*;
@@ -411,6 +441,20 @@ impl PartialEq for Value {
             (Bool(a), Bool(b)) => a == b,
             (String(a), String(b)) => a == b,
             (ProcAddress(a, _), ProcAddress(b, _)) => a == b,
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        use Value::*;
+        match (self, other) {
+            (Int(a), Int(b)) => a.partial_cmp(b),
+            (Float(a), Float(b)) => a.partial_cmp(&b),
+            (Bool(a), Bool(b)) => a.partial_cmp(b),
+            (String(a), String(b)) => a.partial_cmp(b),
+            (ProcAddress(a, _), ProcAddress(b, _)) => a.partial_cmp(b),
             _ => unimplemented!(),
         }
     }

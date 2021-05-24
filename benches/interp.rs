@@ -4,13 +4,16 @@ use leggevm::{compile, interpreter, runtime, LogLevel, Timing};
 pub fn compare(c: &mut Criterion) {
     c.bench_function("reference", |b| {
         b.iter(|| {
-            let mut i = 1000000;
-            loop {
-                if i == 0 {
-                    break;
+            fn add (i: isize) -> isize {
+                let mut val = 0;
+                if i >= 0 {
+                    val = black_box(i + val + add(i-1));
                 }
-                i = black_box(i - 1);
+                return val;
             }
+            let n = 10000;
+            let res = add(n);
+            assert_eq!(res*2, n*(n+1))
         });
     });
 
@@ -21,13 +24,18 @@ pub fn compare(c: &mut Criterion) {
         &runtime,
         LogLevel::LogNone,
         "
-            i := 1000000;
-            loop {
-                if(i == 0) {
-                    break;
-                }
-                i = i - 1;
+            import assert;
+            add :: fn(i: int) -> int {
+              val := 0;
+              if (i >= 0) {
+                val = i + val + add(i-1);
+              }
+              return val;
             }
+            n :: 10000;
+            res :: add(n);
+
+            assert(res*2, n*(n+1));
         "
         .into(),
     ).unwrap();

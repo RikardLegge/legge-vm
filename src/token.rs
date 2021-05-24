@@ -23,6 +23,7 @@ pub enum ArithmeticOP {
     Mul,
     Div,
     Eq,
+    GEq,
 }
 
 impl fmt::Debug for ArithmeticOP {
@@ -34,6 +35,7 @@ impl fmt::Debug for ArithmeticOP {
             Mul => write!(f, "*"),
             Div => write!(f, "/"),
             Eq => write!(f, "=="),
+            GEq => write!(f, ">="),
         }
     }
 }
@@ -162,6 +164,7 @@ impl<'a> Tokenizer<'a> {
             'a'..='z' | 'A'..='Z' => self.parse_name()?,
             ':' => self.parse_declaration_or_type()?,
             '=' => self.parse_assignment_or_eq()?,
+            '>' => self.parse_greater()?,
             '(' => {
                 self.next()?;
                 TokenType::LeftBrace
@@ -235,6 +238,17 @@ impl<'a> Tokenizer<'a> {
                 Some(TokenType::Op(ArithmeticOP::Eq))
             }
             _ => Some(TokenType::Assignment),
+        }
+    }
+
+    fn parse_greater(&mut self) -> Option<TokenType> {
+        assert_eq!(self.next()?, '>');
+        match self.peek()? {
+            '=' => {
+                self.next()?;
+                Some(TokenType::Op(ArithmeticOP::GEq))
+            }
+            _ => unimplemented!(),
         }
     }
 

@@ -8,10 +8,15 @@ B -> type {
   to_a: A
 }
 
-a :: (1)
-;{
-
+add :: fn(i: int) -> int {
+  val := 0;
+  if (i >= 0) {
+    val = i + val + add(i-1);
+  }
+  return val;
 }
+
+log(add(100));
 
 b := B();
 b.to_a.a = 10.100 + 1.0;

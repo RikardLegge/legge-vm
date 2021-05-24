@@ -53,7 +53,7 @@ impl<I> Parser<I>
     fn op_precedence(op: ArithmeticOP) -> usize {
         use crate::token::ArithmeticOP::*;
         match op {
-            Eq => 1,
+            Eq | GEq => 1,
             Add | Sub => 2,
             Mul | Div => 3,
         }
