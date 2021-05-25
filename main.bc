@@ -16,7 +16,9 @@ add :: fn(i: int) -> int {
   return val;
 }
 
-log(add(100));
+add(1,2,3);
+
+//log(add(100));
 
 b := B();
 b.to_a.a = 10.100 + 1.0;

@@ -223,30 +223,38 @@ impl<'a> Checker<'a> {
 
     fn fits(&self, node: &Node, hole: &NodeType, shape: &NodeType) -> Result<()> {
         use NodeType::*;
-        let fits = match (&hole, &shape) {
-            (&Any, &shape) if shape != &Void => true,
+        match (&hole, &shape) {
+            (&Any, &shape) if shape != &Void => Ok(()),
             (&Type(fields), &Fn(shape_args, shape_ret)) => {
                 if shape_args.len() > 0 {
-                    return Err(self.ast.error(
+                    Err(self.ast.error(
                         "Type constructor can not have arguments",
                         "",
                         vec![node.id],
-                    ));
-                }
-
-                if fields != shape_ret {
-                    return Err(self.ast.error(
+                    ))
+                } else if fields != shape_ret {
+                    Err(self.ast.error(
                         "type and constructor does not have the same number of types",
                         "",
                         vec![node.id],
-                    ));
+                    ))
+                } else {
+                    Ok(())
                 }
-                true
             }
             (&Fn(hole_args, hole_ret), &Fn(shape_args, shape_ret)) => {
                 self.fits(node, &*hole_ret, &*shape_ret)?;
                 if hole_args.len() < shape_args.len() {
-                    false
+                    let skip = hole_args.len();
+                    let nodes = node.body.children().skip(skip).map(|id| *id).collect();
+                    Err(self.ast.error(
+                        &format!(
+                            "wrong number of arguments provided to function, {} expected, {} provided",
+                            hole_args.len(), shape_args.len()
+                        ),
+                        "Too many arguments",
+                         nodes,
+                    ))
                 } else {
                     let mut vararg = None;
                     for (i, shape_arg) in shape_args.iter().enumerate() {
@@ -263,23 +271,18 @@ impl<'a> Checker<'a> {
                         };
                         self.fits(node, hole_arg, shape_arg)?;
                     }
-                    true
+                    Ok(())
                 }
             }
-            (&hole, &shape) if hole == shape => true,
-            _ => false,
-        };
-        if fits {
-            Ok(())
-        } else {
-            Err(self.ast.error(
+            (&hole, &shape) if hole == shape => Ok(()),
+            _ => Err(self.ast.error(
                 &format!(
-                    "arguments are of the wrong type, {:?} expected, {:?} provided",
+                    "function arguments are of the wrong type, {:?} expected, {:?} provided",
                     hole, shape
                 ),
                 "Wrong argument type",
                 vec![node.id],
-            ))
+            )),
         }
     }
 
