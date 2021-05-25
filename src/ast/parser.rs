@@ -662,10 +662,17 @@ impl<I> Parser<I>
             StaticDeclaration => {
                 self.next_token(&node)?;
                 let expression = self.do_expression(node.id)?;
-                let node = self.add_node(
-                    node,
-                    NodeBody::ConstDeclaration(ident.into(), tp, expression),
-                );
+                let  node = if let Some(NodeType::Unknown(_)) = tp {
+                    self.add_uncomplete_node(
+                        node,
+                        UnlinkedNodeBody::ConstDeclaration(ident.into(), tp, expression),
+                    )
+                } else {
+                    self.add_node(
+                        node,
+                        NodeBody::ConstDeclaration(ident.into(), tp, expression),
+                    )
+                };
                 Ok(node)
             }
             VariableDeclaration => {

@@ -146,7 +146,14 @@ impl<'a> Checker<'a> {
                     if lhs.tp == rhs.tp {
                         Ok(())
                     } else {
-                        unreachable!()
+                        Err(self.ast.error(
+                            &format!(
+                                "Left and right hand side must have the same types, '{:?}' != '{:?}'",
+                                lhs.tp, rhs.tp
+                            ),
+                            "",
+                            vec![*value, self.ast.get_node(*value).parent_id.unwrap()],
+                        ))
                     }
                 }
                 Return(func, ret_value) => {
@@ -199,8 +206,7 @@ impl<'a> Checker<'a> {
                         .map(|id| self.ast.get_node(*id).tp.as_ref().unwrap().tp.clone())
                         .collect();
                     let call = &match func {
-                        Fn(_, ret) => Fn(args, ret.clone()),
-                        Type(ret) => Fn(Vec::new(), ret.clone()),
+                        Fn(_, ret) | Type(ret) => Fn(args, ret.clone()),
                         _ => unreachable!(),
                     };
                     self.fits(node, func, call)?;
@@ -227,10 +233,11 @@ impl<'a> Checker<'a> {
             (&Any, &shape) if shape != &Void => Ok(()),
             (&Type(fields), &Fn(shape_args, shape_ret)) => {
                 if shape_args.len() > 0 {
+                    let nodes = node.body.children().map(|id| *id).collect();
                     Err(self.ast.error(
                         "Type constructor can not have arguments",
-                        "",
-                        vec![node.id],
+                        "Arguments not allowed here",
+                        nodes,
                     ))
                 } else if fields != shape_ret {
                     Err(self.ast.error(

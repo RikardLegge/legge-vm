@@ -171,6 +171,7 @@ impl NodeBody {
 
 #[derive(Debug, Clone)]
 pub enum UnlinkedNodeBody {
+    ConstDeclaration(String, Option<NodeType>, NodeID),
     VariableAssignment(String, Option<Vec<String>>, NodeID),
     Value(NodeValue),
     VariableValue(String, Option<Vec<String>>),
@@ -444,7 +445,8 @@ impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
     fn next(&mut self) -> Option<&'a NodeID> {
         use UnlinkedNodeBody::*;
         let option = match self.body {
-            VariableAssignment(_, _, value) => match self.index {
+            VariableAssignment(_, _, value)
+            | ConstDeclaration(.., value)=> match self.index {
                 0 => Some(value),
                 _ => None,
             },

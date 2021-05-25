@@ -1,25 +1,3 @@
-import log;
-
-A -> type {
-  a: float
-}
-
-B -> type {
-  to_a: A
-}
-
-add :: fn(i: int) -> int {
-  val := 0;
-  if (i >= 0) {
-    val = i + val + add(i-1);
-  }
-  return val;
-}
-
-add(1,2,3);
-
-//log(add(100));
-
-b := B();
-b.to_a.a = 10.100 + 1.0;
-log(b);
+B -> type {}
+A -> type {}
+a: B :: A();

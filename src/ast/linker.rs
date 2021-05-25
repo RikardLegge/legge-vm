@@ -163,6 +163,14 @@ impl<'a, 'b> Linker<'a, 'b> {
                             self.add_ref(target_id, node_id, ReceiveValue, location);
                             NodeBody::VariableAssignment(target_id, path, expr_id)
                         }
+                        ConstDeclaration(name, tp, value) => {
+                            if tp.is_some() {
+                                let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
+                                NodeBody::ConstDeclaration(name.clone(), Some(tp), *value)
+                            } else {
+                                unreachable!()
+                            }
+                        }
                         Value(value) => {
                             let value = value.clone();
                             let new_value = self.fix_unknown_fields(node_id, value)?;
