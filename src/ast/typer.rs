@@ -152,9 +152,17 @@ impl<'a> Typer<'a> {
                 if let Some(value_tp) = self.get_type(value) {
                     let mut value_tp = value_tp;
                     if let NodeType::Type(_) = value_tp {
-                        match &self.ast.get_node(*value).body {
+                        let body = &self.ast.get_node(*value).body;
+                        match body {
                             NodeBody::ConstDeclaration(_, _, constructor) => {
                                 value_tp = self.get_type(constructor).unwrap();
+                            }
+                            NodeBody::TypeDeclaration(name, ..) => {
+                                Err(self.ast.error(
+                                        "When instantiating a type, use the default instantiation function by adding ()",
+                                    &format!("Replace with {}()", name),
+                                    vec![node.id],
+                                ))?
                             }
                             _ => unreachable!(),
                         }

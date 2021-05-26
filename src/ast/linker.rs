@@ -90,7 +90,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                     None => {
                         Err(self
                             .ast
-                            .error("Failed to find type", "type not found", vec![node_id]))?
+                            .error("Failed to find type", "value not found", vec![node_id]))?
                     }
                 };
                 let value = match &self.ast.get_node(target_id).body {
@@ -124,7 +124,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                     None => {
                         Err(self
                             .ast
-                            .error("Failed to find type", "type not found", vec![node_id]))?
+                            .error("Failed to find type", "unknown type", vec![node_id]))?
                     }
                 };
                 match &self.ast.get_node(target_id).body {
