@@ -7,6 +7,8 @@ exec :: fn(num: int, map: Fn(int) -> int) -> int {
 exec(2, double);
 
 import log;
+import int;
+import float;
 
-a :: 001.00/01.0;
+a :: float(1)/2.0;
 log(a);

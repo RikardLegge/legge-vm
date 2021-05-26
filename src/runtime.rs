@@ -21,6 +21,8 @@ pub struct FunctionDefinition {
 pub fn std() -> Runtime {
     use crate::ast::NodeType::*;
     let functions = vec![
+        ff("int", vec![Any], Int, &to_int),
+        ff("float", vec![Any], Float, &to_float),
         ff("log", vec![VarArg(Box::new(Any))], Void, &log),
         ff("sin", vec![Int], Int, &sin),
         ff("assert", vec![Any, Any], Void, &assert),
@@ -43,6 +45,30 @@ fn ff(
         function,
         tp,
     }
+}
+
+fn to_int(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
+    if args.len() != 1 {
+        panic!("int must be called with one arguments")
+    }
+    let result = match args[0] {
+        Value::Int(int) => Value::Int(int),
+        Value::Float(int) => Value::Int(int as isize),
+        _ => panic!("invalid value type passed to int: {:?}", args[0]),
+    };
+    Ok(Some(result))
+}
+
+fn to_float(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
+    if args.len() != 1 {
+        panic!("int must be called with one arguments")
+    }
+    let result = match args[0] {
+        Value::Int(int) => Value::Float(int as f64),
+        Value::Float(float) => Value::Float(float),
+        _ => panic!("invalid value type passed to int: {:?}", args[0]),
+    };
+    Ok(Some(result))
 }
 
 fn sin(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
