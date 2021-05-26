@@ -1,7 +1,18 @@
-B -> type {
-  b: int
-}
+import log;
 A -> type {
-  b: int
+  val: int
+  b: B
 }
-a: B :: A();
+B -> type {
+  val: int
+}
+
+add :: fn(a: A) -> A {
+  a.val = a.val + 1;
+  return a;
+}
+
+a := A();
+log(a);
+a = add(a);
+log(a);

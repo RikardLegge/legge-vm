@@ -177,7 +177,7 @@ impl<'a> Typer<'a> {
                                     None => unreachable!(),
                                 }
                             } else {
-                                unimplemented!()
+                                self.ast.unimplemented(node.id)?;
                             }
                         }
                     }

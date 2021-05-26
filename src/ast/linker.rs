@@ -143,7 +143,7 @@ impl<'a, 'b> Linker<'a, 'b> {
             for &child in node.body.children() {
                 self.queue.push_back(child);
             }
-            match &node.body {
+            let new_body = match &node.body {
                 NodeBody::Unlinked(body) => {
                     use super::NodeReferenceType::*;
                     use super::UnlinkedNodeBody::*;
@@ -162,14 +162,6 @@ impl<'a, 'b> Linker<'a, 'b> {
                             let path = path.clone();
                             self.add_ref(target_id, node_id, ReceiveValue, location);
                             NodeBody::VariableAssignment(target_id, path, expr_id)
-                        }
-                        ConstDeclaration(name, tp, value) => {
-                            if tp.is_some() {
-                                let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
-                                NodeBody::ConstDeclaration(name.clone(), Some(tp), *value)
-                            } else {
-                                unreachable!()
-                            }
                         }
                         Value(value) => {
                             let value = value.clone();
@@ -260,10 +252,54 @@ impl<'a, 'b> Linker<'a, 'b> {
                             NodeBody::Break(target_id)
                         }
                     };
-                    let node = self.ast.get_node_mut(node_id);
-                    node.body = new_body;
+                    Some(new_body)
                 }
-                _ => (),
+
+                NodeBody::Empty
+                | NodeBody::Loop(_)
+                | NodeBody::Op(_, _, _)
+                | NodeBody::PrefixOp(_, _)
+                | NodeBody::Block(_)
+                | NodeBody::If(_, _)
+                | NodeBody::Expression(_)
+                | NodeBody::Comment(_)
+                | NodeBody::Import(_, _)
+                | NodeBody::ConstValue(_)
+                | NodeBody::VariableAssignment(_, _, _)
+                | NodeBody::VariableValue(_, _)
+                | NodeBody::Return(_, _)
+                | NodeBody::Break(_)
+                | NodeBody::Call(_, _)
+                | NodeBody::TypeDeclaration(_, _, _, _)=> None,
+
+                NodeBody::ProcedureDeclaration(args, return_tp, body) => {
+                    if let Some(NodeType::Unknown(_)) = *return_tp {
+                        let tp = self.fix_unknown_types(node_id, return_tp.clone().unwrap())?;
+                        Some(NodeBody::ProcedureDeclaration(args.clone(), Some(tp), *body))
+                    } else {
+                        None
+                    }
+                }
+                NodeBody::VariableDeclaration(name, tp, value) => {
+                    if let Some(NodeType::Unknown(_)) = *tp {
+                        let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
+                        Some(NodeBody::VariableDeclaration(name.clone(), Some(tp), *value))
+                    } else {
+                        None
+                    }
+                },
+                NodeBody::ConstDeclaration(name, tp, value) => {
+                    if let Some(NodeType::Unknown(_)) = *tp {
+                        let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
+                        Some(NodeBody::ConstDeclaration(name.clone(), Some(tp), *value))
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some(body) = new_body {
+                let node = self.ast.get_node_mut(node_id);
+                node.body = body;
             }
         }
         Ok(())

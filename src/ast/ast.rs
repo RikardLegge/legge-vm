@@ -171,7 +171,6 @@ impl NodeBody {
 
 #[derive(Debug, Clone)]
 pub enum UnlinkedNodeBody {
-    ConstDeclaration(String, Option<NodeType>, NodeID),
     VariableAssignment(String, Option<Vec<String>>, NodeID),
     Value(NodeValue),
     VariableValue(String, Option<Vec<String>>),
@@ -204,6 +203,10 @@ impl fmt::Debug for Ast {
 }
 
 impl Ast {
+    pub fn unimplemented(&self, id: NodeID) -> Result {
+        Err(Err::new(self, "Unimplemented", "", vec![id]))
+    }
+
     pub fn error(&self, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Err {
         Err::new(self, details, row_details, nodes)
     }
@@ -445,8 +448,7 @@ impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
     fn next(&mut self) -> Option<&'a NodeID> {
         use UnlinkedNodeBody::*;
         let option = match self.body {
-            VariableAssignment(_, _, value)
-            | ConstDeclaration(.., value)=> match self.index {
+            VariableAssignment(_, _, value) => match self.index {
                 0 => Some(value),
                 _ => None,
             },

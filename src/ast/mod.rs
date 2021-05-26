@@ -32,6 +32,9 @@ impl Err {
     }
 
     pub fn print_line(nodes: Vec<NodeID>, ast: &Ast, msg: &str) -> String {
+        if nodes.is_empty() {
+            return "".into();
+        }
         let all_tokens = {
             let mut tokens = Vec::new();
             let mut ids = HashSet::new();
