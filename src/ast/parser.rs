@@ -159,6 +159,7 @@ impl<I> Parser<I>
             | If(..)
             | Loop(..)
             | Comment(..)
+            | Empty
             | Unlinked(UnlinkedNodeBody::Type(..)) => false,
             _ => true,
         }
@@ -184,6 +185,7 @@ impl<I> Parser<I>
             Op(op) => self.do_operation(node, op, None),
             Name(symbol) => self.do_statement_symbol(node, &symbol),
             LeftCurlyBrace => self.do_block(node),
+            EndStatement => Ok(self.add_node(node, NodeBody::Empty)),
             KeyName(keyword) => match keyword.as_ref() {
                 "return" => self.do_return(node),
                 "if" => self.do_if(node),

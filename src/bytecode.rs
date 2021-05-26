@@ -438,7 +438,7 @@ impl<'a> Generator<'a> {
             If(condition, body) => self.ev_if(node_id, *condition, *body),
             Loop(body) => self.ev_loop(node_id, *body),
             Break(loop_id) => self.ev_break(node_id, *loop_id),
-            Comment(_) => StackUsage::zero(),
+            Comment(_) | Empty => StackUsage::zero(),
             _ => panic!("Unsupported node here {:?}", node),
         }
     }

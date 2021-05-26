@@ -1,3 +1,7 @@
-B -> type {}
-A -> type {}
+B -> type {
+  b: int
+}
+A -> type {
+  b: int
+}
 a: B :: A();
