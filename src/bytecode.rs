@@ -341,13 +341,8 @@ impl<'a> Generator<'a> {
     fn add_var(&mut self, var_id: NodeID) {
         let has_closure_reference = self.ast.get_node(var_id).has_closure_references();
         let offset = if has_closure_reference {
-            let mut offset = 0;
-            match self.contexts.last() {
-                Some(context) => {
-                    offset += context.closure_allocations();
-                }
-                None => panic!("Context missing"),
-            }
+            let context = self.get_context_mut();
+            let offset = context.closure_allocations();
             offset
         } else {
             let mut offset = 0;
@@ -555,10 +550,11 @@ impl<'a> Generator<'a> {
         path: &Option<Vec<String>>,
     ) -> StackUsage {
         let index = self.get_field_index(val_id, path);
+        let offset = self.get_variable_offset(node_id, val_id, index);
 
         self.add_op(
             node_id,
-            OP::SLoad(self.get_variable_offset(node_id, val_id, index)),
+            OP::SLoad(offset),
         );
         StackUsage::new(0, 1)
     }

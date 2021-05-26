@@ -7,6 +7,7 @@ use std::ops::{Add, Div, Mul, Sub};
 use std::rc::Rc;
 use std::cmp::Ordering;
 use std::fmt::Formatter;
+use crate::ast::NodeID;
 
 #[derive(Debug)]
 pub struct Err {
@@ -28,11 +29,13 @@ pub struct Interpreter<'a> {
     pending_frame: Option<StackFrame>,
     frame: StackFrame,
     stack: Vec<Value>,
+    id_counter: usize,
     pub runtime: &'a Runtime,
     pub log_level: LogLevel,
     pub stack_max: usize,
     pub executed_instructions: usize,
     pub interrupt: &'a dyn Fn(bytecode::Value),
+    pub get_line: &'a dyn Fn(NodeID) -> usize,
 }
 
 impl<'a> Interpreter<'a> {
@@ -44,6 +47,8 @@ impl<'a> Interpreter<'a> {
                 stack_pointer: 0,
                 closure: None,
             },
+            get_line: &|_| 0,
+            id_counter: 0,
             pc: Some(0),
             stack: Vec::with_capacity(stack_size),
             runtime,
@@ -63,17 +68,21 @@ impl<'a> Interpreter<'a> {
         self.pc = None;
     }
 
-    pub fn execute(&mut self, cmd: &OP) -> Result {
+    pub fn execute(&mut self, cmd: &OP, node_id: NodeID) -> Result {
         self.executed_instructions += 1;
         if self.log_level >= LogLevel::LogEval {
             self.debug_log(
                 LogLevel::LogEval,
                 &format!(
-                    "PC: {:>4} SP: {:>4} Stack: {:?} Inst: {:<40}",
-                    format!("{:?}", self.pc),
+                    "Line: {:>4} PC: {:>4} Inst: {:<40} SP: {:>4} Stack: {:?}",
+                    (self.get_line)(node_id),
+                    format!("{}", match self.pc {
+                        Some(pc) => pc.to_string(),
+                        None => "None".into(),
+                    }),
+                    format!("{:?}", cmd),
                     self.frame.stack_pointer,
-                    self.stack,
-                    format!("{:?}", cmd)
+                    self.stack
                 ),
             );
         }
@@ -86,7 +95,7 @@ impl<'a> Interpreter<'a> {
             if let Some(pc) = self.pc {
                 if let Some(cmd) = code.code.get(pc) {
                     self.pc = Some(pc + 1);
-                    if let Err(err) = self.execute(&cmd.op) {
+                    if let Err(err) = self.execute(&cmd.op, cmd.node_id) {
                         panic!("{:?}", err);
                     }
                 } else {
@@ -207,13 +216,14 @@ impl<'a> Interpreter<'a> {
                 self.push_stack(Value::Bool(eq))?;
             }
             PushToClosure(primitive) => {
+                let value = primitive.clone();
                 self.frame
                     .closure
                     .as_ref()
                     .unwrap()
                     .borrow_mut()
                     .stack
-                    .push(Value::from(primitive.clone(), &self.frame.closure));
+                    .push(Value::from(value, &self.frame.closure));
             }
             SStore(offset) => match offset {
                 SFOffset::Closure {
@@ -325,7 +335,9 @@ impl<'a> Interpreter<'a> {
                 self.frame = frame.unwrap();
 
                 assert!(self.frame.closure.is_none());
+                self.id_counter += 1;
                 let closure = Closure {
+                    id: self.id_counter,
                     parent: None,
                     stack: Vec::new(),
                 };
@@ -392,6 +404,7 @@ impl<'a> Interpreter<'a> {
 
 #[derive(Debug, Clone)]
 struct Closure {
+    pub id: usize,
     pub parent: Option<Rc<RefCell<Closure>>>,
     pub stack: Vec<Value>,
 }
@@ -428,7 +441,7 @@ impl fmt::Debug for Value {
             }
             Value::Unset => write!(f, "_"),
             Value::Int(val) => write!(f, "{:?}", val),
-             Value::Float(val) => write!(f, "{:?}", val),
+            Value::Float(val) => write!(f, "{:?}", val),
             Value::Bool(val) => write!(f, "{:?}", val),
             Value::String(val) => write!(f, "{:?}", val),
             Value::PC(val) => write!(f, "{:?}", val),

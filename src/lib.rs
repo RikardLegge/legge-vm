@@ -6,6 +6,7 @@ pub mod runtime;
 pub mod token;
 
 pub use debug::Timing;
+use crate::ast::Ast;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq, Copy, Clone)]
@@ -21,7 +22,7 @@ pub fn compile(
     runtime: &runtime::Runtime,
     log_level: LogLevel,
     code: String,
-) -> Option<bytecode::Bytecode> {
+) -> Option<(bytecode::Bytecode, Ast)> {
     let start = debug::start_timer();
     let tokens = token::from_chars(code.chars());
     timing.token = debug::stop_timer(start);
@@ -45,7 +46,7 @@ pub fn compile(
     if log_level >= LogLevel::LogTiming {
         println!("{:?}", bytecode);
     }
-    return Some(bytecode);
+    return Some((bytecode, ast));
 }
 
 pub fn run_code<F>(code: String, log_level: LogLevel, interrupt: F) -> Option<()>
@@ -54,15 +55,21 @@ where
 {
     let runtime = runtime::std();
     let mut timing = debug::Timing::default();
-    let bytecode = compile(&mut timing, &runtime, log_level, code);
-    if bytecode.is_none() {
+    let compiled = compile(&mut timing, &runtime, log_level, code);
+    if compiled.is_none() {
         return None;
     }
-    let bytecode = bytecode.unwrap();
+    let (bytecode, ast) = compiled.unwrap();
 
     let mut interpreter = interpreter::Interpreter::new(&runtime);
     interpreter.log_level = log_level;
     interpreter.interrupt = &interrupt;
+
+    let get_line = |node_id| match ast.get_node(node_id).tokens.first() {
+        Some(token) => token.line,
+        None => 0
+    };
+    interpreter.get_line = &get_line;
 
     let start = debug::start_timer();
     timing.instructions = interpreter.run(&bytecode);

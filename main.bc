@@ -1,5 +1,13 @@
-ping(A());
+ping();
 
 A -> type {}
 
-ping :: fn(a: A) {}
+ping :: fn() {
+  a := A();
+  debug :: fn() {
+    log(a);
+  }
+  debug();
+}
+
+import log;

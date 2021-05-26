@@ -141,6 +141,37 @@ fn test_returned_closure() {
 }
 
 #[test]
+fn text_nested_scope() {
+    run_test(
+        "
+        proxy :: fn() {
+            val := 0;
+            real :: fn() {
+                exit(val);
+            }
+            real();
+        }
+        proxy();",
+        Some(Int(0)),
+    );
+}
+
+#[test]
+fn text_nested_arg_scope() {
+    run_test(
+        "
+        proxy :: fn(val: int) {
+            real :: fn() {
+                exit(val);
+            }
+            real();
+        }
+        proxy(0);",
+        Some(Int(0)),
+    );
+}
+
+#[test]
 fn test_comments_after_return() {
     run_test(
         "

@@ -19,7 +19,7 @@ pub fn compare(c: &mut Criterion) {
 
     let mut timing = Timing::default();
     let runtime = runtime::std();
-    let bytecode = compile(
+    let (bytecode, _) = compile(
         &mut timing,
         &runtime,
         LogLevel::LogNone,

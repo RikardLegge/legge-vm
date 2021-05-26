@@ -1,4 +1,4 @@
-use crate::ast::NodeType;
+use crate::ast::{NodeType, NodeID};
 use crate::bytecode::Value::Int;
 use crate::bytecode::{Value, OP};
 use crate::interpreter::{Err, Interpreter, Result};
@@ -81,8 +81,8 @@ fn log(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
 fn exit(interp: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
     if args.len() == 1 {
         let value = args.pop().unwrap();
-        interp.execute(&OP::PushImmediate(value))?;
-        interp.execute(&OP::Yield)?;
+        interp.execute(&OP::PushImmediate(value), NodeID::default())?;
+        interp.execute(&OP::Yield, NodeID::default())?;
         interp.exit();
         Ok(None)
     } else {
