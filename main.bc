@@ -1,16 +1,7 @@
-ping(A(), B());
-
-A -> type {}
-B -> type {
-  val: int
+double :: fn(i: int) -> int {
+    return 2 * i;
 }
-
-ping :: fn(a: A, b: B) {
-  debug :: fn() {
-    log(a);
-    log(b);
-  }
-  debug();
+exec :: fn(num: int, map: Fn(int) -> int) -> int {
+    return map(num);
 }
-
-import log;
+exec(2, double);

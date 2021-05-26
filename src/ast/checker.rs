@@ -289,8 +289,15 @@ impl<'a> Checker<'a> {
                                 decl_arg => decl_arg,
                             }
                         };
-                        let arg_id = arg_node_ids[i];
-                        self.fits(self.ast.get_node(arg_id), hole_arg, shape_arg)?;
+
+                        // HACK: Check why i can go out of bounds
+                        let arg = if i < arg_node_ids.len() {
+                            let id = arg_node_ids[i];
+                            self.ast.get_node(id)
+                        } else {
+                            node
+                        };
+                        self.fits(arg, hole_arg, shape_arg)?;
                     }
                     Ok(())
                 }
