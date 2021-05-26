@@ -70,7 +70,8 @@ where
     timing.avg_instruction = timing.interpreter / timing.instructions as u32;
 
     if log_level >= LogLevel::LogTiming {
-        dbg!(timing);
+        dbg!(&timing);
+        dbg!(timing.total());
     }
     return Some(());
 }

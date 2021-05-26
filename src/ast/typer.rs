@@ -119,7 +119,7 @@ impl<'a> Typer<'a> {
             Op(op, lhs, rhs) => {
                 use ArithmeticOP::*;
                 match op {
-                    GEq | Eq => InferredType::maybe(Some(Bool), Declared),
+                    GEq | LEq | Eq => InferredType::maybe(Some(Bool), Declared),
                     Add | Sub | Mul | Div => {
                         let lhs = self.get_type(lhs);
                         let rhs = self.get_type(rhs);

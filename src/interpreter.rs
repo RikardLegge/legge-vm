@@ -200,6 +200,12 @@ impl<'a> Interpreter<'a> {
                 let eq = n1 >= n2;
                 self.push_stack(Value::Bool(eq))?;
             }
+            LEq => {
+                let n2 = self.pop_stack()?;
+                let n1 = self.pop_stack()?;
+                let eq = n1 <= n2;
+                self.push_stack(Value::Bool(eq))?;
+            }
             PushToClosure => {
                 self.frame
                     .closure

@@ -61,6 +61,7 @@ pub enum OP {
     DivI,
     Eq,
     GEq,
+    LEq,
 
     SLoad(SFOffset),
     SStore(SFOffset),
@@ -382,8 +383,8 @@ impl<'a> Generator<'a> {
     }
 
     fn with_context<F, T>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> T
-    where
-        F: Fn(&mut Self) -> T,
+        where
+            F: Fn(&mut Self) -> T,
     {
         self.push_context(node_id, tp);
         let result = func(self);
@@ -392,8 +393,8 @@ impl<'a> Generator<'a> {
     }
 
     fn with_scope<F>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> Scope
-    where
-        F: Fn(&mut Self),
+        where
+            F: Fn(&mut Self),
     {
         self.push_scope(node_id);
         self.with_context(node_id, tp, func);
@@ -716,6 +717,7 @@ impl<'a> Generator<'a> {
                 self.add_op(node_id, OP::PushImmediate(Value::Int(0)));
                 let usage = self.ev_expression(expr_id);
                 assert_eq!(1, usage.pushed);
+                assert_eq!(0, usage.popped);
                 self.add_op(node_id, OP::SubI);
                 StackUsage::new(usage.popped, 1)
             }
@@ -744,6 +746,7 @@ impl<'a> Generator<'a> {
             ArithmeticOP::Div => self.add_op(node_id, OP::DivI),
             ArithmeticOP::Eq => self.add_op(node_id, OP::Eq),
             ArithmeticOP::GEq => self.add_op(node_id, OP::GEq),
+            ArithmeticOP::LEq => self.add_op(node_id, OP::LEq),
         };
         StackUsage::new(usage1.popped + usage2.popped, 1)
     }
@@ -753,6 +756,7 @@ impl<'a> Generator<'a> {
         let expr = self.ast.get_node(expr_id);
         match &expr.body {
             Op(op, expr1, expr2) => self.ev_operation(expr_id, *op, *expr1, *expr2),
+            PrefixOp(op, expr) => self.ev_prefix_operation(expr_id, *op, *expr),
             ConstValue(value) => self.ev_const(expr_id, value),
             ProcedureDeclaration(args, _, body_id) => self.ev_procedure(expr_id, args, *body_id),
             VariableValue(value, field) => self.ev_variable_value(expr_id, *value, field),

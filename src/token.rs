@@ -24,6 +24,7 @@ pub enum ArithmeticOP {
     Div,
     Eq,
     GEq,
+    LEq,
 }
 
 impl fmt::Debug for ArithmeticOP {
@@ -36,6 +37,7 @@ impl fmt::Debug for ArithmeticOP {
             Div => write!(f, "/"),
             Eq => write!(f, "=="),
             GEq => write!(f, ">="),
+            LEq => write!(f, "<="),
         }
     }
 }
@@ -165,6 +167,7 @@ impl<'a> Tokenizer<'a> {
             ':' => self.parse_declaration_or_type()?,
             '=' => self.parse_assignment_or_eq()?,
             '>' => self.parse_greater()?,
+            '<' => self.parse_lesser()?,
             '(' => {
                 self.next()?;
                 TokenType::LeftBrace
@@ -247,6 +250,17 @@ impl<'a> Tokenizer<'a> {
             '=' => {
                 self.next()?;
                 Some(TokenType::Op(ArithmeticOP::GEq))
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    fn parse_lesser(&mut self) -> Option<TokenType> {
+        assert_eq!(self.next()?, '<');
+        match self.peek()? {
+            '=' => {
+                self.next()?;
+                Some(TokenType::Op(ArithmeticOP::LEq))
             }
             _ => unimplemented!(),
         }

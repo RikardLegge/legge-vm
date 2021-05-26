@@ -12,7 +12,7 @@ fn main() {
     f.read_to_string(&mut contents)
         .expect("something went wrong reading the file");
 
-    let res = run_code(contents, LogLevel::LogEval, &|v| println!("{:?}", v));
+    let res = run_code(contents, LogLevel::LogTiming, &|v| println!("{:?}", v));
     if res.is_some() {
         exit(0);
     } else {

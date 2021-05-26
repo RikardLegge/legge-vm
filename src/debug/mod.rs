@@ -9,6 +9,11 @@ pub struct Timing {
     pub instructions: usize,
     pub avg_instruction: Duration,
 }
+impl Timing {
+    pub fn total(&self) -> Duration {
+        self.token + self.bytecode + self.interpreter + self.ast.total()
+    }
+}
 
 pub fn start_timer() -> SystemTime {
     SystemTime::now()
@@ -24,4 +29,11 @@ pub struct AstTiming {
     pub linker: Duration,
     pub type_inference: Duration,
     pub type_checker: Duration,
+}
+
+
+impl AstTiming {
+    pub fn total(&self) -> Duration {
+        self.from_tokens + self.linker + self.type_inference + self.type_checker
+    }
 }

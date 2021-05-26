@@ -1,18 +1,24 @@
 import log;
 A -> type {
   val: int
-  b: B
-}
-B -> type {
-  val: int
 }
 
 add :: fn(a: A) -> A {
-  a.val = a.val + 1;
+  i := a.val;
+  val := 0;
+  loop {
+    val = val + 1;
+    if(i <= 0) {
+      a.val = val;
+      return a;
+    }
+    i = i - 1;
+  }
   return a;
 }
 
 a := A();
+a.val = 1000000;
 log(a);
 a = add(a);
 log(a);
