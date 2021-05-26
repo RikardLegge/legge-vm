@@ -299,8 +299,9 @@ impl<'a> Tokenizer<'a> {
 
     fn parse_comment_or_div(&mut self) -> Option<TokenType> {
         assert_eq!(self.next()?, '/');
-        match self.next()? {
+        match self.peek()? {
             '/' => {
+                self.next()?;
                 let mut comment = String::new();
                 while self.peek()? != '\n' {
                     comment.push(self.next().unwrap())

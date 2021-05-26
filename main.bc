@@ -5,3 +5,8 @@ exec :: fn(num: int, map: Fn(int) -> int) -> int {
     return map(num);
 }
 exec(2, double);
+
+import log;
+
+a :: 1/1;
+log(a);
