@@ -1,6 +1,5 @@
+ping(A());
 
 A -> type {}
-
-ping(A());
 
 ping :: fn(a: A) {}

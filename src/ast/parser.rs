@@ -34,11 +34,25 @@ impl<I> Parser<I>
     fn parse(mut self) -> Result<Ast> {
         let node = self.any_node(None);
 
-        let mut statements = Vec::new();
-        while self.iter.peek().is_some() {
+        let mut static_statements = Vec::new();
+        let mut dynamic_statements = Vec::new();
+        while self.peek_token().is_ok() {
             let statement = self.do_statement(node.id)?;
-            statements.push(statement);
+            match self.ast.get_node(statement).body {
+                NodeBody::TypeDeclaration(..)
+                | NodeBody::StaticDeclaration(..)
+                | NodeBody::Import(..) => {
+                    static_statements.push(statement)
+                },
+                _ => {
+                    dynamic_statements.push(statement)
+                }
+            }
         }
+        let statements = {
+            static_statements.append(&mut dynamic_statements);
+            static_statements
+        };
         self.add_node(node, NodeBody::Block(statements));
         Ok(self.ast)
     }
@@ -93,7 +107,7 @@ impl<I> Parser<I>
                     error_description,
                     vec![error_node_id],
                 ))
-            },
+            }
         }
     }
 
@@ -167,11 +181,25 @@ impl<I> Parser<I>
     }
 
     fn do_block(&mut self, node: PendingNode) -> Result {
-        let mut statements = Vec::new();
+        let mut static_statements = Vec::new();
+        let mut dynamic_statements = Vec::new();
         while *self.peek_token()? != TokenType::RightCurlyBrace {
             let statement = self.do_statement(node.id)?;
-            statements.push(statement);
+            match self.ast.get_node(statement).body {
+                NodeBody::TypeDeclaration(..)
+                | NodeBody::StaticDeclaration(..)
+                | NodeBody::Import(..) => {
+                    static_statements.push(statement)
+                },
+                _ => {
+                    dynamic_statements.push(statement)
+                }
+            }
         }
+        let statements = {
+            static_statements.append(&mut dynamic_statements);
+            static_statements
+        };
         self.ensure_next_token(&node, TokenType::RightCurlyBrace)?;
         Ok(self.add_node(node, NodeBody::Block(statements)))
     }
