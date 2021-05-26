@@ -1,11 +1,14 @@
-ping();
+ping(A(), B());
 
 A -> type {}
+B -> type {
+  val: int
+}
 
-ping :: fn() {
-  a := A();
+ping :: fn(a: A, b: B) {
   debug :: fn() {
     log(a);
+    log(b);
   }
   debug();
 }

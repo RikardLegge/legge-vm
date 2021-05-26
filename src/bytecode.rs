@@ -338,10 +338,9 @@ impl<'a> Generator<'a> {
         self.get_scope().instructions.len()
     }
 
-    fn add_var(&mut self, var_id: NodeID) {
-        let has_closure_reference = self.ast.get_node(var_id).has_closure_references();
-        let offset = if has_closure_reference {
-            let context = self.get_context_mut();
+    fn new_var_offset(&self, has_closure_reference:bool) -> usize {
+        if has_closure_reference {
+            let context = self.get_context();
             let offset = context.closure_allocations();
             offset
         } else {
@@ -353,10 +352,21 @@ impl<'a> Generator<'a> {
                 }
             }
             offset
-        };
+        }
+    }
 
+    fn add_var(&mut self, var_id: NodeID) {
+        let has_closure_reference = self.ast.get_node(var_id).has_closure_references();
+        let offset = self.new_var_offset(has_closure_reference);
         let context = self.get_context_mut();
         let var = ContextVariable::new(var_id, offset, has_closure_reference);
+        context.variables.push(var);
+    }
+
+    fn add_dummy_var(&mut self, has_closure_reference: bool) {
+        let offset = self.new_var_offset(has_closure_reference);
+        let context = self.get_context_mut();
+        let var = ContextVariable::new(Default::default(), offset, has_closure_reference);
         context.variables.push(var);
     }
 
@@ -425,7 +435,7 @@ impl<'a> Generator<'a> {
             ConstDeclaration(_, _, expr)
             | StaticDeclaration(_, _, expr)
             | TypeDeclaration(_, _, expr, _)
-            | Import(_, expr)=> self.ev_declaration(node_id, Some(*expr)),
+            | Import(_, expr) => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
             VariableAssignment(var, path, value) => self.ev_assignment(node_id, *var, path, *value),
             ProcedureDeclaration(args, _, body_id) => self.ev_procedure(node_id, args, *body_id),
@@ -526,8 +536,33 @@ impl<'a> Generator<'a> {
 
     fn ev_procedure(&mut self, node_id: NodeID, args: &[NodeID], body_id: NodeID) -> StackUsage {
         let scope = self.with_scope(node_id, ContextType::ClosureBoundary, |bc| {
-            for arg in args.iter() {
-                bc.add_var(*arg);
+            for (i, arg) in args.iter().enumerate() {
+                if bc.ast.get_node(*arg).has_closure_references() {
+                    // All variables are by default passed to function on the stack.
+                    // If the argument is referenced somewhere inside an inner function,
+                    // it has to be move to a closure instead.
+
+                    // First create a dummy variable for the original argument, this ensures that
+                    // deallocating works as expected. Then copy the variable to the top of the stack.
+                    bc.add_dummy_var(false);
+                    bc.add_op(*arg, OP::SLoad(SFOffset::Stack {
+                        offset: i as isize,
+                        field: None,
+                    }));
+
+                    // We can then create the true variable which we will later look up and copy the
+                    // data from the argument, now on top of the stack, to the closure.
+                    let offset = bc.new_var_offset(true);
+                    bc.add_op(*arg, OP::PushToClosure(Value::Unset));
+                    bc.add_op(*arg, OP::SStore(SFOffset::Closure {
+                        offset,
+                        depth: 0,
+                        field: None
+                    }));
+                    bc.add_var(*arg);
+                } else {
+                    bc.add_var(*arg);
+                }
             }
             let body_node = bc.ast.get_node(body_id);
             match &body_node.body {

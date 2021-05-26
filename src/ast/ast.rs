@@ -355,10 +355,11 @@ impl Ast {
             let node = self.get_node(node_id);
             let result = test(node);
             match result {
-                Ok(option) => {
-                    if let Some(node_id) = option {
-                        break Ok(Some((node_id, location)));
-                    } else if let Some(parent_id) = node.parent_id {
+                Ok(Some(node_id)) => {
+                    break Ok(Some((node_id, location)));
+                },
+                Ok(_) => {
+                    if let Some(parent_id) = node.parent_id {
                         if node.is_closure_boundary() {
                             location = NodeReferenceLocation::Closure;
                         }

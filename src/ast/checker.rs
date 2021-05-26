@@ -262,10 +262,21 @@ impl<'a> Checker<'a> {
                             hole_args.len(), shape_args.len()
                         ),
                         "Too many arguments",
-                         nodes,
+                        nodes,
                     ))
+                } else if hole_args.len() > shape_args.len() {
+                        let nodes = node.body.children().map(|id| *id).collect();
+                        Err(self.ast.error(
+                            &format!(
+                                "wrong number of arguments provided to function, {} expected, {} provided",
+                                hole_args.len(), shape_args.len()
+                            ),
+                            "Too few arguments",
+                            nodes,
+                        ))
                 } else {
                     let mut vararg = None;
+                    let arg_node_ids = node.body.children().map(|id| *id).collect::<Vec<NodeID>>();
                     for (i, shape_arg) in shape_args.iter().enumerate() {
                         let hole_arg = if let Some(decl_arg) = vararg {
                             decl_arg
@@ -278,7 +289,8 @@ impl<'a> Checker<'a> {
                                 decl_arg => decl_arg,
                             }
                         };
-                        self.fits(node, hole_arg, shape_arg)?;
+                        let arg_id = arg_node_ids[i];
+                        self.fits(self.ast.get_node(arg_id), hole_arg, shape_arg)?;
                     }
                     Ok(())
                 }
