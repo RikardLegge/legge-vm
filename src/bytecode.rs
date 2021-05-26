@@ -73,7 +73,7 @@ pub enum OP {
     PopPc,
 
     PushImmediate(Value),
-    PushToClosure,
+    PushToClosure(Value),
     PopStack(usize),
 
     PrepareStackFrame(usize),
@@ -161,7 +161,6 @@ impl Context {
 
 struct Scope {
     node_id: NodeID,
-    const_instructions: Vec<Instruction>,
     instructions: Vec<Instruction>,
 }
 
@@ -169,7 +168,6 @@ impl Scope {
     fn new(node_id: NodeID) -> Self {
         Scope {
             node_id,
-            const_instructions: Vec::new(),
             instructions: Vec::new(),
         }
     }
@@ -371,11 +369,6 @@ impl<'a> Generator<'a> {
         let proc_id = self.procedures.len();
         self.procedures.append(&mut scope.instructions);
         proc_id
-    }
-
-    fn add_const_op(&mut self, node_id: NodeID, op: OP) {
-        let instruction = Instruction { node_id, op };
-        self.get_scope_mut().const_instructions.push(instruction);
     }
 
     fn add_op(&mut self, node_id: NodeID, op: OP) {
@@ -676,26 +669,19 @@ impl<'a> Generator<'a> {
                 if node.has_closure_references() {
                     match &node.body {
                         NodeBody::VariableDeclaration(..)
-                        | NodeBody::ConstDeclaration(..) => {
-                            bc.add_var(*child_id);
-                            bc.add_op(*child_id, OP::PushToClosure);
-                        }
+                        | NodeBody::ConstDeclaration(..)
                         | NodeBody::TypeDeclaration(..)
                         | NodeBody::StaticDeclaration(..)
                         | NodeBody::Import(..) => {
                             bc.add_var(*child_id);
-                            bc.add_op(*child_id, OP::PushToClosure);
+                            bc.add_op(*child_id, OP::PushToClosure(Value::Unset));
                         }
                         _ => (),
                     }
                 } else {
                     match &node.body {
                         NodeBody::VariableDeclaration(..)
-                        | NodeBody::ConstDeclaration(..) => {
-                            bc.add_var(*child_id);
-                            bc.add_op(*child_id, OP::PushImmediate(Value::Unset));
-                        }
-
+                        | NodeBody::ConstDeclaration(..)
                         | NodeBody::TypeDeclaration(..)
                         | NodeBody::StaticDeclaration(..)
                         | NodeBody::Import(..) => {

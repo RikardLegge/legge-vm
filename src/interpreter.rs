@@ -206,14 +206,14 @@ impl<'a> Interpreter<'a> {
                 let eq = n1 <= n2;
                 self.push_stack(Value::Bool(eq))?;
             }
-            PushToClosure => {
+            PushToClosure(primitive) => {
                 self.frame
                     .closure
                     .as_ref()
                     .unwrap()
                     .borrow_mut()
                     .stack
-                    .push(Value::Unset);
+                    .push(Value::from(primitive.clone(), &self.frame.closure));
             }
             SStore(offset) => match offset {
                 SFOffset::Closure {
