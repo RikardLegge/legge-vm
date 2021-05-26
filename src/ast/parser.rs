@@ -209,8 +209,8 @@ impl<I> Parser<I>
         let node = self.node(parent_id);
 
         let node = match self.next_token(&node)? {
-            Int(int) => Ok(self.add_node(node, NodeBody::ConstValue(NodeValue::Int(int)))),
-            Float(float) => Ok(self.add_node(node, NodeBody::ConstValue(NodeValue::Float(float)))),
+            Int(int, _) => Ok(self.add_node(node, NodeBody::ConstValue(NodeValue::Int(int)))),
+            Float(float, _, _) => Ok(self.add_node(node, NodeBody::ConstValue(NodeValue::Float(float)))),
             Op(op) => self.do_operation(node, op, None),
             Name(symbol) => self.do_statement_symbol(node, &symbol),
             LeftCurlyBrace => self.do_block(node),
@@ -244,8 +244,8 @@ impl<I> Parser<I>
         let node = self.node(parent_id);
 
         let node = match self.next_token(&node)? {
-            Int(int) => self.add_node(node, NodeBody::ConstValue(NodeValue::Int(int))),
-            Float(float) => self.add_node(node, NodeBody::ConstValue(NodeValue::Float(float))),
+            Int(int, _) => self.add_node(node, NodeBody::ConstValue(NodeValue::Int(int))),
+            Float(float, _, _) => self.add_node(node, NodeBody::ConstValue(NodeValue::Float(float))),
             String(value) => self.add_node(node, NodeBody::ConstValue(NodeValue::String(value))),
             Op(op) => self.do_operation(node, op, None)?,
             Name(symbol) => self.do_expression_symbol(node, &symbol, None)?,

@@ -8,5 +8,5 @@ exec(2, double);
 
 import log;
 
-a :: 1/1;
+a :: 001.00/01.0;
 log(a);

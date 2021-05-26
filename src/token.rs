@@ -77,8 +77,8 @@ pub enum TokenType {
     Name(String),
     KeyName(String),
     String(String),
-    Int(isize),
-    Float(f64),
+    Int(isize, usize),
+    Float(f64, usize, usize),
     Op(ArithmeticOP),
 }
 
@@ -102,11 +102,19 @@ impl fmt::Display for TokenType {
             Name(ident) => write!(f, "{}", ident),
             KeyName(key) => write!(f, "{}", key),
             String(str) => write!(f, "\"{}\"", str),
-            Int(num) => write!(f, "{}", num),
-            Float(num) => write!(f, "{}", num),
             Op(op) => write!(f, "{:?}", op),
+
+            // Enable nice formatting of numbers with leading zeros
+            Int(num, significant) => format_number_leading_zeros(f, *num as f64, *significant, 0),
+            Float(num, significant, decimal) =>  format_number_leading_zeros(f, *num, *significant, *decimal),
         }
     }
+}
+
+fn format_number_leading_zeros(f: &mut Formatter<'_>, num: f64, significant: usize, decimal: usize) -> fmt::Result {
+    let left_pad = significant-(1.0+num.log10().ceil()) as usize;
+    let right_pad = num;
+    write!(f, "{0:0<1$}{2:.3$}", "", left_pad, right_pad, decimal)
 }
 
 pub struct Tokenizer<'a> {
@@ -325,6 +333,7 @@ impl<'a> Tokenizer<'a> {
 
     fn parse_number(&mut self) -> Option<TokenType> {
         let mut int = 0 as isize;
+        let mut count = 0;
         while let Some(ch) = self.peek() {
             match ch {
                 '0'..='9' => {
@@ -333,25 +342,27 @@ impl<'a> Tokenizer<'a> {
                 }
                 _ => break,
             };
+            count += 1;
         }
         match self.peek()? {
             '.' => {
                 self.next();
-                let float = match self.peek()? {
+                let number = match self.peek()? {
                     '0'..='9' => match self.parse_number() {
-                        Some(TokenType::Int(decimal)) => {
+                        Some(TokenType::Int(decimal, decimal_count)) => {
                             let decimal = decimal as f64;
                             let pow = (decimal + 1.0).log10().ceil() as u32;
                             let divisor = (10 as usize).pow(pow);
-                            int as f64 + decimal / divisor as f64
+                            let val = int as f64 + decimal / divisor as f64;
+                            TokenType::Float(val, count, decimal_count)
                         }
                         _ => unimplemented!(),
                     },
-                    _ => int as f64,
+                    _ => TokenType::Float(int as f64, count, 0),
                 };
-                Some(TokenType::Float(float))
+                Some(number)
             }
-            _ => Some(TokenType::Int(int)),
+            _ => Some(TokenType::Int(int, count)),
         }
     }
 }
