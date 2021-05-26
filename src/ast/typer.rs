@@ -154,7 +154,8 @@ impl<'a> Typer<'a> {
                     if let NodeType::Type(_) = value_tp {
                         let body = &self.ast.get_node(*value).body;
                         match body {
-                            NodeBody::ConstDeclaration(_, _, constructor) => {
+                            NodeBody::ConstDeclaration(_, _, constructor)
+                            | NodeBody::StaticDeclaration(_, _, constructor)=> {
                                 value_tp = self.get_type(constructor).unwrap();
                             }
                             NodeBody::TypeDeclaration(name, ..) => {
@@ -214,7 +215,8 @@ impl<'a> Typer<'a> {
                     None
                 }
             }
-            ConstDeclaration(_, declared, value) => {
+            ConstDeclaration(_, declared, value)
+            | StaticDeclaration(_, declared, value) => {
                 if let Some(declared) = declared {
                     InferredType::maybe(
                         self.get_type_from_declaration(&node.id, declared)?,

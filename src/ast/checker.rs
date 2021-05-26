@@ -49,7 +49,8 @@ impl<'a> Checker<'a> {
                 VariableAssignment(lhs, path, rhs) => {
                     let lhs_node = self.ast.get_node(*lhs);
                     match lhs_node.body {
-                        NodeBody::ConstDeclaration(..) => Err(self.ast.error(
+                        NodeBody::ConstDeclaration(..)
+                        |NodeBody::StaticDeclaration(..) => Err(self.ast.error(
                             "Not allowed to assign to constant value",
                             "Assignment to constant value",
                             vec![node.id],
@@ -140,7 +141,8 @@ impl<'a> Checker<'a> {
                     unreachable!()
                 }
 
-                ConstDeclaration(_, _, value) => {
+                ConstDeclaration(_, _, value)
+                | StaticDeclaration(_, _, value)=> {
                     let lhs = node.tp.as_ref().unwrap();
                     let rhs = self.ast.get_node(*value).tp.as_ref().unwrap();
                     if lhs.tp == rhs.tp {

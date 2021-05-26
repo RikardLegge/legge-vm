@@ -161,6 +161,7 @@ impl Context {
 
 struct Scope {
     node_id: NodeID,
+    const_instructions: Vec<Instruction>,
     instructions: Vec<Instruction>,
 }
 
@@ -168,6 +169,7 @@ impl Scope {
     fn new(node_id: NodeID) -> Self {
         Scope {
             node_id,
+            const_instructions: Vec::new(),
             instructions: Vec::new(),
         }
     }
@@ -371,11 +373,14 @@ impl<'a> Generator<'a> {
         proc_id
     }
 
-    fn add_op(&mut self, node_id: NodeID, op: OP) -> usize {
+    fn add_const_op(&mut self, node_id: NodeID, op: OP) {
         let instruction = Instruction { node_id, op };
-        let i = self.op_index();
+        self.get_scope_mut().const_instructions.push(instruction);
+    }
+
+    fn add_op(&mut self, node_id: NodeID, op: OP) {
+        let instruction = Instruction { node_id, op };
         self.get_scope_mut().instructions.push(instruction);
-        i
     }
 
     fn set_op(&mut self, index: usize, op: OP) {
@@ -429,10 +434,11 @@ impl<'a> Generator<'a> {
             Block(children) => self.ev_block(node_id, children),
             Call(proc_id, args) => self.ev_call(node_id, *proc_id, args, true),
             VariableValue(val, field) => self.ev_variable_value(node_id, *val, field),
-            ConstDeclaration(_, _, expr) => self.ev_declaration(node_id, Some(*expr)),
-            TypeDeclaration(_, _, expr, _) => self.ev_declaration(node_id, Some(*expr)),
+            ConstDeclaration(_, _, expr)
+            | StaticDeclaration(_, _, expr)
+            | TypeDeclaration(_, _, expr, _)
+            | Import(_, expr)=> self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
-            Import(_, value) => self.ev_declaration(node_id, Some(*value)),
             VariableAssignment(var, path, value) => self.ev_assignment(node_id, *var, path, *value),
             ProcedureDeclaration(args, _, body_id) => self.ev_procedure(node_id, args, *body_id),
             Return(proc_id, ret_id) => self.ev_return(node_id, *proc_id, *ret_id),
@@ -456,7 +462,8 @@ impl<'a> Generator<'a> {
 
     fn ev_loop(&mut self, node_id: NodeID, body_id: NodeID) -> StackUsage {
         self.add_op(node_id, OP::Branch(1));
-        let break_inst = self.add_op(node_id, OP::Panic);
+        let break_inst = self.op_index();
+        self.add_op(node_id, OP::Panic);
         let start = self.op_index();
         self.with_context(node_id, ContextType::Loop { break_inst }, |bc| {
             let body_node = bc.ast.get_node(body_id);
@@ -480,7 +487,8 @@ impl<'a> Generator<'a> {
     fn ev_if(&mut self, node_id: NodeID, condition_id: NodeID, body_id: NodeID) -> StackUsage {
         let usage = self.ev_expression(condition_id);
         assert_eq!(usage.pushed - usage.popped, 1);
-        let jump_index = self.add_op(node_id, OP::Panic);
+        let jump_index = self.op_index();
+        self.add_op(node_id, OP::Panic);
 
         let start = self.op_index();
         let body_node = self.ast.get_node(body_id);
@@ -634,7 +642,8 @@ impl<'a> Generator<'a> {
             self.add_op(node_id, OP::PushImmediate(Value::Unset));
         }
 
-        let pc_index = self.add_op(node_id, OP::Panic);
+        let pc_index = self.op_index();
+        self.add_op(node_id, OP::Panic);
         self.add_op(node_id, OP::PushStackFrame);
         for arg in args {
             let usage = self.ev_expression(*arg);
@@ -667,8 +676,12 @@ impl<'a> Generator<'a> {
                 if node.has_closure_references() {
                     match &node.body {
                         NodeBody::VariableDeclaration(..)
-                        | NodeBody::ConstDeclaration(..)
+                        | NodeBody::ConstDeclaration(..) => {
+                            bc.add_var(*child_id);
+                            bc.add_op(*child_id, OP::PushToClosure);
+                        }
                         | NodeBody::TypeDeclaration(..)
+                        | NodeBody::StaticDeclaration(..)
                         | NodeBody::Import(..) => {
                             bc.add_var(*child_id);
                             bc.add_op(*child_id, OP::PushToClosure);
@@ -678,8 +691,13 @@ impl<'a> Generator<'a> {
                 } else {
                     match &node.body {
                         NodeBody::VariableDeclaration(..)
-                        | NodeBody::ConstDeclaration(..)
+                        | NodeBody::ConstDeclaration(..) => {
+                            bc.add_var(*child_id);
+                            bc.add_op(*child_id, OP::PushImmediate(Value::Unset));
+                        }
+
                         | NodeBody::TypeDeclaration(..)
+                        | NodeBody::StaticDeclaration(..)
                         | NodeBody::Import(..) => {
                             bc.add_var(*child_id);
                             bc.add_op(*child_id, OP::PushImmediate(Value::Unset));

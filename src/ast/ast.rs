@@ -149,6 +149,7 @@ pub enum NodeBody {
 
     VariableDeclaration(String, Option<NodeType>, Option<NodeID>),
     ConstDeclaration(String, Option<NodeType>, NodeID),
+    StaticDeclaration(String, Option<NodeType>, NodeID),
     TypeDeclaration(String, NodeType, NodeID, Option<NodeValue>),
     VariableAssignment(NodeID, Option<Vec<String>>, NodeID),
     VariableValue(NodeID, Option<Vec<String>>),
@@ -320,6 +321,7 @@ impl Ast {
                 match &child.body {
                     VariableDeclaration(ident, ..)
                     | ConstDeclaration(ident, ..)
+                    | StaticDeclaration(ident, ..)
                     | TypeDeclaration(ident, ..)
                     | Import(ident, _) => {
                         if ident == target_ident {
@@ -414,6 +416,7 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
             | Expression(value)
             | TypeDeclaration(_, _, value, ..)
             | ConstDeclaration(.., value)
+            | StaticDeclaration(.., value)
             | VariableAssignment(_, _, value)
             | Import(_, value) => match self.index {
                 0 => Some(value),

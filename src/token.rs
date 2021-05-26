@@ -69,7 +69,7 @@ pub enum TokenType {
     Dot,
     LeftBrace,
     RightBrace,
-    StaticDeclaration,
+    ConstDeclaration,
     VariableDeclaration,
     TypeDeclaration,
     Assignment,
@@ -93,7 +93,7 @@ impl fmt::Display for TokenType {
             EndStatement => write!(f, ";"),
             LeftBrace => write!(f, "("),
             RightBrace => write!(f, ")"),
-            StaticDeclaration => write!(f, "::"),
+            ConstDeclaration => write!(f, "::"),
             VariableDeclaration => write!(f, ":="),
             TypeDeclaration => write!(f, ":"),
             Assignment => write!(f, "="),
@@ -271,7 +271,7 @@ impl<'a> Tokenizer<'a> {
         match self.peek()? {
             ':' => {
                 self.next()?;
-                Some(TokenType::StaticDeclaration)
+                Some(TokenType::ConstDeclaration)
             }
             '=' => {
                 self.next()?;

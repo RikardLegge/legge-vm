@@ -151,6 +151,7 @@ impl<I> Parser<I>
         match self.ast.get_node(node).body {
             TypeDeclaration(_, _, child_node, ..)
             | ConstDeclaration(.., child_node)
+            | StaticDeclaration(.., child_node)
             | VariableDeclaration(.., Some(child_node)) => {
                 self.should_terminate_statement(child_node)
             }
@@ -596,7 +597,7 @@ impl<I> Parser<I>
                 self.next_token(&node)?;
                 let tp = self.do_type(&node)?;
                 match self.peek_token()? {
-                    StaticDeclaration | VariableDeclaration => {
+                    ConstDeclaration | VariableDeclaration => {
                         self.do_variable_or_assignment(node, ident, Some(tp))
                     }
                     EndStatement => {
@@ -661,13 +662,24 @@ impl<I> Parser<I>
                 self.ensure_next_token(&node, TokenType::KeyName("type".into()))?;
                 self.do_type_definition(node, ident)
             }
-            StaticDeclaration => {
+            ConstDeclaration => {
                 self.next_token(&node)?;
                 let expression = self.do_expression(node.id)?;
-                let  node = self.add_node(
-                    node,
-                    NodeBody::ConstDeclaration(ident.into(), tp, expression),
-                );
+                let node = match self.ast.get_node(expression).body {
+                    NodeBody::ProcedureDeclaration(..)
+                    | NodeBody::ConstValue(..) => {
+                        self.add_node(
+                            node,
+                            NodeBody::StaticDeclaration(ident.into(), tp, expression),
+                        )
+                    }
+                    _ => {
+                        self.add_node(
+                            node,
+                            NodeBody::ConstDeclaration(ident.into(), tp, expression),
+                        )
+                    }
+                };
                 Ok(node)
             }
             VariableDeclaration => {

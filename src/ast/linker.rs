@@ -296,6 +296,14 @@ impl<'a, 'b> Linker<'a, 'b> {
                         None
                     }
                 }
+                NodeBody::StaticDeclaration(name, tp, value) => {
+                    if let Some(NodeType::Unknown(_)) = *tp {
+                        let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
+                        Some(NodeBody::StaticDeclaration(name.clone(), Some(tp), *value))
+                    } else {
+                        None
+                    }
+                }
             };
             if let Some(body) = new_body {
                 let node = self.ast.get_node_mut(node_id);
