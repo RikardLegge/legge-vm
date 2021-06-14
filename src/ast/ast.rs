@@ -108,7 +108,7 @@ pub enum NodeTypeSource {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
-    VarArg(Box<NodeType>),
+    VarArg { args: Box<NodeType>},
     Any,
     NotYetImplemented,
     Void,
@@ -116,10 +116,10 @@ pub enum NodeType {
     Float,
     Bool,
     String,
-    Fn(Vec<NodeType>, Box<NodeType>),
-    Type(Box<NodeType>),
-    Unknown(String),
-    Struct(Vec<(String, NodeType)>),
+    Fn{ args: Vec<NodeType>, returns: Box<NodeType> },
+    Type { tp: Box<NodeType> },
+    Unknown { ident: String},
+    Struct{ fields: Vec<(String, NodeType)>},
 }
 
 #[derive(Debug, Clone)]

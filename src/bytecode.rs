@@ -600,7 +600,7 @@ impl<'a> Generator<'a> {
             let mut tp = &self.ast.get_node(var_id).tp.as_ref().unwrap().tp;
             for path_name in path {
                 match tp {
-                    NodeType::Struct(fields) => {
+                    NodeType::Struct{fields} => {
                         let index = fields.iter().position(|(name, _)| name == path_name);
                         match index {
                             Some(index) => {
@@ -654,11 +654,11 @@ impl<'a> Generator<'a> {
     ) -> StackUsage {
         let node = self.ast.get_node(proc_var_id);
         let return_values = match &node.tp.as_ref().unwrap().tp {
-            NodeType::Fn(_, ret) => match &**ret {
+            NodeType::Fn{ returns, ..} => match &**returns {
                 NodeType::Void => 0,
                 _ => 1,
             },
-            NodeType::Type(..) => 1,
+            NodeType::Type{..} => 1,
             _ => unreachable!(),
         };
 

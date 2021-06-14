@@ -100,7 +100,7 @@ impl<'a> Typer<'a> {
                         (name.clone(), tp)
                     })
                     .collect();
-                NodeType::Struct(field_types)
+                NodeType::Struct{fields: field_types}
             }
             NodeValue::RuntimeFn(id) => {
                 let func = &self.runtime.functions[*id];
@@ -139,7 +139,7 @@ impl<'a> Typer<'a> {
                         None => Some(Void),
                     };
                     if let Some(return_type) = return_type {
-                        InferredType::maybe(Some(Fn(arg_types, Box::new(return_type))), Declared)
+                        InferredType::maybe(Some(Fn{args: arg_types, returns: Box::new(return_type)}), Declared)
                     } else {
                         None
                     }
@@ -151,7 +151,7 @@ impl<'a> Typer<'a> {
             VariableValue(value, path) => {
                 if let Some(value_tp) = self.get_type(value) {
                     let mut value_tp = value_tp;
-                    if let NodeType::Type(_) = value_tp {
+                    if let NodeType::Type{..} = value_tp {
                         let body = &self.ast.get_node(*value).body;
                         match body {
                             NodeBody::ConstDeclaration(_, _, constructor)
@@ -171,7 +171,7 @@ impl<'a> Typer<'a> {
                     let mut value_tp = &value_tp;
                     if let Some(path) = path {
                         for path_field in path {
-                            if let NodeType::Struct(fields) = &value_tp {
+                            if let NodeType::Struct{fields} = &value_tp {
                                 let mut tp = None;
                                 for (field, field_tp) in fields {
                                     if path_field == field {
@@ -245,11 +245,9 @@ impl<'a> Typer<'a> {
                 let var = self.ast.get_node(*var_id);
                 if let Some(tp) = &var.tp {
                     match &tp.tp {
-                        Fn(_, ret) => {
-                            InferredType::maybe(Some((**ret).clone()), Value)
-                        }
-                        Type(ret) => {
-                            InferredType::maybe(Some((**ret).clone()), Value)
+                        Fn{returns, ..} |
+                        Type{tp: returns }=> {
+                            InferredType::maybe(Some((**returns).clone()), Value)
                         }
                         _ => Err(self.ast.error(
                             &format!(

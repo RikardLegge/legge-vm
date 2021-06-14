@@ -108,17 +108,17 @@ impl<'a, 'b> Linker<'a, 'b> {
     fn fix_unknown_types(&self, node_id: NodeID, tp: NodeType) -> Result<NodeType> {
         let tp = match tp {
             NodeType::Void | NodeType::Int | NodeType::Bool | NodeType::String => tp,
-            NodeType::Fn(_, _) => unimplemented!(),
-            NodeType::Type(tp) => NodeType::Type(Box::new(self.fix_unknown_types(node_id, *tp)?)),
-            NodeType::Struct(tps) => {
-                let mut new_tps = Vec::with_capacity(tps.len());
-                for (name, tp) in tps {
+            NodeType::Fn{..} => unimplemented!(),
+            NodeType::Type{tp} => NodeType::Type{ tp: Box::new(self.fix_unknown_types(node_id, *tp)?)},
+            NodeType::Struct{fields} => {
+                let mut fixed_fields = Vec::with_capacity(fields.len());
+                for (name, tp) in fields {
                     let new_value = self.fix_unknown_types(node_id, tp)?;
-                    new_tps.push((name, new_value));
+                    fixed_fields.push((name, new_value));
                 }
-                NodeType::Struct(new_tps)
+                NodeType::Struct{fields: fixed_fields}
             }
-            NodeType::Unknown(ident) => {
+            NodeType::Unknown{ident} => {
                 let (target_id, _) = match self.closest_variable(node_id, &ident)? {
                     Some(target) => target,
                     None => {
@@ -128,7 +128,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                     }
                 };
                 match &self.ast.get_node(target_id).body {
-                    NodeBody::TypeDeclaration(_, NodeType::Type(tp), _, _) => (**tp).clone(),
+                    NodeBody::TypeDeclaration(_, NodeType::Type{tp}, _, _) => (**tp).clone(),
                     _ => unreachable!(),
                 }
             }
@@ -273,7 +273,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                 | NodeBody::TypeDeclaration(_, _, _, _)=> None,
 
                 NodeBody::ProcedureDeclaration(args, return_tp, body) => {
-                    if let Some(NodeType::Unknown(_)) = *return_tp {
+                    if let Some(NodeType::Unknown{..}) = *return_tp {
                         let tp = self.fix_unknown_types(node_id, return_tp.clone().unwrap())?;
                         Some(NodeBody::ProcedureDeclaration(args.clone(), Some(tp), *body))
                     } else {
@@ -281,7 +281,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                     }
                 }
                 NodeBody::VariableDeclaration(name, tp, value) => {
-                    if let Some(NodeType::Unknown(_)) = *tp {
+                    if let Some(NodeType::Unknown{..}) = *tp {
                         let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
                         Some(NodeBody::VariableDeclaration(name.clone(), Some(tp), *value))
                     } else {
@@ -289,7 +289,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                     }
                 },
                 NodeBody::ConstDeclaration(name, tp, value) => {
-                    if let Some(NodeType::Unknown(_)) = *tp {
+                    if let Some(NodeType::Unknown{..}) = *tp {
                         let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
                         Some(NodeBody::ConstDeclaration(name.clone(), Some(tp), *value))
                     } else {
@@ -297,7 +297,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                     }
                 }
                 NodeBody::StaticDeclaration(name, tp, value) => {
-                    if let Some(NodeType::Unknown(_)) = *tp {
+                    if let Some(NodeType::Unknown{..}) = *tp {
                         let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
                         Some(NodeBody::StaticDeclaration(name.clone(), Some(tp), *value))
                     } else {

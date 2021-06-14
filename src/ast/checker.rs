@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
                     let lhs_node = self.ast.get_node(*lhs);
                     match lhs_node.body {
                         NodeBody::ConstDeclaration(..)
-                        |NodeBody::StaticDeclaration(..) => Err(self.ast.error(
+                        | NodeBody::StaticDeclaration(..) => Err(self.ast.error(
                             "Not allowed to assign to constant value",
                             "Assignment to constant value",
                             vec![node.id],
@@ -60,7 +60,7 @@ impl<'a> Checker<'a> {
                     let mut lhs_tp = &lhs_node.tp.as_ref().unwrap().tp;
                     if let Some(path) = path {
                         for path_field in path {
-                            if let NodeType::Struct(fields) = &lhs_tp {
+                            if let NodeType::Struct { fields } = &lhs_tp {
                                 let mut tp = None;
                                 for (field, field_tp) in fields {
                                     if path_field == field {
@@ -80,7 +80,7 @@ impl<'a> Checker<'a> {
                                             ),
                                             "",
                                             vec![node.id],
-                                        ))
+                                        ));
                                     }
                                 }
                             } else {
@@ -93,7 +93,7 @@ impl<'a> Checker<'a> {
                         Ok(())
                     } else {
                         Err(self.ast.error(
-                            &format!("Types for left and right hand side of assignment do not match ({:?} != {:?})",                                 lhs_tp, rhs_tp
+                            &format!("Types for left and right hand side of assignment do not match ({:?} != {:?})", lhs_tp, rhs_tp
                             ),
                             "Both sides of an assignment must have the same type",
                             vec![self.ast.get_node(*rhs).parent_id.unwrap(), *rhs],
@@ -128,9 +128,9 @@ impl<'a> Checker<'a> {
                 TypeDeclaration(_, _, value, ..) => {
                     let lhs = node.tp.as_ref().unwrap();
                     let rhs = self.ast.get_node(*value).tp.as_ref().unwrap();
-                    if let Type(fields_tp) = &lhs.tp {
-                        if let Fn(_, ret_tp) = &rhs.tp {
-                            if fields_tp == ret_tp {
+                    if let Type { tp } = &lhs.tp {
+                        if let Fn { returns, .. } = &rhs.tp {
+                            if tp == returns {
                                 return Ok(());
                             } else {
                                 println!("{:?} != {:?}", lhs.tp, rhs.tp);
@@ -142,7 +142,7 @@ impl<'a> Checker<'a> {
                 }
 
                 ConstDeclaration(_, _, value)
-                | StaticDeclaration(_, _, value)=> {
+                | StaticDeclaration(_, _, value) => {
                     let lhs = node.tp.as_ref().unwrap();
                     let rhs = self.ast.get_node(*value).tp.as_ref().unwrap();
                     if lhs.tp == rhs.tp {
@@ -160,45 +160,33 @@ impl<'a> Checker<'a> {
                 }
                 Return(func, ret_value) => {
                     let func = self.ast.get_node(*func).tp.as_ref().unwrap();
-                    match &func.tp {
-                        Fn(_, func_ret) => match &**func_ret {
-                            NodeType::Void => {
-                                if let Some(ret_id) = ret_value {
-                                    Err(self.ast.error(
-                                        "Return value should be of type void.",
-                                        "Not allowed to return a value from here",
-                                        vec![*ret_id],
-                                    ))
-                                } else {
-                                    Ok(())
-                                }
+                    match (&func.tp, ret_value) {
+                        (Fn { returns: box NodeType::Void, .. }, None) => Ok(()),
+                        (Fn { returns: box NodeType::Void, .. }, Some(ret_id)) =>
+                            Err(self.ast.error(
+                                "Return value should be of type void.",
+                                "Not allowed to return a value from here",
+                                vec![*ret_id],
+                            )),
+                        (Fn { .. }, None) =>
+                            Err(self.ast.error(
+                                "Return value can not be of type void",
+                                "A value must be provided when returning from here",
+                                vec![node.id],
+                            )),
+                        (Fn { returns, .. }, Some(ret_id)) => {
+                            let ret = self.ast.get_node(*ret_id).tp.as_ref().unwrap();
+                            if ret.tp == **returns {
+                                Ok(())
+                            } else {
+                                Err(self.ast.error(
+                                    &format!("Return statement does not return the right type, {:?} expected, {:?} provided", func.tp, ret.tp),
+                                    "Wrong return type for function",
+                                    vec![*ret_id],
+                                ))
                             }
-                            _ => {
-                                if let Some(ret_id) = ret_value {
-                                    let ret = self.ast.get_node(*ret_id).tp.as_ref().unwrap();
-                                    if let NodeType::Fn(_, func_ret_tp) = &func.tp {
-                                        if ret.tp == **func_ret_tp {
-                                            Ok(())
-                                        } else {
-                                            Err(self.ast.error(
-                                                &format!("Return statement does not return the right type, {:?} expected, {:?} provided", func.tp, ret.tp),
-                                                "Wrong return type for function",
-                                                vec![*ret_id],
-                                            ))
-                                        }
-                                    } else {
-                                        unimplemented!();
-                                    }
-                                } else {
-                                    Err(self.ast.error(
-                                        "Return value can not be of type void",
-                                        "A value must be provided when returning from here",
-                                        vec![node.id],
-                                    ))
-                                }
-                            }
-                        },
-                        _ => unreachable!(),
+                        }
+                        _ => unreachable!()
                     }
                 }
                 Call(func, args) => {
@@ -208,7 +196,7 @@ impl<'a> Checker<'a> {
                         .map(|id| self.ast.get_node(*id).tp.as_ref().unwrap().tp.clone())
                         .collect();
                     let call = &match func {
-                        Fn(_, ret) | Type(ret) => Fn(args, ret.clone()),
+                        Fn { returns, .. } | Type { tp: returns } => Fn { args, returns: returns.clone() },
                         _ => unreachable!(),
                     };
                     self.fits(node, func, call)?;
@@ -233,7 +221,7 @@ impl<'a> Checker<'a> {
         use NodeType::*;
         match (&hole, &shape) {
             (&Any, &shape) if shape != &Void => Ok(()),
-            (&Type(fields), &Fn(shape_args, shape_ret)) => {
+            (&Type{tp: fields}, &Fn{ args: shape_args, returns: shape_ret}) => {
                 if shape_args.len() > 0 {
                     let nodes = node.body.children().map(|id| *id).collect();
                     Err(self.ast.error(
@@ -251,7 +239,7 @@ impl<'a> Checker<'a> {
                     Ok(())
                 }
             }
-            (&Fn(hole_args, hole_ret), &Fn(shape_args, shape_ret)) => {
+            (&Fn{args: hole_args, returns: hole_ret}, &Fn{args: shape_args, returns: shape_ret}) => {
                 self.fits(node, &*hole_ret, &*shape_ret)?;
                 if hole_args.len() < shape_args.len() {
                     let skip = hole_args.len();
@@ -265,15 +253,15 @@ impl<'a> Checker<'a> {
                         nodes,
                     ))
                 } else if hole_args.len() > shape_args.len() {
-                        let nodes = node.body.children().map(|id| *id).collect();
-                        Err(self.ast.error(
-                            &format!(
-                                "wrong number of arguments provided to function, {} expected, {} provided",
-                                hole_args.len(), shape_args.len()
-                            ),
-                            "Too few arguments",
-                            nodes,
-                        ))
+                    let nodes = node.body.children().map(|id| *id).collect();
+                    Err(self.ast.error(
+                        &format!(
+                            "wrong number of arguments provided to function, {} expected, {} provided",
+                            hole_args.len(), shape_args.len()
+                        ),
+                        "Too few arguments",
+                        nodes,
+                    ))
                 } else {
                     let mut vararg = None;
                     let arg_node_ids = node.body.children().map(|id| *id).collect::<Vec<NodeID>>();
@@ -282,11 +270,11 @@ impl<'a> Checker<'a> {
                             decl_arg
                         } else {
                             match &hole_args[i] {
-                                VarArg(tp) => {
-                                    vararg = Some(tp);
-                                    tp
+                                VarArg{args} => {
+                                    vararg = Some(args);
+                                    args
                                 }
-                                decl_arg => decl_arg,
+                                args => args,
                             }
                         };
 

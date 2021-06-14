@@ -383,7 +383,7 @@ impl<I> Parser<I>
         use TokenType::*;
         let token = self.next_token(node)?;
         let tp = match token {
-            Name(name) => match name.as_ref() {
+            Name(ident) => match ident.as_ref() {
                 "int" => NodeType::Int,
                 "float" => NodeType::Float,
                 "string" => NodeType::String,
@@ -414,9 +414,9 @@ impl<I> Parser<I>
                         self.next_token(node)?;
                         ret = self.do_type(node)?;
                     }
-                    NodeType::Fn(args, Box::new(ret))
+                    NodeType::Fn{args, returns: Box::new(ret)}
                 }
-                _ => NodeType::Unknown(name),
+                _ => NodeType::Unknown{ ident },
             },
             _ => unimplemented!(),
         };
@@ -430,7 +430,7 @@ impl<I> Parser<I>
             NodeType::Bool => NodeValue::Bool(false),
             NodeType::Float => NodeValue::Float(0.0),
             NodeType::String => NodeValue::String("".into()),
-            NodeType::Struct(fields) => NodeValue::Struct(
+            NodeType::Struct{fields} => NodeValue::Struct(
                 fields
                     .iter()
                     .map(|(name, tp)| {
@@ -442,9 +442,9 @@ impl<I> Parser<I>
                     })
                     .collect(),
             ),
-            NodeType::Unknown(name) => {
+            NodeType::Unknown{ident} => {
                 linked = false;
-                NodeValue::Unlinked(name.clone())
+                NodeValue::Unlinked(ident.clone())
             }
             _ => unimplemented!(),
         };
@@ -475,7 +475,7 @@ impl<I> Parser<I>
             }
         }
 
-        let inner_tp = NodeType::Struct(fields);
+        let inner_tp = NodeType::Struct{fields};
         let known_type;
         let mut default_value = None;
         let constructor_id = {
@@ -521,7 +521,7 @@ impl<I> Parser<I>
             }
         };
 
-        let tp = NodeType::Type(Box::new(inner_tp));
+        let tp = NodeType::Type{ tp: Box::new(inner_tp)};
         let variable = NodeBody::TypeDeclaration(ident.into(), tp, constructor_id, default_value);
         if known_type {
             let node_id = self.add_node(node, variable);
