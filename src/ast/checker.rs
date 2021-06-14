@@ -20,17 +20,17 @@ impl<'a> Checker<'a> {
         if node.tp.is_some() {
             match &node.body {
                 Empty
-                | Break(..)
-                | Comment(..)
-                | ConstValue(..)
-                | PrefixOp(..)
-                | Block(..)
-                | Loop(..)
-                | Expression(..)
-                | VariableValue(..)
-                | ProcedureDeclaration(..)
-                | Import(..) => Ok(()),
-                Op(op, lhs, rhs) => {
+                | Break{..}
+                | Comment{..}
+                | ConstValue{..}
+                | PrefixOp{..}
+                | Block{..}
+                | Loop{..}
+                | Expression{..}
+                | VariableValue{..}
+                | ProcedureDeclaration{..}
+                | Import{..} => Ok(()),
+                Op{op, lhs, rhs} => {
                     let lhs_tp = self.ast.get_node(*lhs).tp.as_ref().unwrap();
                     let rhs_tp = self.ast.get_node(*rhs).tp.as_ref().unwrap();
                     if lhs_tp.tp == rhs_tp.tp {
@@ -46,21 +46,21 @@ impl<'a> Checker<'a> {
                         ))
                     }
                 }
-                VariableAssignment(lhs, path, rhs) => {
-                    let lhs_node = self.ast.get_node(*lhs);
-                    match lhs_node.body {
-                        NodeBody::ConstDeclaration(..)
-                        | NodeBody::StaticDeclaration(..) => Err(self.ast.error(
+                VariableAssignment{variable, path, expr} => {
+                    let variable_node = self.ast.get_node(*variable);
+                    match variable_node.body {
+                        NodeBody::ConstDeclaration{..}
+                        | NodeBody::StaticDeclaration{..} => Err(self.ast.error(
                             "Not allowed to assign to constant value",
                             "Assignment to constant value",
                             vec![node.id],
                         ))?,
                         _ => (),
                     }
-                    let mut lhs_tp = &lhs_node.tp.as_ref().unwrap().tp;
+                    let mut variable_tp = &variable_node.tp.as_ref().unwrap().tp;
                     if let Some(path) = path {
                         for path_field in path {
-                            if let NodeType::Struct { fields } = &lhs_tp {
+                            if let NodeType::Struct { fields } = &variable_tp {
                                 let mut tp = None;
                                 for (field, field_tp) in fields {
                                     if path_field == field {
@@ -70,7 +70,7 @@ impl<'a> Checker<'a> {
                                 }
                                 match tp {
                                     Some(tp) => {
-                                        lhs_tp = tp;
+                                        variable_tp = tp;
                                     }
                                     None => {
                                         return Err(self.ast.error(
@@ -88,34 +88,34 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    let rhs_tp = &self.ast.get_node(*rhs).tp.as_ref().unwrap().tp;
-                    if lhs_tp == rhs_tp {
+                    let expr_tp = &self.ast.get_node(*expr).tp.as_ref().unwrap().tp;
+                    if variable_tp == expr_tp {
                         Ok(())
                     } else {
                         Err(self.ast.error(
-                            &format!("Types for left and right hand side of assignment do not match ({:?} != {:?})", lhs_tp, rhs_tp
+                            &format!("Types for left and right hand side of assignment do not match ({:?} != {:?})", variable_tp, expr_tp
                             ),
                             "Both sides of an assignment must have the same type",
-                            vec![self.ast.get_node(*rhs).parent_id.unwrap(), *rhs],
+                            vec![self.ast.get_node(*expr).parent_id.unwrap(), *expr],
                         ))
                     }
                 }
-                If(statement, _) => {
-                    let statement_tp = self.ast.get_node(*statement).tp.as_ref().unwrap();
+                If{ condition,..} => {
+                    let statement_tp = self.ast.get_node(*condition).tp.as_ref().unwrap();
                     if statement_tp.tp == Bool {
                         Ok(())
                     } else {
                         Err(self.ast.error(
                             &format!("The condition of an if statement must be of type Bool, ({:?}) was found", statement_tp.tp),
                             "Both sides of an assignment must have the same type",
-                            vec![*statement],
+                            vec![*condition],
                         ))
                     }
                 }
-                VariableDeclaration(_, _, value) => {
-                    if let Some(value) = value {
+                VariableDeclaration{ expr, .. } => {
+                    if let Some(expr) = expr {
                         let lhs = node.tp.as_ref().unwrap();
-                        let rhs = self.ast.get_node(*value).tp.as_ref().unwrap();
+                        let rhs = self.ast.get_node(*expr).tp.as_ref().unwrap();
                         if lhs.tp == rhs.tp {
                             Ok(())
                         } else {
@@ -125,9 +125,9 @@ impl<'a> Checker<'a> {
                         Ok(())
                     }
                 }
-                TypeDeclaration(_, _, value, ..) => {
+                TypeDeclaration{constructor, ..} => {
                     let lhs = node.tp.as_ref().unwrap();
-                    let rhs = self.ast.get_node(*value).tp.as_ref().unwrap();
+                    let rhs = self.ast.get_node(*constructor).tp.as_ref().unwrap();
                     if let Type { tp } = &lhs.tp {
                         if let Fn { returns, .. } = &rhs.tp {
                             if tp == returns {
@@ -141,10 +141,10 @@ impl<'a> Checker<'a> {
                     unreachable!()
                 }
 
-                ConstDeclaration(_, _, value)
-                | StaticDeclaration(_, _, value) => {
+                ConstDeclaration{ expr , ..}
+                | StaticDeclaration{expr, ..} => {
                     let lhs = node.tp.as_ref().unwrap();
-                    let rhs = self.ast.get_node(*value).tp.as_ref().unwrap();
+                    let rhs = self.ast.get_node(*expr).tp.as_ref().unwrap();
                     if lhs.tp == rhs.tp {
                         Ok(())
                     } else {
@@ -154,13 +154,13 @@ impl<'a> Checker<'a> {
                                 lhs.tp, rhs.tp
                             ),
                             "",
-                            vec![*value, self.ast.get_node(*value).parent_id.unwrap()],
+                            vec![*expr, self.ast.get_node(*expr).parent_id.unwrap()],
                         ))
                     }
                 }
-                Return(func, ret_value) => {
+                Return{func, expr } => {
                     let func = self.ast.get_node(*func).tp.as_ref().unwrap();
-                    match (&func.tp, ret_value) {
+                    match (&func.tp, expr) {
                         (Fn { returns: box NodeType::Void, .. }, None) => Ok(()),
                         (Fn { returns: box NodeType::Void, .. }, Some(ret_id)) =>
                             Err(self.ast.error(
@@ -189,7 +189,7 @@ impl<'a> Checker<'a> {
                         _ => unreachable!()
                     }
                 }
-                Call(func, args) => {
+                Call{func, args} => {
                     let func = &self.ast.get_node(*func).tp.as_ref().unwrap().tp;
                     let args = args
                         .iter()
@@ -202,7 +202,7 @@ impl<'a> Checker<'a> {
                     self.fits(node, func, call)?;
                     Ok(())
                 }
-                Unlinked(..) => Err(self.ast.error(
+                Unlinked{..} => Err(self.ast.error(
                     "Encountered a node with unlinked type",
                     "expression with unlinked type",
                     vec![node.id],

@@ -116,7 +116,7 @@ impl<'a> Typer<'a> {
         use super::NodeTypeSource::*;
         let tp = match &node.body {
             ConstValue(value) => Some(InferredType::new(self.node_value_type(value), Declared)),
-            Op(op, lhs, rhs) => {
+            Op{op, lhs, rhs} => {
                 use ArithmeticOP::*;
                 match op {
                     GEq | LEq | Eq => InferredType::maybe(Some(Bool), Declared),
@@ -128,7 +128,7 @@ impl<'a> Typer<'a> {
                     }
                 }
             }
-            ProcedureDeclaration(args, returns, _) => {
+            ProcedureDeclaration{args, returns, ..} => {
                 let arg_types: Vec<Option<NodeType>> =
                     args.iter().map(|id| self.get_type(id)).collect();
                 let args_inferred = arg_types.iter().all(|tp| tp.is_some());
@@ -147,21 +147,21 @@ impl<'a> Typer<'a> {
                     None
                 }
             }
-            PrefixOp(_, node_id) => InferredType::maybe(self.get_type(node_id), Value),
-            VariableValue(value, path) => {
-                if let Some(value_tp) = self.get_type(value) {
+            PrefixOp{rhs, .. } => InferredType::maybe(self.get_type(rhs), Value),
+            VariableValue{ variable, path} => {
+                if let Some(value_tp) = self.get_type(variable) {
                     let mut value_tp = value_tp;
                     if let NodeType::Type{..} = value_tp {
-                        let body = &self.ast.get_node(*value).body;
+                        let body = &self.ast.get_node(*variable).body;
                         match body {
-                            NodeBody::ConstDeclaration(_, _, constructor)
-                            | NodeBody::StaticDeclaration(_, _, constructor)=> {
-                                value_tp = self.get_type(constructor).unwrap();
+                            NodeBody::ConstDeclaration{expr, ..}
+                            | NodeBody::StaticDeclaration{expr, ..}=> {
+                                value_tp = self.get_type(expr).unwrap();
                             }
-                            NodeBody::TypeDeclaration(name, ..) => {
+                            NodeBody::TypeDeclaration{ ident, ..} => {
                                 Err(self.ast.error(
-                                        "When instantiating a type, use the default instantiation function by adding ()",
-                                    &format!("Replace with {}()", name),
+                                    "When instantiating a type, use the default instantiation function by adding ()",
+                                    &format!("Replace with {}()", ident),
                                     vec![node.id],
                                 ))?
                             }
@@ -202,47 +202,47 @@ impl<'a> Typer<'a> {
                     None => None
                 }
             },
-            VariableDeclaration(_, declared, value) => {
-                if let Some(declared) = declared {
+            VariableDeclaration{ tp, expr, ..} => {
+                if let Some(tp) = tp {
                     InferredType::maybe(
-                        self.get_type_from_declaration(&node.id, declared)?,
+                        self.get_type_from_declaration(&node.id, tp)?,
                         Declared,
                     )
-                } else if let Some(value) = value {
-                    self.not_void(value)?;
-                    InferredType::maybe(self.get_type(value), Value)
+                } else if let Some(expr) = expr {
+                    self.not_void(expr)?;
+                    InferredType::maybe(self.get_type(expr), Value)
                 } else {
                     None
                 }
             }
-            ConstDeclaration(_, declared, value)
-            | StaticDeclaration(_, declared, value) => {
-                if let Some(declared) = declared {
+            ConstDeclaration{tp, expr, ..}
+            | StaticDeclaration{ tp, expr,.. } => {
+                if let Some(tp) = tp {
                     InferredType::maybe(
-                        self.get_type_from_declaration(&node.id, declared)?,
+                        self.get_type_from_declaration(&node.id, tp)?,
                         Declared,
                     )
-                } else if let Some(tp) = self.get_type(value) {
-                    self.not_void(value)?;
-                    InferredType::maybe(Some(tp), Value)
+                } else if let Some(expr_tp) = self.get_type(expr) {
+                    self.not_void(expr)?;
+                    InferredType::maybe(Some(expr_tp), Value)
                 } else {
                     None
                 }
             }
-            TypeDeclaration(_, declared, ..) => InferredType::maybe(
-                self.get_type_from_declaration(&node.id, declared)?,
+            TypeDeclaration{tp, ..}=> InferredType::maybe(
+                self.get_type_from_declaration(&node.id, tp)?,
                 Declared,
             ),
-            Import(_, value) => {
-                if let Some(tp) = self.get_type(value) {
+            Import{def, ..}=> {
+                if let Some(tp) = self.get_type(def) {
                     InferredType::maybe(Some(tp), Value)
                 } else {
                     None
                 }
             }
-            VariableAssignment(..) => InferredType::maybe(Some(Void), Declared),
-            Call(var_id, _) => {
-                let var = self.ast.get_node(*var_id);
+            VariableAssignment{..} => InferredType::maybe(Some(Void), Declared),
+            Call{ func, ..} => {
+                let var = self.ast.get_node(*func);
                 if let Some(tp) = &var.tp {
                     match &tp.tp {
                         Fn{returns, ..} |
@@ -255,14 +255,14 @@ impl<'a> Typer<'a> {
                                 var
                             ),
                             "",
-                            vec![node.id, *var_id],
+                            vec![node.id, *func],
                         ))?
                     }
                 } else {
                     None
                 }
             }
-            Empty | Break(..) | Return(..) | Block(..) | If(..) | Loop(..) | Comment(..) => {
+            Empty | Break{..} | Return{..} | Block{..} | If{..} | Loop{..} | Comment(..) => {
                 InferredType::maybe(Some(Void), Declared)
             }
             Unlinked(_) => unreachable!(),

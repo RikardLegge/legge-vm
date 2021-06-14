@@ -427,22 +427,22 @@ impl<'a> Generator<'a> {
         use crate::ast::NodeBody::*;
         let node = self.ast.get_node(node_id);
         match &node.body {
-            Op(op, expr1, expr2) => self.ev_operation(node_id, *op, *expr1, *expr2),
-            PrefixOp(op, expr1) => self.ev_prefix_operation(node_id, *op, *expr1),
-            Block(children) => self.ev_block(node_id, children),
-            Call(proc_id, args) => self.ev_call(node_id, *proc_id, args, true),
-            VariableValue(val, field) => self.ev_variable_value(node_id, *val, field),
-            ConstDeclaration(_, _, expr)
-            | StaticDeclaration(_, _, expr)
-            | TypeDeclaration(_, _, expr, _)
-            | Import(_, expr) => self.ev_declaration(node_id, Some(*expr)),
-            VariableDeclaration(_, _, expr) => self.ev_declaration(node_id, *expr),
-            VariableAssignment(var, path, value) => self.ev_assignment(node_id, *var, path, *value),
-            ProcedureDeclaration(args, _, body_id) => self.ev_procedure(node_id, args, *body_id),
-            Return(proc_id, ret_id) => self.ev_return(node_id, *proc_id, *ret_id),
-            If(condition, body) => self.ev_if(node_id, *condition, *body),
-            Loop(body) => self.ev_loop(node_id, *body),
-            Break(loop_id) => self.ev_break(node_id, *loop_id),
+            Op{op, lhs, rhs} => self.ev_operation(node_id, *op, *lhs, *rhs),
+            PrefixOp{op, rhs } => self.ev_prefix_operation(node_id, *op, *rhs),
+            Block{body} => self.ev_block(node_id, body),
+            Call{func, args} => self.ev_call(node_id, *func, args, true),
+            VariableValue{variable, path} => self.ev_variable_value(node_id, *variable, path),
+            ConstDeclaration{expr, ..}
+            | StaticDeclaration{expr, ..}
+            | TypeDeclaration{constructor: expr, ..}
+            | Import{def: expr, ..}=> self.ev_declaration(node_id, Some(*expr)),
+            VariableDeclaration{expr, ..} => self.ev_declaration(node_id, *expr),
+            VariableAssignment{variable, path, expr} => self.ev_assignment(node_id, *variable, path, *expr),
+            ProcedureDeclaration{args, body, ..} => self.ev_procedure(node_id, args, *body),
+            Return{func, expr} => self.ev_return(node_id, *func, *expr),
+            If{condition, body} => self.ev_if(node_id, *condition, *body),
+            Loop{body} => self.ev_loop(node_id, *body),
+            Break{r#loop} => self.ev_break(node_id, *r#loop),
             Comment(_) | Empty => StackUsage::zero(),
             _ => panic!("Unsupported node here {:?}", node),
         }
@@ -466,8 +466,8 @@ impl<'a> Generator<'a> {
         self.with_context(node_id, ContextType::Loop { break_inst }, |bc| {
             let body_node = bc.ast.get_node(body_id);
             match &body_node.body {
-                NodeBody::Block(children) => {
-                    let usage = bc.ev_block(body_id, children);
+                NodeBody::Block{body} => {
+                    let usage = bc.ev_block(body_id, body);
                     assert_eq!(usage.pushed, usage.popped);
                 }
                 _ => panic!("The body of a loop statement must be a scope"),
@@ -491,8 +491,8 @@ impl<'a> Generator<'a> {
         let start = self.op_index();
         let body_node = self.ast.get_node(body_id);
         match &body_node.body {
-            NodeBody::Block(children) => {
-                let usage = self.ev_block(body_id, children);
+            NodeBody::Block{body} => {
+                let usage = self.ev_block(body_id, body);
                 assert_eq!(usage.pushed, usage.popped);
             }
             _ => panic!("The body of an if statement must be a Block"),
@@ -566,8 +566,8 @@ impl<'a> Generator<'a> {
             }
             let body_node = bc.ast.get_node(body_id);
             match &body_node.body {
-                NodeBody::Block(children) => {
-                    let usage = bc.ev_block(body_id, children);
+                NodeBody::Block{body} => {
+                    let usage = bc.ev_block(body_id, body);
                     assert_eq!(StackUsage::zero(), usage);
                 }
                 _ => panic!("The body of a procedure statement must be a Block"),
@@ -699,11 +699,11 @@ impl<'a> Generator<'a> {
                 let node = bc.ast.get_node(*child_id);
                 if node.has_closure_references() {
                     match &node.body {
-                        NodeBody::VariableDeclaration(..)
-                        | NodeBody::ConstDeclaration(..)
-                        | NodeBody::TypeDeclaration(..)
-                        | NodeBody::StaticDeclaration(..)
-                        | NodeBody::Import(..) => {
+                        NodeBody::VariableDeclaration{..}
+                        | NodeBody::ConstDeclaration{..}
+                        | NodeBody::TypeDeclaration{..}
+                        | NodeBody::StaticDeclaration{..}
+                        | NodeBody::Import{..} => {
                             bc.add_var(*child_id);
                             bc.add_op(*child_id, OP::PushToClosure(Value::Unset));
                         }
@@ -711,11 +711,11 @@ impl<'a> Generator<'a> {
                     }
                 } else {
                     match &node.body {
-                        NodeBody::VariableDeclaration(..)
-                        | NodeBody::ConstDeclaration(..)
-                        | NodeBody::TypeDeclaration(..)
-                        | NodeBody::StaticDeclaration(..)
-                        | NodeBody::Import(..) => {
+                        NodeBody::VariableDeclaration{..}
+                        | NodeBody::ConstDeclaration{..}
+                        | NodeBody::TypeDeclaration{..}
+                        | NodeBody::StaticDeclaration{..}
+                        | NodeBody::Import{..} => {
                             bc.add_var(*child_id);
                             bc.add_op(*child_id, OP::PushImmediate(Value::Unset));
                         }
@@ -790,12 +790,12 @@ impl<'a> Generator<'a> {
         use crate::ast::NodeBody::*;
         let expr = self.ast.get_node(expr_id);
         match &expr.body {
-            Op(op, expr1, expr2) => self.ev_operation(expr_id, *op, *expr1, *expr2),
-            PrefixOp(op, expr) => self.ev_prefix_operation(expr_id, *op, *expr),
+            Op{op, lhs, rhs} => self.ev_operation(expr_id, *op, *lhs, *rhs),
+            PrefixOp{op, rhs}=> self.ev_prefix_operation(expr_id, *op, *rhs),
             ConstValue(value) => self.ev_const(expr_id, value),
-            ProcedureDeclaration(args, _, body_id) => self.ev_procedure(expr_id, args, *body_id),
-            VariableValue(value, field) => self.ev_variable_value(expr_id, *value, field),
-            Call(proc_id, args) => self.ev_call(expr_id, *proc_id, args, false),
+            ProcedureDeclaration{args, body, ..} => self.ev_procedure(expr_id, args, *body),
+            VariableValue{variable, path}=> self.ev_variable_value(expr_id, *variable, path),
+            Call{func, args} => self.ev_call(expr_id, *func, args, false),
             Expression(value) => self.ev_expression(*value),
             _ => panic!("Unsupported node {:?} used as expression", expr),
         }

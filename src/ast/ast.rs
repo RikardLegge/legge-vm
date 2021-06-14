@@ -27,7 +27,7 @@ pub struct Node {
 impl Node {
     pub fn is_closure_boundary(&self) -> bool {
         match self.body {
-            NodeBody::ProcedureDeclaration(..) => true,
+            NodeBody::ProcedureDeclaration{..} => true,
             _ => false,
         }
     }
@@ -137,25 +137,25 @@ pub enum NodeValue {
 pub enum NodeBody {
     Empty,
     ConstValue(NodeValue),
-    Op(ArithmeticOP, NodeID, NodeID),
-    ProcedureDeclaration(Vec<NodeID>, Option<NodeType>, NodeID),
-    PrefixOp(ArithmeticOP, NodeID),
-    Block(Vec<NodeID>),
-    If(NodeID, NodeID),
-    Loop(NodeID),
+    Op{ op: ArithmeticOP, lhs: NodeID, rhs: NodeID},
+    ProcedureDeclaration{ args: Vec<NodeID>, returns: Option<NodeType>, body: NodeID},
+    PrefixOp{ op:ArithmeticOP, rhs: NodeID},
+    Block{body: Vec<NodeID>},
+    If{ condition: NodeID, body: NodeID},
+    Loop{body: NodeID},
     Expression(NodeID),
     Comment(String),
-    Import(String, NodeID),
+    Import{ident: String, def: NodeID},
 
-    VariableDeclaration(String, Option<NodeType>, Option<NodeID>),
-    ConstDeclaration(String, Option<NodeType>, NodeID),
-    StaticDeclaration(String, Option<NodeType>, NodeID),
-    TypeDeclaration(String, NodeType, NodeID, Option<NodeValue>),
-    VariableAssignment(NodeID, Option<Vec<String>>, NodeID),
-    VariableValue(NodeID, Option<Vec<String>>),
-    Return(NodeID, Option<NodeID>),
-    Break(NodeID),
-    Call(NodeID, Vec<NodeID>),
+    VariableDeclaration{ident: String, tp: Option<NodeType>, expr: Option<NodeID>},
+    ConstDeclaration{ident: String, tp: Option<NodeType>, expr: NodeID},
+    StaticDeclaration{ident: String, tp: Option<NodeType>, expr: NodeID},
+    TypeDeclaration{ident: String, tp: NodeType, constructor: NodeID, default_value: Option<NodeValue>},
+    VariableAssignment{variable: NodeID, path: Option<Vec<String>>, expr: NodeID},
+    VariableValue{variable: NodeID, path: Option<Vec<String>>},
+    Return{func: NodeID, expr: Option<NodeID>},
+    Break{r#loop: NodeID},
+    Call{func: NodeID, args: Vec<NodeID>},
 
     Unlinked(UnlinkedNodeBody),
 }
@@ -172,14 +172,14 @@ impl NodeBody {
 
 #[derive(Debug, Clone)]
 pub enum UnlinkedNodeBody {
-    VariableAssignment(String, Option<Vec<String>>, NodeID),
+    VariableAssignment{ident: String, path: Option<Vec<String>>, expr: NodeID},
     Value(NodeValue),
-    VariableValue(String, Option<Vec<String>>),
-    Type(Box<NodeBody>, Option<NodeID>),
-    Return(Option<NodeID>),
+    VariableValue{ident: String, path: Option<Vec<String>>},
+    Type{def: Box<NodeBody>, expr: Option<NodeID>},
+    Return{expr: Option<NodeID>},
     Break,
-    Call(String, Vec<NodeID>),
-    ImportValue(String),
+    Call{ident: String, args: Vec<NodeID>},
+    ImportValue{ident: String},
 }
 
 impl UnlinkedNodeBody {
@@ -291,7 +291,7 @@ impl Ast {
     pub fn closest_fn(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
-                NodeBody::ProcedureDeclaration(..) => Some(node.id),
+                NodeBody::ProcedureDeclaration{..} => Some(node.id),
                 _ => None,
             })
         })
@@ -301,7 +301,7 @@ impl Ast {
     pub fn closest_loop(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
-                NodeBody::Loop(..) => Some(node.id),
+                NodeBody::Loop{..} => Some(node.id),
                 _ => None,
             })
         })
@@ -319,11 +319,11 @@ impl Ast {
             for &child_id in node.body.children() {
                 let child = self.get_node(child_id);
                 match &child.body {
-                    VariableDeclaration(ident, ..)
-                    | ConstDeclaration(ident, ..)
-                    | StaticDeclaration(ident, ..)
-                    | TypeDeclaration(ident, ..)
-                    | Import(ident, _) => {
+                    VariableDeclaration{ident, ..}
+                    | ConstDeclaration{ident, ..}
+                    | StaticDeclaration{ident, ..}
+                    | TypeDeclaration{ident, ..}
+                    | Import{ident, ..} => {
                         if ident == target_ident {
                             if let Some(closest_id) = closest_id {
                                 return Err(self.error(
@@ -386,17 +386,17 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
     fn next(&mut self) -> Option<&'a NodeID> {
         use NodeBody::*;
         let option = match self.body {
-            Op(_, lhs, rhs) => match self.index {
+            Op{lhs, rhs, .. } => match self.index {
                 0 => Some(lhs),
                 1 => Some(rhs),
                 _ => None,
             },
-            If(cond, body) => match self.index {
-                0 => Some(cond),
+            If{condition, body} => match self.index {
+                0 => Some(condition),
                 1 => Some(body),
                 _ => None,
             },
-            ProcedureDeclaration(args, _, body) => {
+            ProcedureDeclaration{args,  body, ..} => {
                 if self.index < args.len() {
                     args.get(self.index)
                 } else if self.index == args.len() {
@@ -405,25 +405,25 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
                     None
                 }
             }
-            Block(children) => children.get(self.index),
-            Call(_, args) => args.get(self.index),
+            Block{body} => body.get(self.index),
+            Call{args, ..} => args.get(self.index),
 
-            Return(_, value) | VariableDeclaration(.., value) => match self.index {
-                0 => value.as_ref(),
+            Return{ expr, ..} | VariableDeclaration{ expr, ..}=> match self.index {
+                0 => expr.as_ref(),
                 _ => None,
             },
-            PrefixOp(_, value)
-            | Loop(value)
+            PrefixOp{ rhs: value, ..}
+            | Loop{body: value}
             | Expression(value)
-            | TypeDeclaration(_, _, value, ..)
-            | ConstDeclaration(.., value)
-            | StaticDeclaration(.., value)
-            | VariableAssignment(_, _, value)
-            | Import(_, value) => match self.index {
+            | TypeDeclaration{constructor: value, ..}
+            | ConstDeclaration{expr: value, ..}
+            | StaticDeclaration{expr: value, .. }
+            | VariableAssignment{expr: value, ..}
+            | Import{def: value, ..} => match self.index {
                 0 => Some(value),
                 _ => None,
             },
-            VariableValue(_, _) | Comment(_) | Break(_) | ConstValue(_) | Empty => None,
+            VariableValue{..} | Comment{..} | Break{..} | ConstValue{..} | Empty => None,
             Unlinked(body) => {
                 if let None = self.unlinked {
                     self.unlinked = Some(body.children());
@@ -452,20 +452,20 @@ impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
     fn next(&mut self) -> Option<&'a NodeID> {
         use UnlinkedNodeBody::*;
         let option = match self.body {
-            VariableAssignment(_, _, value) => match self.index {
-                0 => Some(value),
+            VariableAssignment{ expr, ..}=> match self.index {
+                0 => Some(expr),
                 _ => None,
             },
-            Return(value) => match self.index {
-                0 => value.as_ref(),
+            Return{expr} => match self.index {
+                0 => expr.as_ref(),
                 _ => None,
             },
-            Type(_, children) => match self.index {
-                0 => children.as_ref(),
+            Type{expr, ..} => match self.index {
+                0 => expr.as_ref(),
                 _ => None,
             },
-            Call(_, args) => args.get(self.index),
-            VariableValue(_, _) | Break | ImportValue(_) | Value(_) => None,
+            Call{args, ..} => args.get(self.index),
+            VariableValue{..} | Break | ImportValue{..} | Value {..}=> None,
         };
         if option.is_some() {
             self.index += 1;
