@@ -6,6 +6,7 @@ mod debug;
 pub mod interpreter;
 pub mod runtime;
 pub mod token;
+pub mod testing;
 
 pub use debug::Timing;
 use crate::ast::Ast;

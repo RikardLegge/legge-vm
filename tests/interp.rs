@@ -1,45 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use leggevm::bytecode::Value;
 use leggevm::bytecode::Value::*;
-use leggevm::{run_code, LogLevel};
-
-fn run_test(code: &str, expected_result: Option<Value>) {
-    let code = format!("import exit;{}", code);
-    let result = Rc::new(RefCell::new(None));
-    let assign_result = result.clone();
-    run_code(code.into(), LogLevel::LogNone, move |v| {
-        *assign_result.borrow_mut() = Some(v);
-    }).expect("code should compile and run");
-    let result = result.borrow();
-    assert_eq!(*result, expected_result);
-}
-
-macro_rules! bc_test_should_fail {
-    ( $name:ident $bc:tt) => {
-        #[test]
-        #[should_panic]
-        fn $name() {
-            run_test(stringify!($bc), None);
-        }
-    };
-}
-
-macro_rules! bc_test {
-    ( $name:ident $bc:tt) => {
-        #[test]
-        fn $name() {
-            run_test(stringify!($bc), None);
-        }
-    };
-    ( $name:ident $bc:tt == $result:expr ) => {
-        #[test]
-        fn $name() {
-            run_test(stringify!($bc), Some($result));
-        }
-    };
-}
+use leggevm::testing::{bc_test, bc_test_should_fail};
 
 bc_test! {test_variable {
     a :: 1;
