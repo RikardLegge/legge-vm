@@ -8,7 +8,7 @@ pub fn ast_from_tokens<I>(iter: I) -> Result<Ast>
     where
         I: Iterator<Item=Token>,
 {
-    Parser::new(iter.peekable()).parse()
+    Parser::new(iter).parse()
 }
 
 #[derive(Debug)]
@@ -26,9 +26,9 @@ impl<I> Parser<I>
     where
         I: Iterator<Item=Token>,
 {
-    fn new(iter: Peekable<I>) -> Self {
+    fn new(iter: I) -> Self {
         let ast = Ast::new();
-        Self { ast, iter }
+        Self { ast, iter: iter.peekable() }
     }
 
     fn parse(mut self) -> Result<Ast> {
@@ -39,11 +39,11 @@ impl<I> Parser<I>
         while self.peek_token().is_ok() {
             let statement = self.do_statement(node.id)?;
             match self.ast.get_node(statement).body {
-                NodeBody::TypeDeclaration{..}
-                | NodeBody::StaticDeclaration{..}
-                | NodeBody::Import{..} => {
+                NodeBody::TypeDeclaration { .. }
+                | NodeBody::StaticDeclaration { .. }
+                | NodeBody::Import { .. } => {
                     static_statements.push(statement)
-                },
+                }
                 _ => {
                     dynamic_statements.push(statement)
                 }
@@ -53,7 +53,7 @@ impl<I> Parser<I>
             static_statements.append(&mut dynamic_statements);
             static_statements
         };
-        self.add_node(node, NodeBody::Block{body: statements});
+        self.add_node(node, NodeBody::Block { body: statements });
         Ok(self.ast)
     }
 
@@ -163,19 +163,19 @@ impl<I> Parser<I>
         use self::NodeBody::*;
 
         match self.ast.get_node(node).body {
-            TypeDeclaration{constructor: expr, ..}
-            | ConstDeclaration{expr, ..}
-            | StaticDeclaration{expr, ..}
-            | VariableDeclaration{expr:Some(expr), ..} => {
+            TypeDeclaration { constructor: expr, .. }
+            | ConstDeclaration { expr, .. }
+            | StaticDeclaration { expr, .. }
+            | VariableDeclaration { expr: Some(expr), .. } => {
                 self.should_terminate_statement(expr)
             }
-            Block{..}
-            | ProcedureDeclaration{..}
-            | If{..}
-            | Loop{..}
-            | Comment{..}
+            Block { .. }
+            | ProcedureDeclaration { .. }
+            | If { .. }
+            | Loop { .. }
+            | Comment { .. }
             | Empty
-            | Unlinked(UnlinkedNodeBody::Type{..}) => false,
+            | Unlinked(UnlinkedNodeBody::Type { .. }) => false,
             _ => true,
         }
     }
@@ -186,11 +186,11 @@ impl<I> Parser<I>
         while *self.peek_token()? != TokenType::RightCurlyBrace {
             let statement = self.do_statement(node.id)?;
             match self.ast.get_node(statement).body {
-                NodeBody::TypeDeclaration{..}
-                | NodeBody::StaticDeclaration{..}
-                | NodeBody::Import{..} => {
+                NodeBody::TypeDeclaration { .. }
+                | NodeBody::StaticDeclaration { .. }
+                | NodeBody::Import { .. } => {
                     static_statements.push(statement)
-                },
+                }
                 _ => {
                     dynamic_statements.push(statement)
                 }
@@ -201,7 +201,7 @@ impl<I> Parser<I>
             static_statements
         };
         self.ensure_next_token(&node, TokenType::RightCurlyBrace)?;
-        Ok(self.add_node(node, NodeBody::Block{body:statements}))
+        Ok(self.add_node(node, NodeBody::Block { body: statements }))
     }
 
     fn do_statement(&mut self, parent_id: NodeID) -> Result {
@@ -301,7 +301,7 @@ impl<I> Parser<I>
         let body_node = self.node(node.id);
         self.ensure_next_token(&body_node, TokenType::LeftCurlyBrace)?;
         let body = self.do_block(body_node)?;
-        Ok(self.add_node(node, NodeBody::If{ condition, body}))
+        Ok(self.add_node(node, NodeBody::If { condition, body }))
     }
 
     fn do_import(&mut self, node: PendingNode) -> Result {
@@ -310,9 +310,9 @@ impl<I> Parser<I>
                 let body_node = self.node(node.id);
                 let def = self.add_node(
                     body_node,
-                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue{ident: ident.clone()}),
+                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue { ident: ident.clone() }),
                 );
-                Ok(self.add_node(node, NodeBody::Import{ident, def }))
+                Ok(self.add_node(node, NodeBody::Import { ident, def }))
             }
             _ => unimplemented!(),
         }
@@ -326,7 +326,7 @@ impl<I> Parser<I>
         let body_node = self.node(node.id);
         self.ensure_next_token(&body_node, TokenType::LeftCurlyBrace)?;
         let body = self.do_block(body_node)?;
-        Ok(self.add_node(node, NodeBody::Loop{body}))
+        Ok(self.add_node(node, NodeBody::Loop { body }))
     }
 
     fn do_break(&mut self, node: PendingNode) -> Result {
@@ -348,7 +348,7 @@ impl<I> Parser<I>
                 let lhs_precedence = Self::op_precedence(op);
                 let rhs_precedence = Self::token_precedence(next_token);
                 if lhs_precedence >= rhs_precedence {
-                    NodeBody::Op{op, lhs, rhs}
+                    NodeBody::Op { op, lhs, rhs }
                 } else {
                     let node = self.node(node.id);
                     let rhs = match self.next_token(&node)? {
@@ -359,14 +359,14 @@ impl<I> Parser<I>
                             vec![node.id],
                         ))?,
                     };
-                    NodeBody::Op{op, lhs, rhs}
+                    NodeBody::Op { op, lhs, rhs }
                 }
             } else {
                 match op {
                     ArithmeticOP::Add | ArithmeticOP::Sub => {
                         // Prefix operation of single node
                         let rhs = self.do_expression(node.id)?;
-                        NodeBody::PrefixOp{op, rhs}
+                        NodeBody::PrefixOp { op, rhs }
                     }
                     _ => Err(self.ast.error(
                         &format!("Can only use prefix operations for addition and subtraction"),
@@ -414,11 +414,15 @@ impl<I> Parser<I>
                         self.next_token(node)?;
                         ret = self.do_type(node)?;
                     }
-                    NodeType::Fn{args, returns: Box::new(ret)}
+                    NodeType::Fn { args, returns: Box::new(ret) }
                 }
-                _ => NodeType::Unknown{ ident },
+                _ => NodeType::Unknown { ident },
             },
-            _ => unimplemented!(),
+            _ => Err(self.ast.error(
+                &format!("Invalid token found when expecting type"),
+                "",
+                vec![node.id],
+            ))?,
         };
         Ok(tp)
     }
@@ -430,7 +434,7 @@ impl<I> Parser<I>
             NodeType::Bool => NodeValue::Bool(false),
             NodeType::Float => NodeValue::Float(0.0),
             NodeType::String => NodeValue::String("".into()),
-            NodeType::Struct{fields} => NodeValue::Struct(
+            NodeType::Struct { fields } => NodeValue::Struct(
                 fields
                     .iter()
                     .map(|(name, tp)| {
@@ -442,7 +446,7 @@ impl<I> Parser<I>
                     })
                     .collect(),
             ),
-            NodeType::Unknown{ident} => {
+            NodeType::Unknown { ident } => {
                 linked = false;
                 NodeValue::Unlinked(ident.clone())
             }
@@ -475,7 +479,7 @@ impl<I> Parser<I>
             }
         }
 
-        let self_tp = NodeType::Struct{fields};
+        let self_tp = NodeType::Struct { fields };
         let known_type;
         let mut default_value = None;
         let constructor = {
@@ -501,35 +505,35 @@ impl<I> Parser<I>
                         }
                     };
 
-                    let ret = NodeBody::Unlinked(UnlinkedNodeBody::Return{expr: Some(value_id)});
+                    let ret = NodeBody::Unlinked(UnlinkedNodeBody::Return { expr: Some(value_id) });
                     self.add_node(node, ret)
                 };
 
-                let body = NodeBody::Block{body: vec![ret_id]};
+                let body = NodeBody::Block { body: vec![ret_id] };
                 self.add_node(node, body)
             };
 
             let constructor =
-                NodeBody::ProcedureDeclaration{args:Vec::new(), returns:Some(self_tp.clone()), body };
+                NodeBody::ProcedureDeclaration { args: Vec::new(), returns: Some(self_tp.clone()), body };
             if known_type {
                 self.add_node(node, constructor)
             } else {
                 self.add_uncomplete_node(
                     node,
-                    UnlinkedNodeBody::Type{def:Box::new(constructor), expr: Some(body)},
+                    UnlinkedNodeBody::Type { def: Box::new(constructor), expr: Some(body) },
                 )
             }
         };
 
-        let tp = NodeType::Type{ tp: Box::new(self_tp)};
-        let variable = NodeBody::TypeDeclaration{ident: ident.into(), tp, constructor, default_value};
+        let tp = NodeType::Type { tp: Box::new(self_tp) };
+        let variable = NodeBody::TypeDeclaration { ident: ident.into(), tp, constructor, default_value };
         if known_type {
             let node_id = self.add_node(node, variable);
             Ok(node_id)
         } else {
             let node_id = self.add_uncomplete_node(
                 node,
-                UnlinkedNodeBody::Type{def: Box::new(variable), expr: Some(constructor)},
+                UnlinkedNodeBody::Type { def: Box::new(variable), expr: Some(constructor) },
             );
             Ok(node_id)
         }
@@ -550,7 +554,7 @@ impl<I> Parser<I>
                         _ => None,
                     };
                     let body =
-                        self.add_node(arg_node, NodeBody::VariableDeclaration{ident, tp, expr: None});
+                        self.add_node(arg_node, NodeBody::VariableDeclaration { ident, tp, expr: None });
                     args.push(body)
                 }
                 _ => Err(self.ast.error(
@@ -591,7 +595,7 @@ impl<I> Parser<I>
                 match last.body {
                     // Ignore comments when searching for last statement
                     NodeBody::Comment(..) => continue,
-                    NodeBody::Unlinked(UnlinkedNodeBody::Return{..}) | NodeBody::Return{..} => {
+                    NodeBody::Unlinked(UnlinkedNodeBody::Return { .. }) | NodeBody::Return { .. } => {
                         has_return = true;
                         break;
                     }
@@ -602,9 +606,9 @@ impl<I> Parser<I>
         };
         if !has_return {
             let ret_node = self.node(body);
-            let ret_node = self.add_node(ret_node, NodeBody::Return{func: node.id, expr: None});
+            let ret_node = self.add_node(ret_node, NodeBody::Return { func: node.id, expr: None });
             match &mut self.ast.get_node_mut(body).body {
-                NodeBody::Block{body: children} => {
+                NodeBody::Block { body: children } => {
                     children.push(ret_node);
                 }
                 _ => unreachable!(),
@@ -612,7 +616,7 @@ impl<I> Parser<I>
         }
         Ok(self.add_node(
             node,
-            NodeBody::ProcedureDeclaration{ args, returns, body },
+            NodeBody::ProcedureDeclaration { args, returns, body },
         ))
     }
 
@@ -623,6 +627,11 @@ impl<I> Parser<I>
             LeftBrace => self.do_function_call(node, ident),
             TypeDeclaration => {
                 self.next_token(&node)?;
+                let next = self.peek_token()?;
+                if let Assignment = next {
+                    // TypeDeclaration + Assignment = VariableDeclaration
+                    return self.do_variable_declaration(node, ident, None);
+                }
                 let tp = self.do_type(&node)?;
                 match self.peek_token()? {
                     ConstDeclaration | VariableDeclaration => {
@@ -631,7 +640,7 @@ impl<I> Parser<I>
                     EndStatement => {
                         let node = self.add_node(
                             node,
-                            NodeBody::VariableDeclaration{ident: ident.into(), tp:Some(tp), expr: None},
+                            NodeBody::VariableDeclaration { ident: ident.into(), tp: Some(tp), expr: None },
                         );
                         Ok(node)
                     }
@@ -694,37 +703,29 @@ impl<I> Parser<I>
                 self.next_token(&node)?;
                 let expr = self.do_expression(node.id)?;
                 let node = match self.ast.get_node(expr).body {
-                    NodeBody::ProcedureDeclaration{..}
-                    | NodeBody::ConstValue{..} => {
+                    NodeBody::ProcedureDeclaration { .. }
+                    | NodeBody::ConstValue { .. } => {
                         self.add_node(
                             node,
-                            NodeBody::StaticDeclaration{ident: ident.into(), tp, expr },
+                            NodeBody::StaticDeclaration { ident: ident.into(), tp, expr },
                         )
                     }
                     _ => {
                         self.add_node(
                             node,
-                            NodeBody::ConstDeclaration{ident:ident.into(), tp, expr},
+                            NodeBody::ConstDeclaration { ident: ident.into(), tp, expr },
                         )
                     }
                 };
                 Ok(node)
             }
-            VariableDeclaration => {
-                self.next_token(&node)?;
-                let expr = self.do_expression(node.id)?;
-                let node = self.add_node(
-                    node,
-                    NodeBody::VariableDeclaration{ident: ident.into(), tp, expr: Some(expr)},
-                );
-                Ok(node)
-            }
+            VariableDeclaration => self.do_variable_declaration(node, ident, tp),
             Assignment => {
                 self.next_token(&node)?;
                 let expr = self.do_expression(node.id)?;
                 let node = self.add_uncomplete_node(
                     node,
-                    UnlinkedNodeBody::VariableAssignment{ident: ident.into(), path:None, expr },
+                    UnlinkedNodeBody::VariableAssignment { ident: ident.into(), path: None, expr },
                 );
                 Ok(node)
             }
@@ -736,7 +737,7 @@ impl<I> Parser<I>
                         let expr = self.do_expression(node.id)?;
                         let node = self.add_uncomplete_node(
                             node,
-                            UnlinkedNodeBody::VariableAssignment{
+                            UnlinkedNodeBody::VariableAssignment {
                                 ident: ident.into(),
                                 path: Some(path),
                                 expr,
@@ -757,6 +758,16 @@ impl<I> Parser<I>
         }
     }
 
+    fn do_variable_declaration(&mut self, node: PendingNode, ident: &str, tp: Option<NodeType>) -> Result {
+        self.next_token(&node)?;
+        let expr = self.do_expression(node.id)?;
+        let node = self.add_node(
+            node,
+            NodeBody::VariableDeclaration { ident: ident.into(), tp, expr: Some(expr) },
+        );
+        Ok(node)
+    }
+
     fn do_expression_symbol(
         &mut self,
         node: PendingNode,
@@ -769,7 +780,7 @@ impl<I> Parser<I>
         match token {
             LeftBrace => self.do_function_call(node, ident),
             Op(_) | RightBrace | EndStatement | ListSeparator => Ok(self
-                .add_uncomplete_node(node, UnlinkedNodeBody::VariableValue{ident: ident.into(), path})),
+                .add_uncomplete_node(node, UnlinkedNodeBody::VariableValue { ident: ident.into(), path })),
             Dot => {
                 let path = self.get_traverse_path(&node)?;
                 self.do_expression_symbol(node, ident, Some(path))
@@ -797,7 +808,7 @@ impl<I> Parser<I>
             }
         }
         self.ensure_next_token(&node, RightBrace)?;
-        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Call{ident: ident.into(), args}))
+        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Call { ident: ident.into(), args }))
     }
 
     fn do_return(&mut self, node: PendingNode) -> Result {
@@ -807,6 +818,6 @@ impl<I> Parser<I>
         } else {
             None
         };
-        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Return{ expr }))
+        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Return { expr }))
     }
 }
