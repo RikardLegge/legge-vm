@@ -638,7 +638,10 @@ impl<'a> Generator<'a> {
     }
 
     fn ev_declaration(&mut self, node_id: NodeID, expr: Option<NodeID>) -> StackUsage {
-        if let Some(expr_id) = expr {
+        if self.ast.get_node(node_id).referenced_by.is_empty() {
+            // Declaration never used, do not evaluate it's children.
+            StackUsage::zero()
+        } else if let Some(expr_id) = expr {
             self.ev_assignment(node_id, node_id, &None, expr_id)
         } else {
             StackUsage::zero()

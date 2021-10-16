@@ -4,11 +4,10 @@ double :: fn(i: int) -> int {
 exec :: fn(num: int, map: Fn(int) -> int) -> int {
     return map(num);
 }
-exec(2, double);
+//exec(2, double);
 
-import log;
-import int;
 import float;
+import log;
 
 a :: float(1)/2.0;
 log(a);
