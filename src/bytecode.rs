@@ -338,7 +338,7 @@ impl<'a> Generator<'a> {
         self.get_scope().instructions.len()
     }
 
-    fn new_var_offset(&self, has_closure_reference:bool) -> usize {
+    fn new_var_offset(&self, has_closure_reference: bool) -> usize {
         if has_closure_reference {
             let context = self.get_context();
             let offset = context.closure_allocations();
@@ -427,22 +427,22 @@ impl<'a> Generator<'a> {
         use crate::ast::NodeBody::*;
         let node = self.ast.get_node(node_id);
         match &node.body {
-            Op{op, lhs, rhs} => self.ev_operation(node_id, *op, *lhs, *rhs),
-            PrefixOp{op, rhs } => self.ev_prefix_operation(node_id, *op, *rhs),
-            Block{body} => self.ev_block(node_id, body),
-            Call{func, args} => self.ev_call(node_id, *func, args, true),
-            VariableValue{variable, path} => self.ev_variable_value(node_id, *variable, path),
-            ConstDeclaration{expr, ..}
-            | StaticDeclaration{expr, ..}
-            | TypeDeclaration{constructor: expr, ..}
-            | Import{def: expr, ..}=> self.ev_declaration(node_id, Some(*expr)),
-            VariableDeclaration{expr, ..} => self.ev_declaration(node_id, *expr),
-            VariableAssignment{variable, path, expr} => self.ev_assignment(node_id, *variable, path, *expr),
-            ProcedureDeclaration{args, body, ..} => self.ev_procedure(node_id, args, *body),
-            Return{func, expr} => self.ev_return(node_id, *func, *expr),
-            If{condition, body} => self.ev_if(node_id, *condition, *body),
-            Loop{body} => self.ev_loop(node_id, *body),
-            Break{r#loop} => self.ev_break(node_id, *r#loop),
+            Op { op, lhs, rhs } => self.ev_operation(node_id, *op, *lhs, *rhs),
+            PrefixOp { op, rhs } => self.ev_prefix_operation(node_id, *op, *rhs),
+            Block { body } => self.ev_block(node_id, body),
+            Call { func, args } => self.ev_call(node_id, *func, args, true),
+            VariableValue { variable, path } => self.ev_variable_value(node_id, *variable, path),
+            ConstDeclaration { expr, .. }
+            | StaticDeclaration { expr, .. }
+            | TypeDeclaration { constructor: expr, .. }
+            | Import { def: expr, .. } => self.ev_declaration(node_id, Some(*expr)),
+            VariableDeclaration { expr, .. } => self.ev_declaration(node_id, *expr),
+            VariableAssignment { variable, path, expr } => self.ev_assignment(node_id, *variable, path, *expr),
+            ProcedureDeclaration { args, body, .. } => self.ev_procedure(node_id, args, *body),
+            Return { func, expr } => self.ev_return(node_id, *func, *expr),
+            If { condition, body } => self.ev_if(node_id, *condition, *body),
+            Loop { body } => self.ev_loop(node_id, *body),
+            Break { r#loop } => self.ev_break(node_id, *r#loop),
             Comment(_) | Empty => StackUsage::zero(),
             _ => panic!("Unsupported node here {:?}", node),
         }
@@ -466,7 +466,7 @@ impl<'a> Generator<'a> {
         self.with_context(node_id, ContextType::Loop { break_inst }, |bc| {
             let body_node = bc.ast.get_node(body_id);
             match &body_node.body {
-                NodeBody::Block{body} => {
+                NodeBody::Block { body } => {
                     let usage = bc.ev_block(body_id, body);
                     assert_eq!(usage.pushed, usage.popped);
                 }
@@ -491,7 +491,7 @@ impl<'a> Generator<'a> {
         let start = self.op_index();
         let body_node = self.ast.get_node(body_id);
         match &body_node.body {
-            NodeBody::Block{body} => {
+            NodeBody::Block { body } => {
                 let usage = self.ev_block(body_id, body);
                 assert_eq!(usage.pushed, usage.popped);
             }
@@ -557,7 +557,7 @@ impl<'a> Generator<'a> {
                     bc.add_op(*arg, OP::SStore(SFOffset::Closure {
                         offset,
                         depth: 0,
-                        field: None
+                        field: None,
                     }));
                     bc.add_var(*arg);
                 } else {
@@ -566,7 +566,7 @@ impl<'a> Generator<'a> {
             }
             let body_node = bc.ast.get_node(body_id);
             match &body_node.body {
-                NodeBody::Block{body} => {
+                NodeBody::Block { body } => {
                     let usage = bc.ev_block(body_id, body);
                     assert_eq!(StackUsage::zero(), usage);
                 }
@@ -600,7 +600,7 @@ impl<'a> Generator<'a> {
             let mut tp = &self.ast.get_node(var_id).tp.as_ref().unwrap().tp;
             for path_name in path {
                 match tp {
-                    NodeType::Struct{fields} => {
+                    NodeType::Struct { fields } => {
                         let index = fields.iter().position(|(name, _)| name == path_name);
                         match index {
                             Some(index) => {
@@ -654,11 +654,11 @@ impl<'a> Generator<'a> {
     ) -> StackUsage {
         let node = self.ast.get_node(proc_var_id);
         let return_values = match &node.tp.as_ref().unwrap().tp {
-            NodeType::Fn{ returns, ..} => match &**returns {
+            NodeType::Fn { returns, .. } => match &**returns {
                 NodeType::Void => 0,
                 _ => 1,
             },
-            NodeType::Type{..} => 1,
+            NodeType::Type { .. } => 1,
             _ => unreachable!(),
         };
 
@@ -699,11 +699,11 @@ impl<'a> Generator<'a> {
                 let node = bc.ast.get_node(*child_id);
                 if node.has_closure_references() {
                     match &node.body {
-                        NodeBody::VariableDeclaration{..}
-                        | NodeBody::ConstDeclaration{..}
-                        | NodeBody::TypeDeclaration{..}
-                        | NodeBody::StaticDeclaration{..}
-                        | NodeBody::Import{..} => {
+                        NodeBody::VariableDeclaration { .. }
+                        | NodeBody::ConstDeclaration { .. }
+                        | NodeBody::TypeDeclaration { .. }
+                        | NodeBody::StaticDeclaration { .. }
+                        | NodeBody::Import { .. } => {
                             bc.add_var(*child_id);
                             bc.add_op(*child_id, OP::PushToClosure(Value::Unset));
                         }
@@ -711,11 +711,11 @@ impl<'a> Generator<'a> {
                     }
                 } else {
                     match &node.body {
-                        NodeBody::VariableDeclaration{..}
-                        | NodeBody::ConstDeclaration{..}
-                        | NodeBody::TypeDeclaration{..}
-                        | NodeBody::StaticDeclaration{..}
-                        | NodeBody::Import{..} => {
+                        NodeBody::VariableDeclaration { .. }
+                        | NodeBody::ConstDeclaration { .. }
+                        | NodeBody::TypeDeclaration { .. }
+                        | NodeBody::StaticDeclaration { .. }
+                        | NodeBody::Import { .. } => {
                             bc.add_var(*child_id);
                             bc.add_op(*child_id, OP::PushImmediate(Value::Unset));
                         }
@@ -790,12 +790,12 @@ impl<'a> Generator<'a> {
         use crate::ast::NodeBody::*;
         let expr = self.ast.get_node(expr_id);
         match &expr.body {
-            Op{op, lhs, rhs} => self.ev_operation(expr_id, *op, *lhs, *rhs),
-            PrefixOp{op, rhs}=> self.ev_prefix_operation(expr_id, *op, *rhs),
+            Op { op, lhs, rhs } => self.ev_operation(expr_id, *op, *lhs, *rhs),
+            PrefixOp { op, rhs } => self.ev_prefix_operation(expr_id, *op, *rhs),
             ConstValue(value) => self.ev_const(expr_id, value),
-            ProcedureDeclaration{args, body, ..} => self.ev_procedure(expr_id, args, *body),
-            VariableValue{variable, path}=> self.ev_variable_value(expr_id, *variable, path),
-            Call{func, args} => self.ev_call(expr_id, *func, args, false),
+            ProcedureDeclaration { args, body, .. } => self.ev_procedure(expr_id, args, *body),
+            VariableValue { variable, path } => self.ev_variable_value(expr_id, *variable, path),
+            Call { func, args } => self.ev_call(expr_id, *func, args, false),
             Expression(value) => self.ev_expression(*value),
             _ => panic!("Unsupported node {:?} used as expression", expr),
         }
