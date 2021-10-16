@@ -112,7 +112,8 @@ impl fmt::Display for TokenType {
 }
 
 fn format_number_leading_zeros(f: &mut Formatter<'_>, num: f64, significant: usize, decimal: usize) -> fmt::Result {
-    let left_pad = significant-(1.0+num.log10().ceil()) as usize;
+    let width = (1.0 + num.log10().floor()) as usize;
+    let left_pad = significant-width;
     let right_pad = num;
     write!(f, "{0:0<1$}{2:.3$}", "", left_pad, right_pad, decimal)
 }
