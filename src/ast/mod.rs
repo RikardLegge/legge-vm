@@ -3,6 +3,7 @@ mod checker;
 mod linker;
 mod parser;
 mod typer;
+mod treeshaker;
 
 use std::result;
 
@@ -143,6 +144,14 @@ pub fn from_tokens<I>(iter: I, runtime: &Runtime) -> Result<(Ast, debug::AstTimi
         Err(err)?;
     }
     timing.linker = debug::stop_timer(start);
+
+    let start = debug::start_timer();
+    if let Err(err) = treeshaker::treeshake(&mut ast) {
+        println!("{:?}", ast);
+        Err(err)?;
+    }
+    timing.treeshaker = debug::stop_timer(start);
+
 
     let start = debug::start_timer();
     if let Err(err) = typer::infer_types(&mut ast, runtime) {

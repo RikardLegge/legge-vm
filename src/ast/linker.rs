@@ -1,42 +1,25 @@
 use super::{Ast, NodeBody, NodeID, Result};
-use crate::ast::ast::{NodeReference, NodeReferenceLocation};
-use crate::ast::{NodeReferenceType, NodeType, NodeValue};
+use crate::ast::ast::NodeReferenceLocation;
+use super::NodeReferenceType::*;
+use super::UnlinkedNodeBody::*;
+use crate::ast::{NodeType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
 use std::mem;
 
 pub fn link(ast: &mut Ast, runtime: &Runtime) -> Result<()> {
-    Linker::new(ast, runtime).link()
+    let root_id = ast.root();
+    Linker::new(ast, runtime).link(root_id)
 }
 
 struct Linker<'a, 'b> {
-    queue: VecDeque<NodeID>,
     ast: &'a mut Ast,
     runtime: &'b Runtime,
 }
 
 impl<'a, 'b> Linker<'a, 'b> {
     fn new(ast: &'a mut Ast, runtime: &'b Runtime) -> Self {
-        let queue = VecDeque::from(vec![ast.root()]);
-        Self {
-            queue,
-            ast,
-            runtime,
-        }
-    }
-
-    fn add_ref(
-        &mut self,
-        target_id: NodeID,
-        referencer: NodeID,
-        tp: NodeReferenceType,
-        loc: NodeReferenceLocation,
-    ) {
-        let node_ref = NodeReference::new(referencer, tp, loc);
-        self.ast
-            .get_node_mut(target_id)
-            .referenced_by
-            .insert(node_ref);
+        Self { ast, runtime }
     }
 
     fn closest_variable(
@@ -137,16 +120,15 @@ impl<'a, 'b> Linker<'a, 'b> {
         Ok(tp)
     }
 
-    fn link(mut self) -> Result<()> {
-        while let Some(node_id) = self.queue.pop_front() {
+    fn link(mut self, root_id: NodeID) -> Result<()> {
+        let mut queue = VecDeque::from(vec![root_id]);
+        while let Some(node_id) = queue.pop_front() {
             let node = self.ast.get_node(node_id);
             for &child in node.body.children() {
-                self.queue.push_back(child);
+                queue.push_back(child);
             }
             let new_body = match &node.body {
                 NodeBody::Unlinked(body) => {
-                    use super::NodeReferenceType::*;
-                    use super::UnlinkedNodeBody::*;
                     let new_body = match body {
                         VariableAssignment { ident, path, expr } => {
                             let expr = *expr;
@@ -160,7 +142,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                                     ))?,
                                 };
                             let path = path.clone();
-                            self.add_ref(variable, node_id, ReceiveValue, location);
+                            self.ast.add_ref(variable, node_id, ReceiveValue, location);
                             NodeBody::VariableAssignment { variable, path, expr }
                         }
                         Value(value) => {
@@ -199,7 +181,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                                     ))?,
                                 };
                             let path = path.clone();
-                            self.add_ref(variable, node_id, AssignValue, location);
+                            self.ast.add_ref(variable, node_id, AssignValue, location);
                             NodeBody::VariableValue { variable, path }
                         }
                         Call { ident, .. } => {
@@ -216,10 +198,13 @@ impl<'a, 'b> Linker<'a, 'b> {
                             // the argument vec while replacing the node body.
                             let node = self.ast.get_node_mut(node_id);
                             let args = match &mut node.body {
-                                NodeBody::Unlinked(Call{ args, ..}) => mem::replace(args, Vec::new()),
+                                NodeBody::Unlinked(Call { args, .. }) => mem::replace(args, Vec::new()),
                                 _ => unreachable!(),
                             };
-                            self.add_ref(func, node_id, GoTo, location);
+                            self.ast.add_ref(func, node_id, GoTo, location);
+                            for arg in &args {
+                                self.ast.add_ref(*arg, node_id, ReceiveValue, NodeReferenceLocation::Local);
+                            }
                             NodeBody::Call { func, args }
                         }
                         ImportValue { ident } => {
@@ -242,17 +227,17 @@ impl<'a, 'b> Linker<'a, 'b> {
                         }
                         Return { .. } => {
                             let (func, location) = self.closest_fn(node_id)?;
-                            self.add_ref(func, node_id, GoTo, location);
+                            self.ast.add_ref(func, node_id, GoTo, location);
                             let node = self.ast.get_node_mut(node_id);
                             let expr = match &mut node.body {
-                                NodeBody::Unlinked(Return{expr}) => mem::replace(expr, None),
+                                NodeBody::Unlinked(Return { expr }) => mem::replace(expr, None),
                                 _ => unreachable!(),
                             };
                             NodeBody::Return { func, expr }
                         }
                         Break => {
                             let (r#loop, location) = self.closest_loop(node_id)?;
-                            self.add_ref(r#loop, node_id, GoTo, location);
+                            self.ast.add_ref(r#loop, node_id, GoTo, location);
                             NodeBody::Break { r#loop }
                         }
                     };
@@ -271,10 +256,15 @@ impl<'a, 'b> Linker<'a, 'b> {
                 | NodeBody::ConstValue { .. }
                 | NodeBody::VariableAssignment { .. }
                 | NodeBody::VariableValue { .. }
-                | NodeBody::Return { .. }
                 | NodeBody::Break { .. }
                 | NodeBody::Call { .. }
                 | NodeBody::TypeDeclaration { .. } => None,
+
+                | NodeBody::Return { func, .. } => {
+                    let func = *func;
+                    self.ast.add_ref(func, node_id, GoTo, NodeReferenceLocation::Local);
+                    None
+                }
 
                 NodeBody::ProcedureDeclaration { args, returns, body } => {
                     if let Some(NodeType::Unknown { .. }) = *returns {

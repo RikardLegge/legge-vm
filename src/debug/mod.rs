@@ -27,6 +27,7 @@ pub fn stop_timer(start: SystemTime) -> Duration {
 pub struct AstTiming {
     pub from_tokens: Duration,
     pub linker: Duration,
+    pub treeshaker: Duration,
     pub type_inference: Duration,
     pub type_checker: Duration,
 }

@@ -1,13 +1,24 @@
-double :: fn(i: int) -> int {
-    return 2 * i;
-}
-exec :: fn(num: int, map: Fn(int) -> int) -> int {
-    return map(num);
-}
-//exec(2, double);
+//double :: fn(i: int) -> int {
+//    return 2 * i;
+//}
+//exec :: fn(num: int, map: Fn(int) -> int) -> int {
+//    return map(num);
+//}
+////exec(2, double);
+//
+//import float;
+//import log;
+//
+//a :: float(1)/2.0;
+//log(a);
+import exit;
 
-import float;
-import log;
-
-a :: float(1)/2.0;
-log(a);
+    val := 1;
+    change_val :: fn() {
+        val = 2;
+    }
+    get_val :: fn() -> int {
+        return val;
+    }
+    change_val();
+    exit(get_val());

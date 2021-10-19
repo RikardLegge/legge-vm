@@ -426,6 +426,10 @@ impl<'a> Generator<'a> {
     fn ev_node(&mut self, node_id: NodeID) -> StackUsage {
         use crate::ast::NodeBody::*;
         let node = self.ast.get_node(node_id);
+        if node.is_dead() {
+            return StackUsage::zero();
+        }
+
         match &node.body {
             Op { op, lhs, rhs } => self.ev_operation(node_id, *op, *lhs, *rhs),
             PrefixOp { op, rhs } => self.ev_prefix_operation(node_id, *op, *rhs),
@@ -638,10 +642,7 @@ impl<'a> Generator<'a> {
     }
 
     fn ev_declaration(&mut self, node_id: NodeID, expr: Option<NodeID>) -> StackUsage {
-        if self.ast.get_node(node_id).referenced_by.is_empty() {
-            // Declaration never used, do not evaluate it's children.
-            StackUsage::zero()
-        } else if let Some(expr_id) = expr {
+        if let Some(expr_id) = expr {
             self.ev_assignment(node_id, node_id, &None, expr_id)
         } else {
             StackUsage::zero()
