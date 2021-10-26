@@ -150,7 +150,8 @@ impl<I> Parser<I>
     }
 
     fn add_node(&mut self, pending: PendingNode, body: NodeBody) -> NodeID {
-        self.ast.get_node_mut(pending.id).body = body;
+        let node = self.ast.get_node_mut(pending.id);
+        node.body = body;
         pending.id
     }
 
@@ -284,10 +285,15 @@ impl<I> Parser<I>
 
         match self.peek_token_or_none() {
             Some(TokenType::Op(op)) => {
+                let lhs = node;
                 let op = *op;
-                let op_node = self.node(node);
+                let op_node = self.node(parent_id);
+                // Since we parsed the lhs expression before the operation, we have to rewrite
+                // lhs parent id to lie under the operation.
+                self.ast.get_node_mut(lhs).parent_id = Some(op_node.id);
+
                 self.next_token(&op_node)?;
-                self.do_operation(op_node, op, Some(node))
+                self.do_operation(op_node, op, Some(lhs))
             }
             _ => Ok(node),
         }
@@ -312,7 +318,7 @@ impl<I> Parser<I>
                     body_node,
                     NodeBody::Unlinked(UnlinkedNodeBody::ImportValue { ident: ident.clone() }),
                 );
-                Ok(self.add_node(node, NodeBody::Import { ident, def }))
+                Ok(self.add_node(node, NodeBody::Import { ident, expr: def }))
             }
             _ => unimplemented!(),
         }
@@ -339,6 +345,17 @@ impl<I> Parser<I>
         op: ArithmeticOP,
         pending_node: Option<NodeID>,
     ) -> Result {
+        let id = node.id;
+        self.do_sub_operation(node, id, op, pending_node)
+    }
+
+    fn do_sub_operation(
+        &mut self,
+        node: PendingNode,
+        parent_id: NodeID,
+        op: ArithmeticOP,
+        pending_node: Option<NodeID>,
+    ) -> Result {
         let body = {
             if let Some(lhs) = pending_node {
                 // Operation between two nodes
@@ -350,9 +367,10 @@ impl<I> Parser<I>
                 if lhs_precedence >= rhs_precedence {
                     NodeBody::Op { op, lhs, rhs }
                 } else {
-                    let node = self.node(node.id);
+                    let node = self.node(parent_id);
+                    let id = node.id;
                     let rhs = match self.next_token(&node)? {
-                        TokenType::Op(op) => self.do_operation(node, op, Some(rhs))?,
+                        TokenType::Op(op) => self.do_sub_operation(node, id, op, Some(rhs))?,
                         _ => Err(self.ast.error(
                             &format!("Expecting operation, found something else"),
                             "",
@@ -378,6 +396,7 @@ impl<I> Parser<I>
         };
         Ok(self.add_node(node, body))
     }
+
 
     fn do_type(&mut self, node: &PendingNode) -> Result<NodeType> {
         use TokenType::*;

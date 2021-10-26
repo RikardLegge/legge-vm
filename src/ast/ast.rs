@@ -3,7 +3,7 @@ use crate::ast::Err;
 use crate::token::{ArithmeticOP, Token};
 use std::collections::HashSet;
 use std::fmt;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct NodeID(usize);
@@ -27,7 +27,7 @@ pub struct Node {
     pub parent_id: Option<NodeID>,
     pub referenced_by: HashSet<NodeReference>,
     pub references: HashSet<NodeReference>,
-    pub is_dead: Option<bool>,
+    pub is_referenced: bool,
 }
 
 impl Node {
@@ -39,10 +39,7 @@ impl Node {
     }
 
     pub fn is_dead(&self) -> bool {
-        match self.is_dead {
-            Some(true) => true,
-            _ => false
-        }
+        !self.is_referenced
     }
 
     pub fn has_closure_references(&self) -> bool {
@@ -67,6 +64,7 @@ pub struct NodeReference {
     pub id: NodeID,
     pub ref_tp: NodeReferenceType,
     pub ref_loc: NodeReferenceLocation,
+    pub ref_effect: SideEffectSet,
 }
 
 impl NodeReference {
@@ -75,15 +73,90 @@ impl NodeReference {
             id,
             ref_tp,
             ref_loc,
+            ref_effect: SideEffectSet::new(),
         }
     }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum SideEffect {
+    Read,
+    Write,
+    Execute,
+}
+
+impl Into<SideEffectSet> for SideEffect {
+    fn into(self) -> SideEffectSet {
+        SideEffectSet(self.bit())
+    }
+}
+
+impl SideEffect {
+    fn bit(&self) -> usize {
+        match self {
+            SideEffect::Read => 0x01,
+            SideEffect::Write => 0x02,
+            SideEffect::Execute => 0x04,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct SideEffectSet(usize);
+
+impl Debug for SideEffectSet {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if self.empty() {
+            write!(f, "-")?;
+        }
+        if self.is(SideEffect::Read) {
+            write!(f, "R")?;
+        }
+        if self.is(SideEffect::Write) {
+            write!(f, "W")?;
+        }
+        if self.is(SideEffect::Execute) {
+            write!(f, "X")?;
+        }
+        Ok(())
+    }
+}
+
+impl SideEffectSet {
+    pub fn new() -> SideEffectSet {
+        SideEffectSet(0)
+    }
+
+    pub fn empty(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn is(&self, side_effect: SideEffect) -> bool {
+        (self.0 & side_effect.bit()) > 0
+    }
+
+    pub fn or(&mut self, set: SideEffectSet) {
+        self.0 |= set.0
+    }
+
+    pub fn add(&mut self, side_effect: SideEffect) {
+        self.0 |= side_effect.bit()
+    }
+
+    pub fn remove(&mut self, side_effect: SideEffect) {
+        self.0 ^= side_effect.bit()
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum NodeReferenceType {
-    AssignValue,
-    ReceiveValue,
+    ReadValue,
+    WriteValue,
+    ExecuteValue,
     GoTo,
+    ControlFlow,
+    Body,
+    External,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -158,7 +231,7 @@ pub enum NodeBody {
     Loop { body: NodeID },
     Expression(NodeID),
     Comment(String),
-    Import { ident: String, def: NodeID },
+    Import { ident: String, expr: NodeID },
 
     VariableDeclaration { ident: String, tp: Option<NodeType>, expr: Option<NodeID> },
     ConstDeclaration { ident: String, tp: Option<NodeType>, expr: NodeID },
@@ -234,20 +307,20 @@ impl Ast {
 
     pub fn add_ref(
         &mut self,
-        target_id: NodeID,
-        referencer_id: NodeID,
-        tp: NodeReferenceType,
+        target: (NodeID, NodeReferenceType),
+        referencer: (NodeID, NodeReferenceType),
         loc: NodeReferenceLocation,
     ) {
-        let referenced_by = NodeReference::new(referencer_id, tp, loc);
-        let inserted_referenced = self.get_node_mut(target_id)
+        let referenced_by = NodeReference::new(referencer.0, referencer.1, loc);
+        let inserted_referenced = self.get_node_mut(target.0)
             .referenced_by
             .insert(referenced_by);
 
-        let references = NodeReference::new(target_id, tp, loc);
-        let inserted_references = self.get_node_mut(referencer_id)
+        let references = NodeReference::new(target.0, target.1, loc);
+        let inserted_references = self.get_node_mut(referencer.0)
             .references
             .insert(references);
+
         if !(inserted_referenced && inserted_references) {
             format!("WARNING: inserted already existing reference!");
         }
@@ -296,7 +369,7 @@ impl Ast {
             tp: None,
             tokens: vec![],
             body: NodeBody::Empty,
-            is_dead: None,
+            is_referenced: false,
         };
         let id = node.id;
         self.nodes.push(node);
@@ -308,24 +381,34 @@ impl Ast {
     }
 
     fn fmt_debug_node(&self, f: &mut Formatter<'_>, level: usize, node_id: NodeID) -> fmt::Result {
-        let node = &self.nodes[node_id.0];
-        let pad = " ".repeat(level * 2);
-        let mut children = node.body.children().peekable();
-        let location_text = if node.has_closure_references() {
-            "closure"
-        } else {
-            ""
-        };
-        if node.is_dead() {
-            write!(f, "-")?;
-        } else {
-            write!(f, " ")?;
+        if level > 100 {
+            write!(f, "Nesting level too deep!")?;
+            return Ok(());
         }
-        write!(
-            f,
-            "{}Node({}): {} {:?} = {:?}",
-            pad, node.id.0, location_text, node.tp, node.body
-        )?;
+        let node = &self.nodes[node_id.0];
+        let mut children = node.body.children().peekable();
+
+
+        let prefix = if node.is_referenced { " " } else { "-" };
+        write!(f, "{}", prefix)?;
+
+        let pad_len = 2 + level * 2;
+        let pad_start = " ".repeat(std::cmp::max(0, pad_len as isize - prefix.len() as isize) as usize);
+        let pad_end = " ".repeat(pad_len);
+        write!(f, "{}", pad_start)?;
+
+        write!(f, " Node({}):", node.id.0)?;
+        if node.has_closure_references() {
+            write!(f, " closure ")?;
+        }
+        if let Some(InferredType { source, tp }) = &node.tp {
+            if !node.has_closure_references() {
+                write!(f, " ")?;
+            }
+            write!(f, "{{ {:?}, {:?} }} ", source, tp)?;
+        }
+        write!(f, "= {:?}", node.body)?;
+
         if children.peek().is_some() {
             write!(f, " [\n")?;
             for &child in children {
@@ -341,7 +424,7 @@ impl Ast {
             } else {
                 write!(f, " ")?;
             }
-            write!(f, "{}]", pad)?;
+            write!(f, "{}]", pad_end)?;
         }
         Ok(())
     }
@@ -491,7 +574,7 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
             | ConstDeclaration { expr: value, .. }
             | StaticDeclaration { expr: value, .. }
             | VariableAssignment { expr: value, .. }
-            | Import { def: value, .. } => match self.index {
+            | Import { expr: value, .. } => match self.index {
                 0 => Some(value),
                 _ => None,
             },

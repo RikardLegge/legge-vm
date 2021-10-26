@@ -439,7 +439,7 @@ impl<'a> Generator<'a> {
             ConstDeclaration { expr, .. }
             | StaticDeclaration { expr, .. }
             | TypeDeclaration { constructor: expr, .. }
-            | Import { def: expr, .. } => self.ev_declaration(node_id, Some(*expr)),
+            | Import { expr, .. } => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration { expr, .. } => self.ev_declaration(node_id, *expr),
             VariableAssignment { variable, path, expr } => self.ev_assignment(node_id, *variable, path, *expr),
             ProcedureDeclaration { args, body, .. } => self.ev_procedure(node_id, args, *body),

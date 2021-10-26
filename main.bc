@@ -13,12 +13,11 @@
 //log(a);
 import exit;
 
-    val := 1;
-    change_val :: fn() {
-        val = 2;
+i := 0;
+loop {
+    if(i == 100) {
+        break;
     }
-    get_val :: fn() -> int {
-        return val;
-    }
-    change_val();
-    exit(get_val());
+    i = i + 1;
+}
+exit(i);

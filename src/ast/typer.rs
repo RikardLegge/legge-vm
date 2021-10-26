@@ -233,8 +233,8 @@ impl<'a> Typer<'a> {
                 self.get_type_from_declaration(&node.id, tp)?,
                 Declared,
             ),
-            Import{def, ..}=> {
-                if let Some(tp) = self.get_type(def) {
+            Import{ expr, ..}=> {
+                if let Some(tp) = self.get_type(expr) {
                     InferredType::maybe(Some(tp), Value)
                 } else {
                     None

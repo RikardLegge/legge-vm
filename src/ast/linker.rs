@@ -1,5 +1,5 @@
 use super::{Ast, NodeBody, NodeID, Result};
-use crate::ast::ast::NodeReferenceLocation;
+use crate::ast::ast::{NodeReferenceLocation};
 use super::NodeReferenceType::*;
 use super::UnlinkedNodeBody::*;
 use crate::ast::{NodeType, NodeValue};
@@ -142,7 +142,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                                     ))?,
                                 };
                             let path = path.clone();
-                            self.ast.add_ref(variable, node_id, ReceiveValue, location);
+                            self.ast.add_ref(
+                                (variable, WriteValue),
+                                (expr, ReadValue),
+                                location,
+                            );
                             NodeBody::VariableAssignment { variable, path, expr }
                         }
                         Value(value) => {
@@ -181,7 +185,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                                     ))?,
                                 };
                             let path = path.clone();
-                            self.ast.add_ref(variable, node_id, AssignValue, location);
+                            self.ast.add_ref(
+                                (variable, ReadValue),
+                                (node_id, WriteValue),
+                                location,
+                            );
                             NodeBody::VariableValue { variable, path }
                         }
                         Call { ident, .. } => {
@@ -201,10 +209,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                                 NodeBody::Unlinked(Call { args, .. }) => mem::replace(args, Vec::new()),
                                 _ => unreachable!(),
                             };
-                            self.ast.add_ref(func, node_id, GoTo, location);
-                            for arg in &args {
-                                self.ast.add_ref(*arg, node_id, ReceiveValue, NodeReferenceLocation::Local);
-                            }
+                            self.ast.add_ref(
+                                (func, GoTo),
+                                (node_id, ExecuteValue),
+                                location,
+                            );
                             NodeBody::Call { func, args }
                         }
                         ImportValue { ident } => {
@@ -227,7 +236,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                         }
                         Return { .. } => {
                             let (func, location) = self.closest_fn(node_id)?;
-                            self.ast.add_ref(func, node_id, GoTo, location);
+                            self.ast.add_ref(
+                                (func, GoTo),
+                                (node_id, ControlFlow),
+                                location,
+                            );
                             let node = self.ast.get_node_mut(node_id);
                             let expr = match &mut node.body {
                                 NodeBody::Unlinked(Return { expr }) => mem::replace(expr, None),
@@ -237,7 +250,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                         }
                         Break => {
                             let (r#loop, location) = self.closest_loop(node_id)?;
-                            self.ast.add_ref(r#loop, node_id, GoTo, location);
+                            self.ast.add_ref(
+                                (r#loop, GoTo),
+                                (node_id, ControlFlow),
+                                location,
+                            );
                             NodeBody::Break { r#loop }
                         }
                     };
@@ -262,7 +279,11 @@ impl<'a, 'b> Linker<'a, 'b> {
 
                 | NodeBody::Return { func, .. } => {
                     let func = *func;
-                    self.ast.add_ref(func, node_id, GoTo, NodeReferenceLocation::Local);
+                    self.ast.add_ref(
+                        (func, GoTo),
+                        (node_id, ControlFlow),
+                        NodeReferenceLocation::Local,
+                    );
                     None
                 }
 
