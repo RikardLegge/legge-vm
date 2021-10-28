@@ -27,7 +27,7 @@ pub struct Node {
     pub parent_id: Option<NodeID>,
     pub referenced_by: HashSet<NodeReference>,
     pub references: HashSet<NodeReference>,
-    pub is_referenced: bool,
+    pub reference_types: HashSet<SideEffect>,
 }
 
 impl Node {
@@ -39,7 +39,7 @@ impl Node {
     }
 
     pub fn is_dead(&self) -> bool {
-        !self.is_referenced
+        self.reference_types.is_empty()
     }
 
     pub fn has_closure_references(&self) -> bool {
@@ -64,7 +64,6 @@ pub struct NodeReference {
     pub id: NodeID,
     pub ref_tp: NodeReferenceType,
     pub ref_loc: NodeReferenceLocation,
-    pub ref_effect: SideEffectSet,
 }
 
 impl NodeReference {
@@ -73,49 +72,42 @@ impl NodeReference {
             id,
             ref_tp,
             ref_loc,
-            ref_effect: SideEffectSet::new(),
         }
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum SideEffect {
     Read,
     Write,
     Execute,
+    WhenThen(Box<(SideEffect,SideEffect)>),
+    GoTo(NodeID),
 }
 
 impl Into<SideEffectSet> for SideEffect {
     fn into(self) -> SideEffectSet {
-        SideEffectSet(self.bit())
+        let mut set = SideEffectSet::new();
+        set.insert(self);
+        set
     }
 }
 
-impl SideEffect {
-    fn bit(&self) -> usize {
-        match self {
-            SideEffect::Read => 0x01,
-            SideEffect::Write => 0x02,
-            SideEffect::Execute => 0x04,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub struct SideEffectSet(usize);
+#[derive(Clone, Eq, PartialEq)]
+pub struct SideEffectSet(HashSet<SideEffect>);
 
 impl Debug for SideEffectSet {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if self.empty() {
+        if self.is_empty() {
             write!(f, "-")?;
         }
-        if self.is(SideEffect::Read) {
+        if self.contains(SideEffect::Read) {
             write!(f, "R")?;
         }
-        if self.is(SideEffect::Write) {
+        if self.contains(SideEffect::Write) {
             write!(f, "W")?;
         }
-        if self.is(SideEffect::Execute) {
+        if self.contains(SideEffect::Execute) {
             write!(f, "X")?;
         }
         Ok(())
@@ -124,27 +116,36 @@ impl Debug for SideEffectSet {
 
 impl SideEffectSet {
     pub fn new() -> SideEffectSet {
-        SideEffectSet(0)
+        SideEffectSet(HashSet::new())
     }
 
-    pub fn empty(&self) -> bool {
-        self.0 == 0
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
-    pub fn is(&self, side_effect: SideEffect) -> bool {
-        (self.0 & side_effect.bit()) > 0
+    pub fn contains(&self, side_effect: SideEffect) -> bool {
+        self.0.contains(&side_effect)
     }
 
-    pub fn or(&mut self, set: SideEffectSet) {
-        self.0 |= set.0
+    pub fn contains_all(&self, other: SideEffectSet) -> bool {
+        for item in other.0 {
+            if !self.contains(item) {
+                return false;
+            }
+        }
+        true
     }
 
-    pub fn add(&mut self, side_effect: SideEffect) {
-        self.0 |= side_effect.bit()
+    pub fn extend(&mut self, set: SideEffectSet) {
+        self.0.extend(set.0);
     }
 
-    pub fn remove(&mut self, side_effect: SideEffect) {
-        self.0 ^= side_effect.bit()
+    pub fn insert(&mut self, item: SideEffect) {
+        self.0.insert(item);
+    }
+
+    pub fn remove(&mut self, item: SideEffect) {
+        self.0.remove(&item);
     }
 }
 
@@ -305,6 +306,10 @@ impl Ast {
         }
     }
 
+    pub fn nodes(&self) -> &[Node] {
+        &self.nodes
+    }
+
     pub fn add_ref(
         &mut self,
         target: (NodeID, NodeReferenceType),
@@ -369,7 +374,7 @@ impl Ast {
             tp: None,
             tokens: vec![],
             body: NodeBody::Empty,
-            is_referenced: false,
+            reference_types: HashSet::new(),
         };
         let id = node.id;
         self.nodes.push(node);
@@ -389,7 +394,7 @@ impl Ast {
         let mut children = node.body.children().peekable();
 
 
-        let prefix = if node.is_referenced { " " } else { "-" };
+        let prefix = if node.is_dead() { "-" } else { " " };
         write!(f, "{}", prefix)?;
 
         let pad_len = 2 + level * 2;

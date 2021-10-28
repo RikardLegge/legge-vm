@@ -1,23 +1,18 @@
-//double :: fn(i: int) -> int {
-//    return 2 * i;
-//}
-//exec :: fn(num: int, map: Fn(int) -> int) -> int {
-//    return map(num);
-//}
-////exec(2, double);
-//
-//import float;
-//import log;
-//
-//a :: float(1)/2.0;
-//log(a);
 import exit;
 
-i := 0;
-loop {
-    if(i == 100) {
-        break;
-    }
-    i = i + 1;
+val := 0;
+
+halt :: fn() {
+  exit(1);
 }
-exit(i);
+
+do :: fn(f: Fn()) {
+  f();
+}
+
+inc :: fn() {
+  val = val + 1;
+}
+
+inc();
+do(halt);

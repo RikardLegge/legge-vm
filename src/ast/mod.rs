@@ -146,14 +146,6 @@ pub fn from_tokens<I>(iter: I, runtime: &Runtime) -> Result<(Ast, debug::AstTimi
     timing.linker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    if let Err(err) = treeshaker::treeshake(&mut ast) {
-        println!("{:?}", ast);
-        Err(err)?;
-    }
-    timing.treeshaker = debug::stop_timer(start);
-
-
-    let start = debug::start_timer();
     if let Err(err) = typer::infer_types(&mut ast, runtime) {
         println!("{:?}", ast);
         Err(err)?;
@@ -166,6 +158,13 @@ pub fn from_tokens<I>(iter: I, runtime: &Runtime) -> Result<(Ast, debug::AstTimi
         Err(err)?;
     }
     timing.type_checker = debug::stop_timer(start);
+
+    let start = debug::start_timer();
+    if let Err(err) = treeshaker::treeshake(&mut ast) {
+        println!("{:?}", ast);
+        Err(err)?;
+    }
+    timing.treeshaker = debug::stop_timer(start);
 
     Ok((ast, timing))
 }

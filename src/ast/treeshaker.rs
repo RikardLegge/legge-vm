@@ -1,8 +1,7 @@
 use super::{Ast, NodeID, Result};
 use std::collections::{HashSet, VecDeque};
-use crate::ast::{NodeBody, NodeReferenceType, NodeValue};
-use crate::ast::ast::{NodeReference, SideEffect, SideEffectSet};
-use crate::ast::ast::NodeReferenceType::*;
+use crate::ast::{Node, NodeBody, NodeType, NodeValue};
+use crate::ast::ast::{NodeReference, SideEffect};
 
 pub fn treeshake(ast: &mut Ast) -> Result<()> {
     let root_id = ast.root();
@@ -11,92 +10,94 @@ pub fn treeshake(ast: &mut Ast) -> Result<()> {
 
 struct TreeShaker<'a> {
     ast: &'a mut Ast,
-    stack: HashSet<NodeID>,
 }
 
-impl<'a> TreeShaker<'a> {
+struct Shaker<'a> {
+    ast: &'a mut Ast,
+    stack: HashSet<NodeID>,
+    side_effect_nodes: Vec<(NodeID, SideEffect)>,
+    active_roots: Vec<NodeID>,
+}
+
+impl<'a> Shaker<'a> {
     fn new(ast: &'a mut Ast) -> Self {
         Self {
             ast,
-            stack: HashSet::new(),
+            stack: Default::default(),
+            side_effect_nodes: vec![],
+            active_roots: vec![]
         }
     }
 
-    fn has_side_effect(&self, node_id: NodeID) -> Option<SideEffectSet> {
-        let node = self.ast.get_node(node_id);
-        match node.body {
-            NodeBody::ConstValue(NodeValue::RuntimeFn(_)) => Some(SideEffect::Execute.into()),
-            _ => None
+    fn child_dependent_on_parent(&self, node: &Node) -> Option<NodeID> {
+        if let Some(parent_id) = node.parent_id {
+            let parent = self.ast.get_node(parent_id);
+            match parent.body {
+                NodeBody::Empty
+                | NodeBody::Comment(_)
+                | NodeBody::TypeDeclaration { .. }
+                | NodeBody::Return { .. }
+                | NodeBody::Break { .. } => None,
+                _ => Some(parent_id)
+            }
+        } else {
+            None
         }
     }
 
-    fn child_to_parent_reference(child_id: NodeID, body: &NodeBody) -> Option<NodeReferenceType> {
-        match body {
-            NodeBody::Op { .. }
-            | NodeBody::ConstValue(_)
-            | NodeBody::VariableValue { .. }
-            | NodeBody::PrefixOp { .. }
-            | NodeBody::Expression(_) => Some(ReadValue),
-
-            NodeBody::VariableDeclaration { expr, .. }
-            if Some(child_id) == *expr => Some(ReadValue),
-            NodeBody::VariableDeclaration { expr, .. }
-            if Some(child_id) != *expr => Some(WriteValue),
-
-            NodeBody::Import { expr, .. }
-            | NodeBody::ConstDeclaration { expr, .. }
-            | NodeBody::StaticDeclaration { expr, .. }
-            | NodeBody::VariableAssignment { expr, .. }
-            if child_id == *expr => Some(ReadValue),
-            NodeBody::Import { expr, .. }
-            | NodeBody::ConstDeclaration { expr, .. }
-            | NodeBody::StaticDeclaration { expr, .. }
-            | NodeBody::VariableAssignment { expr, .. }
-            if child_id != *expr => Some(WriteValue),
-
-            NodeBody::If { condition, .. } if *condition == child_id => Some(ControlFlow),
-            NodeBody::If { body, .. } if *body == child_id => Some(Body),
-
-            | NodeBody::Block { .. }
-            | NodeBody::ProcedureDeclaration { .. }
-            | NodeBody::Loop { .. } =>
-                Some(Body),
-
-            NodeBody::Call { .. } => Some(ExecuteValue),
-
-            NodeBody::Empty
-            | NodeBody::Comment(_)
-            | NodeBody::TypeDeclaration { .. }
-            | NodeBody::Return { .. }
-            | NodeBody::Break { .. } => None,
-
-            _ => unreachable!("Invalid node body type {:?}", body)
-        }
-    }
-
-    fn mark_dependencies_as_active(&mut self, node_id: NodeID) {
+    fn mark_dependencies_as_active(&mut self, node_id: NodeID, effect: &SideEffect) {
         if !self.stack.contains(&node_id) {
             self.stack.insert(node_id);
 
             let node = self.ast.get_node_mut(node_id);
-            node.is_referenced = true;
+            node.reference_types.insert(effect.clone());
 
             let node = self.ast.get_node(node_id);
             match node.body {
                 NodeBody::Block { .. } => {}
                 _ => {
                     for child_id in node.body.children().cloned().collect::<Vec<NodeID>>() {
-                        self.mark_dependencies_as_active(child_id)
+                        self.mark_dependencies_as_active(child_id, effect)
                     }
                 }
             }
 
             let node = self.ast.get_node(node_id);
-            if let Some(parent_id) = node.parent_id {
-                let parent = self.ast.get_node(parent_id);
-                if let Some(_) = Self::child_to_parent_reference(node_id, &parent.body) {
-                    self.mark_dependencies_as_active(parent_id)
+            match node.body {
+                NodeBody::VariableValue { variable, .. } => {
+                    self.side_effect_nodes.push((variable, SideEffect::Write))
                 }
+                NodeBody::Loop { .. } => {
+                    for reference in &node.referenced_by {
+                        self.side_effect_nodes.push((reference.id, SideEffect::GoTo(node_id)))
+                    }
+                }
+                NodeBody::ProcedureDeclaration { ref args, ref returns, .. } => {
+                    for reference in &node.referenced_by {
+                        self.side_effect_nodes.push((reference.id, SideEffect::GoTo(node_id)));
+                    }
+                    for arg in args {
+                        let arg_node = self.ast.get_node(*arg);
+                        for arg_ref in &arg_node.referenced_by {
+                            self.side_effect_nodes.push((arg_ref.id, effect.clone()));
+                        }
+                    }
+                    if let Some(NodeType::Fn { .. }) = returns {
+                        if let Some(parent_id) = self.child_dependent_on_parent(node) {
+                            self.side_effect_nodes.push((parent_id, SideEffect::WhenThen(Box::new((SideEffect::Execute, SideEffect::Execute)))))
+                        }
+                    } else {
+                        if let Some(parent_id) = self.child_dependent_on_parent(node) {
+                            self.side_effect_nodes.push((parent_id, SideEffect::Execute))
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            let node = self.ast.get_node(node_id);
+            if let Some(parent_id) = self.child_dependent_on_parent(node) {
+                self.mark_dependencies_as_active(parent_id, effect)
             }
 
             let node = self.ast.get_node(node_id);
@@ -104,30 +105,49 @@ impl<'a> TreeShaker<'a> {
                 .cloned()
                 .collect::<Vec<NodeReference>>();
             for reference in references {
-                self.mark_dependencies_as_active(reference.id)
+                self.mark_dependencies_as_active(reference.id, effect)
             }
             self.stack.remove(&node_id);
         }
     }
 
-    fn find_mark_alive_triggers(&mut self, node_id: NodeID, effect: SideEffectSet, triggers: &mut Vec<NodeID>) {
-        if !self.stack.contains(&node_id) {
+    fn find_mark_alive_triggers(&mut self, node_id: NodeID, effect: &SideEffect) {
+        let effect_is_processed = self.ast.get_node(node_id).reference_types.contains(&effect);
+        if !self.stack.contains(&node_id) && !effect_is_processed {
             self.stack.insert(node_id);
 
             let node = self.ast.get_node(node_id);
             match node.body {
-                NodeBody::Call { .. } if effect.is(SideEffect::Execute) => {
-                    triggers.push(node_id);
+                NodeBody::Call { .. } => {
+                    if let SideEffect::Execute = effect {
+                        self.active_roots.push(node_id);
+                    } else if let SideEffect::WhenThen(when_then) = effect {
+                        match &**when_then {
+                            (SideEffect::Execute, then) => {
+                                self.side_effect_nodes.push((node_id, then.clone()))
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                NodeBody::VariableAssignment { .. } if effect == &SideEffect::Write => {
+                    self.active_roots.push(node_id);
+                }
+                NodeBody::VariableValue { .. } if effect == &SideEffect::Read => {
+                    self.active_roots.push(node_id);
+                }
+                NodeBody::Break { r#loop } if effect == &SideEffect::GoTo(r#loop) => {
+                    self.active_roots.push(node_id);
+                }
+                NodeBody::Return { func, .. } if effect == &SideEffect::GoTo(func) => {
+                    self.active_roots.push(node_id);
                 }
                 _ => {}
             }
 
             let node = self.ast.get_node(node_id);
-            if let Some(parent_id) = node.parent_id {
-                let parent = self.ast.get_node(parent_id);
-                if let Some(_) = Self::child_to_parent_reference(node_id, &parent.body) {
-                    self.find_mark_alive_triggers(parent_id, effect, triggers);
-                }
+            if let Some(parent_id) = self.child_dependent_on_parent(node) {
+                self.find_mark_alive_triggers(parent_id, effect);
             }
 
             let node = self.ast.get_node(node_id);
@@ -135,16 +155,33 @@ impl<'a> TreeShaker<'a> {
                 .cloned()
                 .collect::<Vec<NodeReference>>();
             for reference in references {
-                self.find_mark_alive_triggers(reference.id, effect, triggers);
+                self.find_mark_alive_triggers(reference.id, effect);
             }
 
             self.stack.remove(&node_id);
         }
     }
+}
 
-    fn shake(mut self, root_id: NodeID) -> Result<()> {
+
+impl<'a> TreeShaker<'a> {
+    fn new(ast: &'a mut Ast) -> Self {
+        Self {
+            ast,
+        }
+    }
+
+    fn has_side_effect(&self, node_id: NodeID) -> Option<SideEffect> {
+        let node = self.ast.get_node(node_id);
+        match node.body {
+            NodeBody::ConstValue(NodeValue::RuntimeFn(_)) => Some(SideEffect::Execute),
+            _ => None
+        }
+    }
+
+    fn shake(self, root_id: NodeID) -> Result<()> {
         let mut queue = VecDeque::from(vec![root_id]);
-        let mut side_effect_nodes = VecDeque::new();
+        let mut side_effect_nodes = Vec::new();
         while let Some(node_id) = queue.pop_front() {
             let node = self.ast.get_node(node_id);
             for &child in node.body.children() {
@@ -152,15 +189,25 @@ impl<'a> TreeShaker<'a> {
             }
 
             if let Some(effect) = self.has_side_effect(node_id) {
-                side_effect_nodes.push_back((node_id, effect));
+                side_effect_nodes.push((node_id, effect));
             }
         }
 
-        while let Some((node_id, effect)) = side_effect_nodes.pop_front() {
-            let mut triggers = Vec::new();
-            self.find_mark_alive_triggers(node_id, effect, &mut triggers);
-            for trigger_id in triggers {
-                self.mark_dependencies_as_active(trigger_id)
+        let mut shaker = Shaker::new(self.ast);
+        shaker.side_effect_nodes = side_effect_nodes;
+        let mut other_active_roots = Vec::new();
+
+        while let Some((node_id, effect)) = shaker.side_effect_nodes.pop() {
+
+            assert_eq!(shaker.active_roots.len(), 0);
+            shaker.find_mark_alive_triggers(node_id, &effect);
+            std::mem::swap(&mut shaker.active_roots, &mut other_active_roots);
+            shaker.active_roots.clear();
+            assert_eq!(shaker.stack.len(), 0);
+
+            for active_id in &other_active_roots {
+                shaker.mark_dependencies_as_active(*active_id, &effect);
+                assert_eq!(shaker.stack.len(), 0);
             }
         }
 
