@@ -1,4 +1,4 @@
-use crate::ast::{NodeType};
+use crate::ast::NodeType;
 use crate::bytecode::Value::Int;
 use crate::bytecode::{Value, OP};
 use crate::interpreter::{Err, Interpreter, Result};
@@ -23,7 +23,14 @@ pub fn std() -> Runtime {
     let functions = vec![
         ff("int", vec![Any], Int, &to_int),
         ff("float", vec![Any], Float, &to_float),
-        ff("log", vec![VarArg{ args: Box::new(Any)}], Void, &log),
+        ff(
+            "log",
+            vec![VarArg {
+                args: Box::new(Any),
+            }],
+            Void,
+            &log,
+        ),
         ff("sin", vec![Int], Int, &sin),
         ff("assert", vec![Any, Any], Void, &assert),
         ff("exit", vec![Any], Void, &exit),
@@ -37,7 +44,10 @@ fn ff(
     returns: NodeType,
     function: Function,
 ) -> FunctionDefinition {
-    let tp = NodeType::Fn{args: arguments.clone(), returns: Box::new(returns.clone())};
+    let tp = NodeType::Fn {
+        args: arguments.clone(),
+        returns: Box::new(returns.clone()),
+    };
     FunctionDefinition {
         name: name.to_string(),
         arguments,

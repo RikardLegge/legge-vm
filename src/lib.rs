@@ -3,11 +3,11 @@ pub mod bytecode;
 mod debug;
 pub mod interpreter;
 pub mod runtime;
-pub mod token;
 pub mod testing;
+pub mod token;
 
-pub use debug::Timing;
 use crate::ast::Ast;
+pub use debug::Timing;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq, Copy, Clone)]
@@ -32,7 +32,7 @@ pub fn compile(
     let (ast, ast_timing) = match result {
         Ok((ast, ast_timing)) => (ast, ast_timing),
         Err(e) => {
-            println!("Ast Error: {}\n{}\n",e.details, e.node_info.join("\n\n"));
+            println!("Ast Error: {}\n{}\n", e.details, e.node_info.join("\n\n"));
             return None;
         }
     };
@@ -68,7 +68,7 @@ where
 
     let get_line = |node_id| match ast.get_node(node_id).tokens.first() {
         Some(token) => token.line,
-        None => 0
+        None => 0,
     };
     interpreter.get_line = &get_line;
 

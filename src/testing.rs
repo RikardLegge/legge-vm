@@ -11,7 +11,8 @@ pub fn run_test(code: &str, expected_result: Option<Value>) {
     let assign_result = result.clone();
     run_code(code.into(), LogLevel::LogNone, move |v| {
         *assign_result.borrow_mut() = Some(v);
-    }).expect("code should compile and run");
+    })
+    .expect("code should compile and run");
     let result = result.borrow();
     assert_eq!(*result, expected_result);
 }
@@ -43,5 +44,5 @@ macro_rules! bc_test {
     };
 }
 
-pub use bc_test_should_fail;
 pub use bc_test;
+pub use bc_test_should_fail;

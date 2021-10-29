@@ -46,15 +46,20 @@ impl<'a> Checker<'a> {
                         ))
                     }
                 }
-                VariableAssignment { variable, path, expr } => {
+                VariableAssignment {
+                    variable,
+                    path,
+                    expr,
+                } => {
                     let variable_node = self.ast.get_node(*variable);
                     match variable_node.body {
-                        NodeBody::ConstDeclaration { .. }
-                        | NodeBody::StaticDeclaration { .. } => Err(self.ast.error(
-                            "Not allowed to assign to constant value",
-                            "Assignment to constant value",
-                            vec![node.id],
-                        ))?,
+                        NodeBody::ConstDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
+                            Err(self.ast.error(
+                                "Not allowed to assign to constant value",
+                                "Assignment to constant value",
+                                vec![node.id],
+                            ))?
+                        }
                         _ => (),
                     }
                     let mut variable_tp = &variable_node.tp.as_ref().unwrap().tp;
@@ -141,8 +146,7 @@ impl<'a> Checker<'a> {
                     unreachable!()
                 }
 
-                ConstDeclaration { expr, .. }
-                | StaticDeclaration { expr, .. } => {
+                ConstDeclaration { expr, .. } | StaticDeclaration { expr, .. } => {
                     let lhs = node.tp.as_ref().unwrap();
                     let rhs = self.ast.get_node(*expr).tp.as_ref().unwrap();
                     if lhs.tp == rhs.tp {
@@ -163,18 +167,16 @@ impl<'a> Checker<'a> {
                     if let Fn { returns, .. } = &func.tp {
                         match (&**returns, expr) {
                             (NodeType::Void, None) => Ok(()),
-                            (NodeType::Void, Some(ret_id)) =>
-                                Err(self.ast.error(
-                                    "Return value should be of type void.",
-                                    "Not allowed to return a value from here",
-                                    vec![*ret_id],
-                                )),
-                            (_, None) =>
-                                Err(self.ast.error(
-                                    "Return value can not be of type void",
-                                    "A value must be provided when returning from here",
-                                    vec![node.id],
-                                )),
+                            (NodeType::Void, Some(ret_id)) => Err(self.ast.error(
+                                "Return value should be of type void.",
+                                "Not allowed to return a value from here",
+                                vec![*ret_id],
+                            )),
+                            (_, None) => Err(self.ast.error(
+                                "Return value can not be of type void",
+                                "A value must be provided when returning from here",
+                                vec![node.id],
+                            )),
                             (tp, Some(ret_id)) => {
                                 let ret = self.ast.get_node(*ret_id).tp.as_ref().unwrap();
                                 if ret.tp == *tp {
@@ -199,7 +201,10 @@ impl<'a> Checker<'a> {
                         .map(|id| self.ast.get_node(*id).tp.as_ref().unwrap().tp.clone())
                         .collect();
                     let call = &match func {
-                        Fn { returns, .. } | Type { tp: returns } => Fn { args, returns: returns.clone() },
+                        Fn { returns, .. } | Type { tp: returns } => Fn {
+                            args,
+                            returns: returns.clone(),
+                        },
                         _ => unreachable!(),
                     };
                     self.fits(node, func, call)?;
@@ -224,7 +229,13 @@ impl<'a> Checker<'a> {
         use NodeType::*;
         match (&hole, &shape) {
             (&Any, &shape) if shape != &Void => Ok(()),
-            (&Type { tp: fields }, &Fn { args: shape_args, returns: shape_ret }) => {
+            (
+                &Type { tp: fields },
+                &Fn {
+                    args: shape_args,
+                    returns: shape_ret,
+                },
+            ) => {
                 if shape_args.len() > 0 {
                     let nodes = node.body.children().map(|id| *id).collect();
                     Err(self.ast.error(
@@ -242,7 +253,16 @@ impl<'a> Checker<'a> {
                     Ok(())
                 }
             }
-            (&Fn { args: hole_args, returns: hole_ret }, &Fn { args: shape_args, returns: shape_ret }) => {
+            (
+                &Fn {
+                    args: hole_args,
+                    returns: hole_ret,
+                },
+                &Fn {
+                    args: shape_args,
+                    returns: shape_ret,
+                },
+            ) => {
                 self.fits(node, &*hole_ret, &*shape_ret)?;
                 if hole_args.len() < shape_args.len() {
                     let skip = hole_args.len();

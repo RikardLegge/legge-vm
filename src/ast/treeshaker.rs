@@ -1,7 +1,7 @@
 use super::{Ast, NodeID, Result};
-use std::collections::{HashSet, VecDeque};
-use crate::ast::{Node, NodeBody, NodeType, NodeValue};
 use crate::ast::ast::{NodeReference, SideEffect};
+use crate::ast::{Node, NodeBody, NodeType, NodeValue};
+use std::collections::{HashSet, VecDeque};
 
 pub fn treeshake(ast: &mut Ast) -> Result<()> {
     let root_id = ast.root();
@@ -25,7 +25,7 @@ impl<'a> Shaker<'a> {
             ast,
             stack: Default::default(),
             side_effect_nodes: vec![],
-            active_roots: vec![]
+            active_roots: vec![],
         }
     }
 
@@ -38,7 +38,7 @@ impl<'a> Shaker<'a> {
                 | NodeBody::TypeDeclaration { .. }
                 | NodeBody::Return { .. }
                 | NodeBody::Break { .. } => None,
-                _ => Some(parent_id)
+                _ => Some(parent_id),
             }
         } else {
             None
@@ -69,12 +69,18 @@ impl<'a> Shaker<'a> {
                 }
                 NodeBody::Loop { .. } => {
                     for reference in &node.referenced_by {
-                        self.side_effect_nodes.push((reference.id, SideEffect::GoTo(node_id)))
+                        self.side_effect_nodes
+                            .push((reference.id, SideEffect::GoTo(node_id)))
                     }
                 }
-                NodeBody::ProcedureDeclaration { ref args, ref returns, .. } => {
+                NodeBody::ProcedureDeclaration {
+                    ref args,
+                    ref returns,
+                    ..
+                } => {
                     for reference in &node.referenced_by {
-                        self.side_effect_nodes.push((reference.id, SideEffect::GoTo(node_id)));
+                        self.side_effect_nodes
+                            .push((reference.id, SideEffect::GoTo(node_id)));
                     }
                     for arg in args {
                         let arg_node = self.ast.get_node(*arg);
@@ -84,11 +90,18 @@ impl<'a> Shaker<'a> {
                     }
                     if let Some(NodeType::Fn { .. }) = returns {
                         if let Some(parent_id) = self.child_dependent_on_parent(node) {
-                            self.side_effect_nodes.push((parent_id, SideEffect::WhenThen(Box::new((SideEffect::Execute, SideEffect::Execute)))))
+                            self.side_effect_nodes.push((
+                                parent_id,
+                                SideEffect::WhenThen(Box::new((
+                                    SideEffect::Execute,
+                                    SideEffect::Execute,
+                                ))),
+                            ))
                         }
                     } else {
                         if let Some(parent_id) = self.child_dependent_on_parent(node) {
-                            self.side_effect_nodes.push((parent_id, SideEffect::Execute))
+                            self.side_effect_nodes
+                                .push((parent_id, SideEffect::Execute))
                         }
                     }
                 }
@@ -101,7 +114,9 @@ impl<'a> Shaker<'a> {
             }
 
             let node = self.ast.get_node(node_id);
-            let references = node.references.iter()
+            let references = node
+                .references
+                .iter()
                 .cloned()
                 .collect::<Vec<NodeReference>>();
             for reference in references {
@@ -151,7 +166,9 @@ impl<'a> Shaker<'a> {
             }
 
             let node = self.ast.get_node(node_id);
-            let references = node.referenced_by.iter()
+            let references = node
+                .referenced_by
+                .iter()
                 .cloned()
                 .collect::<Vec<NodeReference>>();
             for reference in references {
@@ -163,19 +180,16 @@ impl<'a> Shaker<'a> {
     }
 }
 
-
 impl<'a> TreeShaker<'a> {
     fn new(ast: &'a mut Ast) -> Self {
-        Self {
-            ast,
-        }
+        Self { ast }
     }
 
     fn has_side_effect(&self, node_id: NodeID) -> Option<SideEffect> {
         let node = self.ast.get_node(node_id);
         match node.body {
             NodeBody::ConstValue(NodeValue::RuntimeFn(_)) => Some(SideEffect::Execute),
-            _ => None
+            _ => None,
         }
     }
 
@@ -198,7 +212,6 @@ impl<'a> TreeShaker<'a> {
         let mut other_active_roots = Vec::new();
 
         while let Some((node_id, effect)) = shaker.side_effect_nodes.pop() {
-
             assert_eq!(shaker.active_roots.len(), 0);
             shaker.find_mark_alive_triggers(node_id, &effect);
             std::mem::swap(&mut shaker.active_roots, &mut other_active_roots);

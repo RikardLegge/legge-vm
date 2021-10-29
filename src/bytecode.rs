@@ -9,7 +9,7 @@ pub fn from_ast(ast: &ast::Ast) -> Bytecode {
     let root_id = ast.root();
     let mut bc = Generator::new(ast);
     let root_scope = bc.evaluate(root_id);
-    bc.get_bytecode(root_scope)
+    bc.bytecode(root_scope)
 }
 
 pub struct Bytecode {
@@ -220,7 +220,7 @@ impl<'a> Generator<'a> {
         }
     }
 
-    fn get_bytecode(self, mut scope: Scope) -> Bytecode {
+    fn bytecode(self, mut scope: Scope) -> Bytecode {
         let mut code = self.procedures;
         let entrypoint = code.len();
 
@@ -386,8 +386,8 @@ impl<'a> Generator<'a> {
     }
 
     fn with_context<F, T>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> T
-        where
-            F: Fn(&mut Self) -> T,
+    where
+        F: Fn(&mut Self) -> T,
     {
         self.push_context(node_id, tp);
         let result = func(self);
@@ -396,8 +396,8 @@ impl<'a> Generator<'a> {
     }
 
     fn with_scope<F>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> Scope
-        where
-            F: Fn(&mut Self),
+    where
+        F: Fn(&mut Self),
     {
         self.push_scope(node_id);
         self.with_context(node_id, tp, func);
@@ -438,10 +438,16 @@ impl<'a> Generator<'a> {
             VariableValue { variable, path } => self.ev_variable_value(node_id, *variable, path),
             ConstDeclaration { expr, .. }
             | StaticDeclaration { expr, .. }
-            | TypeDeclaration { constructor: expr, .. }
+            | TypeDeclaration {
+                constructor: expr, ..
+            }
             | Import { expr, .. } => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration { expr, .. } => self.ev_declaration(node_id, *expr),
-            VariableAssignment { variable, path, expr } => self.ev_assignment(node_id, *variable, path, *expr),
+            VariableAssignment {
+                variable,
+                path,
+                expr,
+            } => self.ev_assignment(node_id, *variable, path, *expr),
             ProcedureDeclaration { args, body, .. } => self.ev_procedure(node_id, args, *body),
             Return { func, expr } => self.ev_return(node_id, *func, *expr),
             If { condition, body } => self.ev_if(node_id, *condition, *body),
@@ -549,20 +555,26 @@ impl<'a> Generator<'a> {
                     // First create a dummy variable for the original argument, this ensures that
                     // deallocating works as expected. Then copy the variable to the top of the stack.
                     bc.add_dummy_var(false);
-                    bc.add_op(*arg, OP::SLoad(SFOffset::Stack {
-                        offset: i as isize,
-                        field: None,
-                    }));
+                    bc.add_op(
+                        *arg,
+                        OP::SLoad(SFOffset::Stack {
+                            offset: i as isize,
+                            field: None,
+                        }),
+                    );
 
                     // We can then create the true variable which we will later look up and copy the
                     // data from the argument, now on top of the stack, to the closure.
                     let offset = bc.new_var_offset(true);
                     bc.add_op(*arg, OP::PushToClosure(Value::Unset));
-                    bc.add_op(*arg, OP::SStore(SFOffset::Closure {
-                        offset,
-                        depth: 0,
-                        field: None,
-                    }));
+                    bc.add_op(
+                        *arg,
+                        OP::SStore(SFOffset::Closure {
+                            offset,
+                            depth: 0,
+                            field: None,
+                        }),
+                    );
                     bc.add_var(*arg);
                 } else {
                     bc.add_var(*arg);
@@ -591,10 +603,7 @@ impl<'a> Generator<'a> {
         let index = self.get_field_index(val_id, path);
         let offset = self.get_variable_offset(node_id, val_id, index);
 
-        self.add_op(
-            node_id,
-            OP::SLoad(offset),
-        );
+        self.add_op(node_id, OP::SLoad(offset));
         StackUsage::new(0, 1)
     }
 

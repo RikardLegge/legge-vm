@@ -106,14 +106,21 @@ impl fmt::Display for TokenType {
 
             // Enable nice formatting of numbers with leading zeros
             Int(num, significant) => format_number_leading_zeros(f, *num as f64, *significant, 0),
-            Float(num, significant, decimal) =>  format_number_leading_zeros(f, *num, *significant, *decimal),
+            Float(num, significant, decimal) => {
+                format_number_leading_zeros(f, *num, *significant, *decimal)
+            }
         }
     }
 }
 
-fn format_number_leading_zeros(f: &mut Formatter<'_>, num: f64, significant: usize, decimal: usize) -> fmt::Result {
+fn format_number_leading_zeros(
+    f: &mut Formatter<'_>,
+    num: f64,
+    significant: usize,
+    decimal: usize,
+) -> fmt::Result {
     let width = (1.0 + num.log10().floor()) as usize;
-    let left_pad = significant-width;
+    let left_pad = significant - width;
     let right_pad = num;
     write!(f, "{0:0<1$}{2:.3$}", "", left_pad, right_pad, decimal)
 }

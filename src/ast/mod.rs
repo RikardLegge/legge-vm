@@ -2,8 +2,8 @@ mod ast;
 mod checker;
 mod linker;
 mod parser;
-mod typer;
 mod treeshaker;
+mod typer;
 
 use std::result;
 
@@ -14,8 +14,8 @@ pub use ast::{
     Ast, Node, NodeBody, NodeID, NodeReferenceType, NodeType, NodeTypeSource, NodeValue,
     UnlinkedNodeBody,
 };
-use std::collections::HashSet;
 use colored::*;
+use std::collections::HashSet;
 
 pub type Result<N = NodeID> = result::Result<N, Err>;
 
@@ -29,7 +29,10 @@ impl Err {
     pub fn new(ast: &Ast, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Self {
         let node_info = Self::print_line(nodes, ast, row_details);
         // panic!("\nAst Error: {}\n{}\n", details, node_info.join("\n\n"));
-        Err { details: details.into(), node_info: vec![node_info] }
+        Err {
+            details: details.into(),
+            node_info: vec![node_info],
+        }
     }
 
     pub fn print_line(nodes: Vec<NodeID>, ast: &Ast, msg: &str) -> String {
@@ -130,8 +133,8 @@ impl Err {
 }
 
 pub fn from_tokens<I>(iter: I, runtime: &Runtime) -> Result<(Ast, debug::AstTiming)>
-    where
-        I: Iterator<Item=Token>,
+where
+    I: Iterator<Item = Token>,
 {
     let mut timing = debug::AstTiming::default();
     let start = debug::start_timer();

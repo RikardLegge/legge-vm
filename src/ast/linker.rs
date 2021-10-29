@@ -1,7 +1,7 @@
-use super::{Ast, NodeBody, NodeID, Result};
-use crate::ast::ast::{NodeReferenceLocation};
 use super::NodeReferenceType::*;
 use super::UnlinkedNodeBody::*;
+use super::{Ast, NodeBody, NodeID, Result};
+use crate::ast::ast::NodeReferenceLocation;
 use crate::ast::{NodeType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
@@ -70,11 +70,11 @@ impl<'a, 'b> Linker<'a, 'b> {
             NodeValue::Unlinked(ident) => {
                 let (target_id, _) = match self.closest_variable(node_id, &ident)? {
                     Some(target) => target,
-                    None => {
-                        Err(self
-                            .ast
-                            .error("Failed to find type", "value not found", vec![node_id]))?
-                    }
+                    None => Err(self.ast.error(
+                        "Failed to find type",
+                        "value not found",
+                        vec![node_id],
+                    ))?,
                 };
                 let value = match &self.ast.get_node(target_id).body {
                     NodeBody::TypeDeclaration { default_value, .. } => match default_value {
@@ -92,14 +92,18 @@ impl<'a, 'b> Linker<'a, 'b> {
         let tp = match tp {
             NodeType::Void | NodeType::Int | NodeType::Bool | NodeType::String => tp,
             NodeType::Fn { .. } => unimplemented!(),
-            NodeType::Type { tp } => NodeType::Type { tp: Box::new(self.fix_unknown_types(node_id, *tp)?) },
+            NodeType::Type { tp } => NodeType::Type {
+                tp: Box::new(self.fix_unknown_types(node_id, *tp)?),
+            },
             NodeType::Struct { fields } => {
                 let mut fixed_fields = Vec::with_capacity(fields.len());
                 for (name, tp) in fields {
                     let new_value = self.fix_unknown_types(node_id, tp)?;
                     fixed_fields.push((name, new_value));
                 }
-                NodeType::Struct { fields: fixed_fields }
+                NodeType::Struct {
+                    fields: fixed_fields,
+                }
             }
             NodeType::Unknown { ident } => {
                 let (target_id, _) = match self.closest_variable(node_id, &ident)? {
@@ -111,7 +115,10 @@ impl<'a, 'b> Linker<'a, 'b> {
                     }
                 };
                 match &self.ast.get_node(target_id).body {
-                    NodeBody::TypeDeclaration { tp: NodeType::Type { tp }, .. } => (**tp).clone(),
+                    NodeBody::TypeDeclaration {
+                        tp: NodeType::Type { tp },
+                        ..
+                    } => (**tp).clone(),
                     _ => unreachable!(),
                 }
             }
@@ -142,12 +149,13 @@ impl<'a, 'b> Linker<'a, 'b> {
                                     ))?,
                                 };
                             let path = path.clone();
-                            self.ast.add_ref(
-                                (variable, WriteValue),
-                                (expr, ReadValue),
-                                location,
-                            );
-                            NodeBody::VariableAssignment { variable, path, expr }
+                            self.ast
+                                .add_ref((variable, WriteValue), (expr, ReadValue), location);
+                            NodeBody::VariableAssignment {
+                                variable,
+                                path,
+                                expr,
+                            }
                         }
                         Value(value) => {
                             let value = value.clone();
@@ -155,7 +163,12 @@ impl<'a, 'b> Linker<'a, 'b> {
                             NodeBody::ConstValue(new_value)
                         }
                         Type { def, .. } => match &**def {
-                            NodeBody::TypeDeclaration { ident, tp, constructor, default_value } => {
+                            NodeBody::TypeDeclaration {
+                                ident,
+                                tp,
+                                constructor,
+                                default_value,
+                            } => {
                                 let tp = self.fix_unknown_types(node_id, tp.clone())?;
                                 NodeBody::TypeDeclaration {
                                     ident: ident.clone(),
@@ -164,8 +177,13 @@ impl<'a, 'b> Linker<'a, 'b> {
                                     default_value: default_value.clone(),
                                 }
                             }
-                            NodeBody::ProcedureDeclaration { args, returns, body } => {
-                                let tp = self.fix_unknown_types(node_id, returns.clone().unwrap())?;
+                            NodeBody::ProcedureDeclaration {
+                                args,
+                                returns,
+                                body,
+                            } => {
+                                let tp =
+                                    self.fix_unknown_types(node_id, returns.clone().unwrap())?;
                                 NodeBody::ProcedureDeclaration {
                                     args: args.clone(),
                                     returns: Some(tp),
@@ -193,27 +211,25 @@ impl<'a, 'b> Linker<'a, 'b> {
                             NodeBody::VariableValue { variable, path }
                         }
                         Call { ident, .. } => {
-                            let (func, location) =
-                                match self.closest_variable(node_id, &ident)? {
-                                    Some(node_id) => node_id,
-                                    None => Err(self.ast.error(
-                                        "Failed to find variable to call",
-                                        "function not found",
-                                        vec![node_id],
-                                    ))?,
-                                };
+                            let (func, location) = match self.closest_variable(node_id, &ident)? {
+                                Some(node_id) => node_id,
+                                None => Err(self.ast.error(
+                                    "Failed to find variable to call",
+                                    "function not found",
+                                    vec![node_id],
+                                ))?,
+                            };
                             // We move the args out the old NodeBody so that we do not have to copy
                             // the argument vec while replacing the node body.
                             let node = self.ast.get_node_mut(node_id);
                             let args = match &mut node.body {
-                                NodeBody::Unlinked(Call { args, .. }) => mem::replace(args, Vec::new()),
+                                NodeBody::Unlinked(Call { args, .. }) => {
+                                    mem::replace(args, Vec::new())
+                                }
                                 _ => unreachable!(),
                             };
-                            self.ast.add_ref(
-                                (func, GoTo),
-                                (node_id, ExecuteValue),
-                                location,
-                            );
+                            self.ast
+                                .add_ref((func, GoTo), (node_id, ExecuteValue), location);
                             NodeBody::Call { func, args }
                         }
                         ImportValue { ident } => {
@@ -236,11 +252,8 @@ impl<'a, 'b> Linker<'a, 'b> {
                         }
                         Return { .. } => {
                             let (func, location) = self.closest_fn(node_id)?;
-                            self.ast.add_ref(
-                                (func, GoTo),
-                                (node_id, ControlFlow),
-                                location,
-                            );
+                            self.ast
+                                .add_ref((func, GoTo), (node_id, ControlFlow), location);
                             let node = self.ast.get_node_mut(node_id);
                             let expr = match &mut node.body {
                                 NodeBody::Unlinked(Return { expr }) => mem::replace(expr, None),
@@ -250,11 +263,8 @@ impl<'a, 'b> Linker<'a, 'b> {
                         }
                         Break => {
                             let (r#loop, location) = self.closest_loop(node_id)?;
-                            self.ast.add_ref(
-                                (r#loop, GoTo),
-                                (node_id, ControlFlow),
-                                location,
-                            );
+                            self.ast
+                                .add_ref((r#loop, GoTo), (node_id, ControlFlow), location);
                             NodeBody::Break { r#loop }
                         }
                     };
@@ -277,7 +287,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                 | NodeBody::Call { .. }
                 | NodeBody::TypeDeclaration { .. } => None,
 
-                | NodeBody::Return { func, .. } => {
+                NodeBody::Return { func, .. } => {
                     let func = *func;
                     self.ast.add_ref(
                         (func, GoTo),
@@ -287,7 +297,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                     None
                 }
 
-                NodeBody::ProcedureDeclaration { args, returns, body } => {
+                NodeBody::ProcedureDeclaration {
+                    args,
+                    returns,
+                    body,
+                } => {
                     if let Some(NodeType::Unknown { .. }) = *returns {
                         let tp = self.fix_unknown_types(node_id, returns.clone().unwrap())?;
                         Some(NodeBody::ProcedureDeclaration {
@@ -315,8 +329,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                     if let Some(NodeType::Unknown { .. }) = *tp {
                         let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
                         Some(NodeBody::ConstDeclaration {
-                            ident: ident
-                                .clone(),
+                            ident: ident.clone(),
                             tp: Some(tp),
                             expr: *expr,
                         })
@@ -327,7 +340,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                 NodeBody::StaticDeclaration { ident, tp, expr } => {
                     if let Some(NodeType::Unknown { .. }) = *tp {
                         let tp = self.fix_unknown_types(node_id, tp.clone().unwrap())?;
-                        Some(NodeBody::StaticDeclaration { ident: ident.clone(), tp: Some(tp), expr: *expr })
+                        Some(NodeBody::StaticDeclaration {
+                            ident: ident.clone(),
+                            tp: Some(tp),
+                            expr: *expr,
+                        })
                     } else {
                         None
                     }

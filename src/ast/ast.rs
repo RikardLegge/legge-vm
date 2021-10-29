@@ -81,7 +81,7 @@ pub enum SideEffect {
     Read,
     Write,
     Execute,
-    WhenThen(Box<(SideEffect,SideEffect)>),
+    WhenThen(Box<(SideEffect, SideEffect)>),
     GoTo(NodeID),
 }
 
@@ -195,7 +195,9 @@ pub enum NodeTypeSource {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeType {
-    VarArg { args: Box<NodeType> },
+    VarArg {
+        args: Box<NodeType>,
+    },
     Any,
     NotYetImplemented,
     Void,
@@ -203,10 +205,19 @@ pub enum NodeType {
     Float,
     Bool,
     String,
-    Fn { args: Vec<NodeType>, returns: Box<NodeType> },
-    Type { tp: Box<NodeType> },
-    Unknown { ident: String },
-    Struct { fields: Vec<(String, NodeType)> },
+    Fn {
+        args: Vec<NodeType>,
+        returns: Box<NodeType>,
+    },
+    Type {
+        tp: Box<NodeType>,
+    },
+    Unknown {
+        ident: String,
+    },
+    Struct {
+        fields: Vec<(String, NodeType)>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -224,25 +235,78 @@ pub enum NodeValue {
 pub enum NodeBody {
     Empty,
     ConstValue(NodeValue),
-    Op { op: ArithmeticOP, lhs: NodeID, rhs: NodeID },
-    ProcedureDeclaration { args: Vec<NodeID>, returns: Option<NodeType>, body: NodeID },
-    PrefixOp { op: ArithmeticOP, rhs: NodeID },
-    Block { body: Vec<NodeID> },
-    If { condition: NodeID, body: NodeID },
-    Loop { body: NodeID },
+    Op {
+        op: ArithmeticOP,
+        lhs: NodeID,
+        rhs: NodeID,
+    },
+    ProcedureDeclaration {
+        args: Vec<NodeID>,
+        returns: Option<NodeType>,
+        body: NodeID,
+    },
+    PrefixOp {
+        op: ArithmeticOP,
+        rhs: NodeID,
+    },
+    Block {
+        body: Vec<NodeID>,
+    },
+    If {
+        condition: NodeID,
+        body: NodeID,
+    },
+    Loop {
+        body: NodeID,
+    },
     Expression(NodeID),
     Comment(String),
-    Import { ident: String, expr: NodeID },
+    Import {
+        ident: String,
+        expr: NodeID,
+    },
 
-    VariableDeclaration { ident: String, tp: Option<NodeType>, expr: Option<NodeID> },
-    ConstDeclaration { ident: String, tp: Option<NodeType>, expr: NodeID },
-    StaticDeclaration { ident: String, tp: Option<NodeType>, expr: NodeID },
-    TypeDeclaration { ident: String, tp: NodeType, constructor: NodeID, default_value: Option<NodeValue> },
-    VariableAssignment { variable: NodeID, path: Option<Vec<String>>, expr: NodeID },
-    VariableValue { variable: NodeID, path: Option<Vec<String>> },
-    Return { func: NodeID, expr: Option<NodeID> },
-    Break { r#loop: NodeID },
-    Call { func: NodeID, args: Vec<NodeID> },
+    VariableDeclaration {
+        ident: String,
+        tp: Option<NodeType>,
+        expr: Option<NodeID>,
+    },
+    ConstDeclaration {
+        ident: String,
+        tp: Option<NodeType>,
+        expr: NodeID,
+    },
+    StaticDeclaration {
+        ident: String,
+        tp: Option<NodeType>,
+        expr: NodeID,
+    },
+    TypeDeclaration {
+        ident: String,
+        tp: NodeType,
+        constructor: NodeID,
+        default_value: Option<NodeValue>,
+    },
+    VariableAssignment {
+        variable: NodeID,
+        path: Option<Vec<String>>,
+        expr: NodeID,
+    },
+    VariableValue {
+        variable: NodeID,
+        path: Option<Vec<String>>,
+    },
+    Return {
+        func: NodeID,
+        expr: Option<NodeID>,
+    },
+    Break {
+        r#loop: NodeID,
+    },
+    Call {
+        func: NodeID,
+        args: Vec<NodeID>,
+    },
 
     Unlinked(UnlinkedNodeBody),
 }
@@ -259,14 +323,31 @@ impl NodeBody {
 
 #[derive(Debug, Clone)]
 pub enum UnlinkedNodeBody {
-    VariableAssignment { ident: String, path: Option<Vec<String>>, expr: NodeID },
+    VariableAssignment {
+        ident: String,
+        path: Option<Vec<String>>,
+        expr: NodeID,
+    },
     Value(NodeValue),
-    VariableValue { ident: String, path: Option<Vec<String>> },
-    Type { def: Box<NodeBody>, expr: Option<NodeID> },
-    Return { expr: Option<NodeID> },
+    VariableValue {
+        ident: String,
+        path: Option<Vec<String>>,
+    },
+    Type {
+        def: Box<NodeBody>,
+        expr: Option<NodeID>,
+    },
+    Return {
+        expr: Option<NodeID>,
+    },
     Break,
-    Call { ident: String, args: Vec<NodeID> },
-    ImportValue { ident: String },
+    Call {
+        ident: String,
+        args: Vec<NodeID>,
+    },
+    ImportValue {
+        ident: String,
+    },
 }
 
 impl UnlinkedNodeBody {
@@ -317,12 +398,14 @@ impl Ast {
         loc: NodeReferenceLocation,
     ) {
         let referenced_by = NodeReference::new(referencer.0, referencer.1, loc);
-        let inserted_referenced = self.get_node_mut(target.0)
+        let inserted_referenced = self
+            .get_node_mut(target.0)
             .referenced_by
             .insert(referenced_by);
 
         let references = NodeReference::new(target.0, target.1, loc);
-        let inserted_references = self.get_node_mut(referencer.0)
+        let inserted_references = self
+            .get_node_mut(referencer.0)
             .references
             .insert(references);
 
@@ -339,12 +422,14 @@ impl Ast {
         loc: NodeReferenceLocation,
     ) {
         let referenced_by = NodeReference::new(referencer_id, tp, loc);
-        let removed_referenced = self.get_node_mut(target_id)
+        let removed_referenced = self
+            .get_node_mut(target_id)
             .referenced_by
             .remove(&referenced_by);
 
         let references = NodeReference::new(target_id, tp, loc);
-        let removed_referencer = self.get_node_mut(referencer_id)
+        let removed_referencer = self
+            .get_node_mut(referencer_id)
             .references
             .remove(&references);
         if !removed_referenced && !removed_referencer {
@@ -355,7 +440,6 @@ impl Ast {
             format!("WARNING: removed reference missing to target {:?} from referer {:?} during reference removal", target_id, referencer_id);
         }
     }
-
 
     pub fn add_root_node(&mut self) -> NodeID {
         self.add_some_node(None)
@@ -393,12 +477,12 @@ impl Ast {
         let node = &self.nodes[node_id.0];
         let mut children = node.body.children().peekable();
 
-
         let prefix = if node.is_dead() { "-" } else { " " };
         write!(f, "{}", prefix)?;
 
         let pad_len = 2 + level * 2;
-        let pad_start = " ".repeat(std::cmp::max(0, pad_len as isize - prefix.len() as isize) as usize);
+        let pad_start =
+            " ".repeat(std::cmp::max(0, pad_len as isize - prefix.len() as isize) as usize);
         let pad_end = " ".repeat(pad_len);
         write!(f, "{}", pad_start)?;
 
@@ -455,7 +539,7 @@ impl Ast {
                 _ => None,
             })
         })
-            .unwrap()
+        .unwrap()
     }
 
     pub fn closest_loop(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
@@ -465,7 +549,7 @@ impl Ast {
                 _ => None,
             })
         })
-            .unwrap()
+        .unwrap()
     }
 
     pub fn closest_variable(
@@ -507,8 +591,8 @@ impl Ast {
         mut node_id: NodeID,
         test: F,
     ) -> Result<Option<(NodeID, NodeReferenceLocation)>>
-        where
-            F: Fn(&Node) -> Result<Option<NodeID>>,
+    where
+        F: Fn(&Node) -> Result<Option<NodeID>>,
     {
         let mut location = NodeReferenceLocation::Local;
         loop {
@@ -575,7 +659,9 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
             PrefixOp { rhs: value, .. }
             | Loop { body: value }
             | Expression(value)
-            | TypeDeclaration { constructor: value, .. }
+            | TypeDeclaration {
+                constructor: value, ..
+            }
             | ConstDeclaration { expr: value, .. }
             | StaticDeclaration { expr: value, .. }
             | VariableAssignment { expr: value, .. }
@@ -583,7 +669,9 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
                 0 => Some(value),
                 _ => None,
             },
-            VariableValue { .. } | Comment { .. } | Break { .. } | ConstValue { .. } | Empty => None,
+            VariableValue { .. } | Comment { .. } | Break { .. } | ConstValue { .. } | Empty => {
+                None
+            }
             Unlinked(body) => {
                 if let None = self.unlinked {
                     self.unlinked = Some(body.children());

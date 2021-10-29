@@ -1,13 +1,13 @@
+use crate::ast::NodeID;
 use crate::bytecode::{Bytecode, SFOffset, OP};
 use crate::runtime::Runtime;
 use crate::{bytecode, LogLevel};
 use std::cell::RefCell;
-use std::{mem, fmt};
-use std::ops::{Add, Div, Mul, Sub};
-use std::rc::Rc;
 use std::cmp::Ordering;
 use std::fmt::Formatter;
-use crate::ast::NodeID;
+use std::ops::{Add, Div, Mul, Sub};
+use std::rc::Rc;
+use std::{fmt, mem};
 
 #[derive(Debug)]
 pub struct Err {
@@ -71,15 +71,19 @@ impl<'a> Interpreter<'a> {
     pub fn execute(&mut self, cmd: &OP, node_id: NodeID) -> Result {
         self.executed_instructions += 1;
         if self.log_level >= LogLevel::LogEval {
+            let line = (self.get_line)(node_id) as usize;
             self.debug_log(
                 LogLevel::LogEval,
                 &format!(
                     "Line: {:>4} PC: {:>4} Inst: {:<40} SP: {:>4} Stack: {:?}",
-                    (self.get_line)(node_id),
-                    format!("{}", match self.pc {
-                        Some(pc) => pc.to_string(),
-                        None => "None".into(),
-                    }),
+                    line,
+                    format!(
+                        "{}",
+                        match self.pc {
+                            Some(pc) => pc.to_string(),
+                            None => "None".into(),
+                        }
+                    ),
                     format!("{:?}", cmd),
                     self.frame.stack_pointer,
                     self.stack
@@ -146,7 +150,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn get_foreign_function_arguments(&mut self) -> Result<Vec<bytecode::Value>> {
+    fn foreign_function_arguments(&mut self) -> Result<Vec<bytecode::Value>> {
         let count = self.stack.len() - self.frame.stack_pointer;
         let mut arguments = Vec::with_capacity(count);
         for _ in 0..count {
@@ -157,7 +161,7 @@ impl<'a> Interpreter<'a> {
         Ok(arguments)
     }
 
-    fn get_value<'b>(mut value: &'b mut Value, struct_index: &Option<Vec<usize>>) -> &'b mut Value {
+    fn value<'b>(mut value: &'b mut Value, struct_index: &Option<Vec<usize>>) -> &'b mut Value {
         if let Some(struct_index) = struct_index {
             for index in struct_index {
                 if let Value::Struct(fields) = value {
@@ -245,14 +249,14 @@ impl<'a> Interpreter<'a> {
                     }
                     let value = self.pop_stack()?;
                     let target_root = &mut closure.borrow_mut().stack[index];
-                    let target = Self::get_value(target_root, field);
+                    let target = Self::value(target_root, field);
                     *target = value;
                 }
                 SFOffset::Stack { offset, field } => {
                     let index = (self.frame.stack_pointer as isize + *offset) as usize;
                     let value = self.pop_stack()?;
                     let target_root = &mut self.stack[index];
-                    let target = Self::get_value(target_root, field);
+                    let target = Self::value(target_root, field);
                     *target = value;
                 }
             },
@@ -274,13 +278,13 @@ impl<'a> Interpreter<'a> {
                         depth -= 1;
                     }
                     let value_root = &mut closure.as_ref().borrow_mut().stack[*index];
-                    let value = Self::get_value(value_root, field);
+                    let value = Self::value(value_root, field);
                     self.push_stack(value.clone())?;
                 }
                 SFOffset::Stack { offset, field } => {
                     let index = self.frame.stack_pointer as isize + *offset;
                     let value_root = &mut self.stack[index as usize];
-                    let value = Self::get_value(value_root, field);
+                    let value = Self::value(value_root, field);
                     let value = value.clone();
                     self.push_stack(value)?;
                 }
@@ -350,7 +354,7 @@ impl<'a> Interpreter<'a> {
                         self.pc = Some(addr);
                     }
                     Value::RuntimeFn(id) => {
-                        let mut args = self.get_foreign_function_arguments()?;
+                        let mut args = self.foreign_function_arguments()?;
                         let func = self.runtime.functions[id].function;
                         let returns = func(self, &mut args)?;
                         // Just make sure that the function has not set the pc to None
@@ -450,7 +454,6 @@ impl fmt::Debug for Value {
         }
     }
 }
-
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
