@@ -293,34 +293,8 @@ impl<'a> Checker<'a> {
     fn fits_function_argument(&self, node: &Node, hole: &NodeType, shape: &NodeType) -> Result<()> {
         use NodeType::*;
         match (hole, shape) {
-            (
-                Fn {
-                    args: hole_args,
-                    returns: hole_ret,
-                },
-                Fn {
-                    args: shape_args,
-                    returns: shape_ret,
-                },
-            ) => {
-                self.fits_function_argument(node, hole_ret, shape_ret)?;
-                let vararg_tp = self.correct_number_of_arguments(node, &hole_args, &shape_args)?;
-                let arg_node_ids = node.body.children().map(|id| *id).collect::<Vec<NodeID>>();
-                if let Some(_) = vararg_tp {
-                    unimplemented!();
-                } else {
-                    for (i, (shape_arg, hole_arg)) in shape_args.iter().zip(hole_args).enumerate() {
-                        let arg = if i >= arg_node_ids.len() {
-                            node
-                        } else {
-                            self.ast.get_node(arg_node_ids[i])
-                        };
-                        // Intentionally flipped shape and hole since we are comparing type declarations
-                        self.fits_function_argument(arg, shape_arg, hole_arg)?;
-                    }
-                }
-                Ok(())
-            }
+            // Flip shape and hole since we are comparing types now!
+            (Fn { .. }, Fn { .. }) => self.fits_function_function(node, shape, hole),
             (Any, Void) if *shape != Void => Err(self.ast.error(
                 "function expected Any type of value, nothing (Void) provided.",
                 "Argument required here",
@@ -336,6 +310,53 @@ impl<'a> Checker<'a> {
                 "Wrong argument type",
                 vec![node.id],
             )),
+        }
+    }
+
+    fn fits_function_function(&self, node: &Node, hole: &NodeType, shape: &NodeType) -> Result<()> {
+        match (hole, shape) {
+            (
+                NodeType::Fn {
+                    args: hole_args,
+                    returns: hole_ret,
+                },
+                NodeType::Fn {
+                    args: shape_args,
+                    returns: shape_ret,
+                },
+            ) => {
+                self.fits_function_argument(node, hole_ret, shape_ret)?;
+                let vararg_tp = self.correct_number_of_arguments(node, &hole_args, &shape_args)?;
+                let arg_node_ids = node.body.children().map(|id| *id).collect::<Vec<NodeID>>();
+                if let Some(vararg) = vararg_tp {
+                    for (i, shape_arg) in shape_args.iter().enumerate() {
+                        let hole_arg = if i < hole_args.len() - 1 {
+                            &hole_args[i]
+                        } else {
+                            vararg
+                        };
+                        let arg = if i >= arg_node_ids.len() {
+                            // Only used for printing errors, so ok if we do not have a correct id
+                            node
+                        } else {
+                            self.ast.get_node(arg_node_ids[i])
+                        };
+                        self.fits_function_argument(arg, hole_arg, shape_arg)?;
+                    }
+                } else {
+                    for (i, (shape_arg, hole_arg)) in shape_args.iter().zip(hole_args).enumerate() {
+                        let arg = if i >= arg_node_ids.len() {
+                            // Only used for printing errors, so ok if we do not have a correct id
+                            node
+                        } else {
+                            self.ast.get_node(arg_node_ids[i])
+                        };
+                        self.fits_function_argument(arg, hole_arg, shape_arg)?;
+                    }
+                }
+                Ok(())
+            }
+            _ => unreachable!(),
         }
     }
 
@@ -360,37 +381,7 @@ impl<'a> Checker<'a> {
                     Ok(())
                 }
             }
-            (
-                Fn {
-                    args: hole_args,
-                    returns: hole_ret,
-                },
-                Fn {
-                    args: shape_args,
-                    returns: shape_ret,
-                },
-            ) => {
-                self.fits_function_argument(node, hole_ret, shape_ret)?;
-                let vararg_tp = self.correct_number_of_arguments(node, &hole_args, &shape_args)?;
-                let arg_node_ids = node.body.children().map(|id| *id).collect::<Vec<NodeID>>();
-                if let Some(vararg) = vararg_tp {
-                    for (i, shape_arg) in shape_args.iter().enumerate() {
-                        let hole_arg = if i < hole_args.len() - 1 {
-                            &hole_args[i]
-                        } else {
-                            vararg
-                        };
-                        let arg = self.ast.get_node(arg_node_ids[i]);
-                        self.fits_function_argument(arg, hole_arg, shape_arg)?;
-                    }
-                } else {
-                    for (i, (shape_arg, hole_arg)) in shape_args.iter().zip(hole_args).enumerate() {
-                        let arg = self.ast.get_node(arg_node_ids[i]);
-                        self.fits_function_argument(arg, hole_arg, shape_arg)?;
-                    }
-                }
-                Ok(())
-            }
+            (Fn { .. }, Fn { .. }) => self.fits_function_function(node, hole, shape),
             (_, Fn { .. }) => Err(self.ast.error(
                 &format!("tried to call non-callable function"),
                 "Can not call",

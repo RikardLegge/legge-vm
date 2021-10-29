@@ -1,7 +1,7 @@
 import log;
 
-do :: fn(f: Fn(string)) {
-  f("hej");
+do :: fn(f: Fn(string, int)) {
+  f("hej", 1);
 }
 
-do(exit);
+do(log);
