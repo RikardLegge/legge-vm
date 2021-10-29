@@ -1,18 +1,7 @@
-import exit;
+import log;
 
-val := 0;
-
-halt :: fn() {
-  exit(val);
+do :: fn(f: Fn(string)) {
+  f("hej");
 }
 
-do :: fn(f: Fn()) {
-  f();
-}
-
-inc :: fn() {
-  val = val + 1;
-}
-
-inc();
-do(halt);
+do(exit);
