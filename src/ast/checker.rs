@@ -162,9 +162,14 @@ impl<'a> Checker<'a> {
                         ))
                     }
                 }
-                Return { func, expr } => {
-                    let func = self.ast.get_node(*func).tp.as_ref().unwrap();
-                    if let Fn { returns, .. } = &func.tp {
+                Return {
+                    func,
+                    expr,
+                    automatic,
+                } => {
+                    let func = self.ast.get_node(*func);
+                    let func_tp = func.tp.as_ref().unwrap();
+                    if let Fn { returns, .. } = &func_tp.tp {
                         match (&**returns, expr) {
                             (NodeType::Void, None) => Ok(()),
                             (NodeType::Void, Some(ret_id)) => Err(self.ast.error(
@@ -172,11 +177,41 @@ impl<'a> Checker<'a> {
                                 "Not allowed to return a value from here",
                                 vec![*ret_id],
                             )),
-                            (_, None) => Err(self.ast.error(
-                                "Return value can not be of type void",
-                                "A value must be provided when returning from here",
-                                vec![node.id],
-                            )),
+                            (expected, None) => {
+                                if *automatic {
+                                    let mut nodes = vec![];
+                                    let body_id = **func
+                                        .body
+                                        .children()
+                                        .collect::<Vec<&NodeID>>()
+                                        .last()
+                                        .unwrap();
+                                    nodes.push(body_id);
+                                    let statements = self
+                                        .ast
+                                        .get_node(body_id)
+                                        .body
+                                        .children()
+                                        .cloned()
+                                        .collect::<Vec<NodeID>>();
+                                    if statements.len() >= 2 {
+                                        let last_node_id = statements[statements.len() - 2];
+                                        nodes.push(last_node_id);
+                                    }
+
+                                    Err(self.ast.error(
+                                        "Function missing return statement",
+                                        &format!("A return of type {:?} must be provided as the final statement of the function", expected),
+                                       nodes
+                                    ))
+                                } else {
+                                    Err(self.ast.error(
+                                        "Return value can not be of type void",
+                                        "A value must be provided when returning from here",
+                                        vec![node.id],
+                                    ))
+                                }
+                            }
                             (tp, Some(ret_id)) => {
                                 let ret = self.ast.get_node(*ret_id).tp.as_ref().unwrap();
                                 if ret.tp == *tp {

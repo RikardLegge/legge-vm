@@ -665,6 +665,7 @@ where
                 NodeBody::Return {
                     func: node.id,
                     expr: None,
+                    automatic: true,
                 },
             );
             match &mut self.ast.get_node_mut(body).body {

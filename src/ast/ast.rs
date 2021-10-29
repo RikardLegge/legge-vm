@@ -299,6 +299,7 @@ pub enum NodeBody {
     Return {
         func: NodeID,
         expr: Option<NodeID>,
+        automatic: bool,
     },
     Break {
         r#loop: NodeID,

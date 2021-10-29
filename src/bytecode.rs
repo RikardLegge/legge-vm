@@ -449,7 +449,7 @@ impl<'a> Generator<'a> {
                 expr,
             } => self.ev_assignment(node_id, *variable, path, *expr),
             ProcedureDeclaration { args, body, .. } => self.ev_procedure(node_id, args, *body),
-            Return { func, expr } => self.ev_return(node_id, *func, *expr),
+            Return { func, expr, .. } => self.ev_return(node_id, *func, *expr),
             If { condition, body } => self.ev_if(node_id, *condition, *body),
             Loop { body } => self.ev_loop(node_id, *body),
             Break { r#loop } => self.ev_break(node_id, *r#loop),

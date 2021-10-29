@@ -1,7 +1,9 @@
-import exit;
+name :: "Statically Declared string with inferred type";
 
-do :: fn(f: Fn(string, int)) {
-  f("hej", 1);
+print :: fn(text: string) -> int {
+    // Import function with side effect.
+    import log;
+    log(text);
 }
 
-do(exit);
+print(name);

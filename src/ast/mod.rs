@@ -44,30 +44,35 @@ impl Err {
             let mut ids = HashSet::new();
             for node_id in nodes.iter() {
                 let mut curr = ast.get_node(*node_id);
-                let line = curr.tokens.first().unwrap().line;
-                loop {
-                    // Inefficient but it works since the parent node might not yet have a reference to it's children.
-                    for token in curr.tokens.iter().chain(curr.child_tokens(ast).iter()) {
-                        if ids.contains(&token.id) {
-                            continue;
+                if let Some(token) = curr.tokens.first() {
+                    let line = token.line;
+                    loop {
+                        // Inefficient but it works since the parent node might not yet have a reference to it's children.
+                        for token in curr.tokens.iter().chain(curr.child_tokens(ast).iter()) {
+                            if ids.contains(&token.id) {
+                                continue;
+                            }
+                            if (token.line as isize - line as isize).abs() > 1 {
+                                continue;
+                            }
+                            ids.insert(token.id);
+                            tokens.push(token.clone());
                         }
-                        if (token.line as isize - line as isize).abs() > 1 {
-                            continue;
-                        }
-                        ids.insert(token.id);
-                        tokens.push(token.clone());
-                    }
-                    if curr.parent_id.is_none() {
-                        break;
-                    }
-                    let first_token = curr.tokens.first();
-                    let last_token = curr.tokens.last();
-                    if !first_token.is_none() {
-                        if first_token.unwrap().line != line && last_token.unwrap().line != line {
+                        if curr.parent_id.is_none() {
                             break;
                         }
+                        let first_token = curr.tokens.first();
+                        let last_token = curr.tokens.last();
+                        if !first_token.is_none() {
+                            if first_token.unwrap().line != line && last_token.unwrap().line != line
+                            {
+                                break;
+                            }
+                        }
+                        curr = ast.get_node(curr.parent_id.unwrap());
                     }
-                    curr = ast.get_node(curr.parent_id.unwrap());
+                } else {
+                    continue;
                 }
             }
             tokens.sort_by(|t1, t2| t1.start.cmp(&t2.start));
@@ -75,58 +80,61 @@ impl Err {
             tokens
         };
 
-        let mut line = all_tokens[0].line;
-        let mut end = 0;
-        let mut builder = vec![format!("{:>4} | ", line)];
+        let mut builder = vec![];
+        if all_tokens.len() > 0 {
+            let mut line = all_tokens[0].line;
+            let mut end = 0;
+            builder.push(format!("{:>4} | ", line));
 
-        let mut underline = Vec::new();
-        let mut do_underline = false;
-        for t in all_tokens.iter() {
-            let mut line_offset = t.line as isize - line as isize;
-            while line_offset > 0 {
-                if do_underline {
-                    builder.push(format!(
-                        "\n       {} {}",
-                        underline.join(""),
-                        msg.to_string()
-                    ));
+            let mut underline = Vec::new();
+            let mut do_underline = false;
+            for t in all_tokens.iter() {
+                let mut line_offset = t.line as isize - line as isize;
+                while line_offset > 0 {
+                    if do_underline {
+                        builder.push(format!(
+                            "\n       {} {}",
+                            underline.join(""),
+                            msg.to_string()
+                        ));
+                    }
+
+                    end = 0;
+                    line_offset -= 1;
+                    underline.clear();
+                    do_underline = false;
+
+                    builder.push(format!("\n{:>4} | ", t.line as isize - line_offset));
                 }
-
-                end = 0;
-                line_offset -= 1;
-                underline.clear();
-                do_underline = false;
-
-                builder.push(format!("\n{:>4} | ", t.line as isize - line_offset));
+                let char_offset = t.start - end;
+                if char_offset > 0 {
+                    builder.push(" ".repeat(char_offset));
+                    underline.push(" ".repeat(char_offset));
+                }
+                let mut token_str = format!("{}", t.tp);
+                let contains_token = nodes
+                    .iter()
+                    .filter(|n| ast.get_node(**n).tokens.contains(t))
+                    .next()
+                    .is_some();
+                if contains_token {
+                    underline.push("^".repeat(token_str.len()));
+                    do_underline = true;
+                    token_str = token_str.red().to_string()
+                } else {
+                    underline.push(" ".repeat(token_str.len()));
+                }
+                builder.push(token_str);
+                line = t.line;
+                end = t.end;
             }
-            let char_offset = t.start - end;
-            if char_offset > 0 {
-                builder.push(" ".repeat(char_offset));
-                underline.push(" ".repeat(char_offset));
+            if do_underline {
+                builder.push(format!(
+                    "\n       {} {}",
+                    underline.join(""),
+                    msg.to_string()
+                ));
             }
-            let mut token_str = format!("{}", t.tp);
-            let contains_token = nodes
-                .iter()
-                .filter(|n| ast.get_node(**n).tokens.contains(t))
-                .next()
-                .is_some();
-            if contains_token {
-                underline.push("^".repeat(token_str.len()));
-                do_underline = true;
-                token_str = token_str.red().to_string()
-            } else {
-                underline.push(" ".repeat(token_str.len()));
-            }
-            builder.push(token_str);
-            line = t.line;
-            end = t.end;
-        }
-        if do_underline {
-            builder.push(format!(
-                "\n       {} {}",
-                underline.join(""),
-                msg.to_string()
-            ));
         }
         builder.join("")
     }

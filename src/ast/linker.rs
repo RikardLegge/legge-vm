@@ -259,7 +259,11 @@ impl<'a, 'b> Linker<'a, 'b> {
                                 NodeBody::Unlinked(Return { expr }) => mem::replace(expr, None),
                                 _ => unreachable!(),
                             };
-                            NodeBody::Return { func, expr }
+                            NodeBody::Return {
+                                func,
+                                expr,
+                                automatic: false,
+                            }
                         }
                         Break => {
                             let (r#loop, location) = self.closest_loop(node_id)?;
