@@ -3,7 +3,7 @@ import exit;
 val := 0;
 
 halt :: fn() {
-  exit(1);
+  exit(val);
 }
 
 do :: fn(f: Fn()) {
