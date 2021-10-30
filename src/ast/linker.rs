@@ -306,8 +306,8 @@ impl<'a, 'b> Linker<'a, 'b> {
                     returns,
                     body,
                 } => {
-                    if let Some(NodeType::Unknown { .. }) = *returns {
-                        let tp = self.fix_unknown_types(node_id, returns.clone().unwrap())?;
+                    if let Some(returns) = returns {
+                        let tp = self.fix_unknown_types(node_id, returns.clone())?;
                         Some(NodeBody::ProcedureDeclaration {
                             args: args.clone(),
                             returns: Some(tp),

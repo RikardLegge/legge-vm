@@ -373,7 +373,7 @@ impl<'a> Interpreter<'a> {
                             }
                         }
                     }
-                    _ => unimplemented!(),
+                    _ => unimplemented!("{:?}", val),
                 }
             }
             PrepareStackFrame(arg_count) => {

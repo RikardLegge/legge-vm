@@ -110,6 +110,40 @@ bc_test! {test_returned_closure {
     exit(inc());
 } == Int(3) }
 
+bc_test! {test_returned_closure_bind_arg_1 {
+    wrap :: fn(f: Fn(int) -> int) -> Fn() -> int {
+        return fn() -> int {
+            v :: 21;
+            return f(v);
+        };
+    }
+    val :: wrap(fn(v: int) -> int {return v*2;});
+    exit(val());
+} == Int(42) }
+
+bc_test! {test_returned_closure_bind_arg_2 {
+    wrap :: fn(f: Fn(int) -> int) -> Fn() -> int {
+        v :: 21;
+        return fn() -> int {
+            return f(v);
+        };
+    }
+    val :: wrap(fn(v: int) -> int {return v*2;});
+    exit(val());
+} == Int(42) }
+
+bc_test! {test_returned_closure_bind_arg_3 {
+    wrap :: fn(f: Fn(int) -> int) -> Fn() -> int {
+        ff :: f;
+        v :: 21;
+        return fn() -> int {
+            return ff(v);
+        };
+    }
+    val :: wrap(fn(v: int) -> int {return v*2;});
+    exit(val());
+} == Int(42) }
+
 bc_test! {test_nested_scope {
     proxy :: fn() {
         val := 0;

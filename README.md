@@ -9,10 +9,16 @@ Should probably not be used in production but that might not stop some very brav
 // This is a comment
 name :: "Staticly Declared string with infered type"
 
-print :: fn(text: string) {
+curry :: fn(f: Fn(string, string), v1: string) -> Fn(string) {
+    return fn(v2: string) {
+        f(v1, v2);
+    }
+}
+
+print_context :: fn(context: string, message: string) {
     // Import function with side effect.
     import log;
-    log(text);
+    log(context, message);
 }
 
 print(name);

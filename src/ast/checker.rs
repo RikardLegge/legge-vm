@@ -194,6 +194,8 @@ impl<'a> Checker<'a> {
                                         .children()
                                         .cloned()
                                         .collect::<Vec<NodeID>>();
+
+                                    // The last statement will be the automatically inserted return statement.
                                     if statements.len() >= 2 {
                                         let last_node_id = statements[statements.len() - 2];
                                         nodes.push(last_node_id);
