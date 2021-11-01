@@ -143,19 +143,17 @@ impl Context {
     }
 
     fn local_allocations(&self) -> usize {
-        let mut allocations = 0;
-        for var in &self.variables {
-            if !var.requires_closure {
-                allocations += 1;
-            }
-        }
-        allocations
+        self.allocations(false)
     }
 
     fn closure_allocations(&self) -> usize {
+        self.allocations(true)
+    }
+
+    fn allocations(&self, has_closure_reference: bool) -> usize {
         let mut allocations = 0;
         for var in &self.variables {
-            if var.requires_closure {
+            if var.requires_closure == has_closure_reference {
                 allocations += 1;
             }
         }
@@ -346,20 +344,14 @@ where
     }
 
     fn new_var_offset(&self, has_closure_reference: bool) -> usize {
-        if has_closure_reference {
-            let context = self.get_context();
-            let offset = context.closure_allocations();
-            offset
-        } else {
-            let mut offset = 0;
-            for context in self.contexts.iter().rev() {
-                offset += context.local_allocations();
-                if context.tp == ContextType::ClosureBoundary {
-                    break;
-                }
+        let mut offset = 0;
+        for context in self.contexts.iter().rev() {
+            offset += context.allocations(has_closure_reference);
+            if context.tp == ContextType::ClosureBoundary {
+                break;
             }
-            offset
         }
+        offset
     }
 
     fn add_var(&mut self, var_id: NodeID) {
