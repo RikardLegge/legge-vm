@@ -1,5 +1,5 @@
 use super::{Ast, Node, Result};
-use crate::ast::ast::{CallNode, StateTypesChecked, TypesInferred};
+use crate::ast::ast::{StateTypesChecked, TypesInferred};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{Err, NodeID, NodeType};
 use std::result;
@@ -36,257 +36,236 @@ where
     pub fn check_type(&self, node: &Node<T>) -> Result<()> {
         use crate::ast::nodebody::NodeBody::*;
         use NodeType::*;
-        if node.tp.is_some() {
-            match &node.body {
-                Empty
-                | Break { .. }
-                | Comment { .. }
-                | ConstValue { .. }
-                | PrefixOp { .. }
-                | Block { .. }
-                | Loop { .. }
-                | Expression { .. }
-                | VariableValue { .. }
-                | ProcedureDeclaration(NBProcedureDeclaration { .. })
-                | TypeReference { .. }
-                | PartialType { .. }
-                | Import { .. } => Ok(()),
-                Op { op, lhs, rhs } => {
-                    let lhs_tp = self.ast.get_node(*lhs).tp.as_ref().unwrap();
-                    let rhs_tp = self.ast.get_node(*rhs).tp.as_ref().unwrap();
-                    if lhs_tp.tp == rhs_tp.tp {
-                        Ok(())
-                    } else {
-                        Err(self.ast.error(
+        match &node.body {
+            Empty
+            | Break { .. }
+            | Comment { .. }
+            | ConstValue { .. }
+            | PrefixOp { .. }
+            | Block { .. }
+            | Loop { .. }
+            | Expression { .. }
+            | VariableValue { .. }
+            | ProcedureDeclaration(NBProcedureDeclaration { .. })
+            | TypeReference { .. }
+            | PartialType { .. }
+            | Import { .. } => Ok(()),
+            Op { op, lhs, rhs } => {
+                let lhs_tp = self.ast.get_node(*lhs).tp();
+                let rhs_tp = self.ast.get_node(*rhs).tp();
+                if lhs_tp == rhs_tp {
+                    Ok(())
+                } else {
+                    Err(self.ast.error(
                             &format!(
                                 "Types for left and right hand side of op {:?} do not match ({:?} != {:?})",
-                                op, lhs_tp.tp, rhs_tp.tp
+                                op, lhs_tp, rhs_tp
                             ),
                             "Both sides must have the same type",
-                            vec![node.id, *lhs, *rhs],
+                            vec![node.id(), *lhs, *rhs],
                         ))
-                    }
                 }
-                VariableAssignment {
-                    variable,
-                    path,
-                    expr,
-                } => {
-                    let variable_node = self.ast.get_node(*variable);
-                    match variable_node.body {
-                        NodeBody::ConstDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
-                            Err(self.ast.error(
-                                "Not allowed to assign to constant value",
-                                "Assignment to constant value",
-                                vec![node.id],
-                            ))?
-                        }
-                        _ => (),
+            }
+            VariableAssignment {
+                variable,
+                path,
+                expr,
+            } => {
+                let variable_node = self.ast.get_node(*variable);
+                match variable_node.body {
+                    NodeBody::ConstDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
+                        Err(self.ast.error(
+                            "Not allowed to assign to constant value",
+                            "Assignment to constant value",
+                            vec![node.id()],
+                        ))?
                     }
-                    let mut variable_tp = &variable_node.tp.as_ref().unwrap().tp;
-                    if let Some(path) = path {
-                        for path_field in path {
-                            let fields = if let NodeType::Struct { fields } = &variable_tp {
+                    _ => (),
+                }
+                let mut variable_tp = variable_node.tp();
+                if let Some(path) = path {
+                    for path_field in path {
+                        let fields = if let NodeType::Struct { fields } = &variable_tp {
+                            fields
+                        } else if let NodeType::Type { content, .. } = &variable_tp {
+                            if let NodeType::Struct { fields } = &**content {
                                 fields
-                            } else if let NodeType::Type { content, .. } = &variable_tp {
-                                if let NodeType::Struct { fields } = &**content {
-                                    fields
-                                } else {
-                                    unimplemented!("{:?}", variable_tp)
-                                }
                             } else {
                                 unimplemented!("{:?}", variable_tp)
-                            };
-                            let mut tp = None;
-                            for (field, field_tp) in fields {
-                                if path_field == field {
-                                    tp = Some(field_tp);
-                                    break;
-                                }
                             }
-                            match tp {
-                                Some(tp) => {
-                                    variable_tp = tp;
-                                }
-                                None => {
-                                    return Err(self.ast.error(
-                                        &format!("Struct does not have the field '{}'", path_field),
-                                        "",
-                                        vec![node.id],
-                                    ));
-                                }
+                        } else {
+                            unimplemented!("{:?}", variable_tp)
+                        };
+                        let mut tp = None;
+                        for (field, field_tp) in fields {
+                            if path_field == field {
+                                tp = Some(field_tp);
+                                break;
+                            }
+                        }
+                        match tp {
+                            Some(tp) => {
+                                variable_tp = tp;
+                            }
+                            None => {
+                                return Err(self.ast.error(
+                                    &format!("Struct does not have the field '{}'", path_field),
+                                    "",
+                                    vec![node.id()],
+                                ));
                             }
                         }
                     }
-                    let expr_tp = &self.ast.get_node(*expr).tp.as_ref().unwrap().tp;
-                    if variable_tp == expr_tp {
-                        Ok(())
-                    } else {
-                        Err(self.ast.error(
+                }
+                let expr_tp = self.ast.get_node(*expr).tp();
+                if variable_tp == expr_tp {
+                    Ok(())
+                } else {
+                    Err(self.ast.error(
                             &format!("Types for left and right hand side of assignment do not match ({:?} != {:?})", variable_tp, expr_tp
                             ),
                             "Both sides of an assignment must have the same type",
                             vec![self.ast.get_node(*expr).parent_id.unwrap(), *expr],
                         ))
-                    }
                 }
-                If { condition, .. } => {
-                    let statement_tp = self.ast.get_node(*condition).tp.as_ref().unwrap();
-                    if statement_tp.tp == Bool {
-                        Ok(())
-                    } else {
-                        Err(self.ast.error(
-                            &format!("The condition of an if statement must be of type Bool, ({:?}) was found", statement_tp.tp),
-                            "Both sides of an assignment must have the same type",
-                            vec![*condition],
-                        ))
-                    }
+            }
+            If { condition, .. } => match self.ast.get_node(*condition).tp() {
+                Bool => Ok(()),
+                tp => Err(self.ast.error(
+                    &format!(
+                        "The condition of an if statement must be of type Bool, ({:?}) was found",
+                        tp
+                    ),
+                    "Both sides of an assignment must have the same type",
+                    vec![*condition],
+                )),
+            },
+            VariableDeclaration { expr, .. } => {
+                if let Some(expr) = expr {
+                    let lhs = node.tp();
+                    let rhs = self.ast.get_node(*expr).tp();
+                    assert_eq!(lhs, rhs)
                 }
-                VariableDeclaration { expr, .. } => {
-                    if let Some(expr) = expr {
-                        let lhs = node.tp.as_ref().unwrap();
-                        let rhs = self.ast.get_node(*expr).tp.as_ref().unwrap();
-                        if lhs.tp == rhs.tp {
-                            Ok(())
-                        } else {
-                            unreachable!()
-                        }
-                    } else {
-                        Ok(())
+                Ok(())
+            }
+            TypeDeclaration { constructor, .. } => {
+                let lhs = node.tp();
+                let rhs = self.ast.get_node(**constructor).tp();
+                match (lhs, rhs) {
+                    (NewType { tp, .. }, Fn { returns, .. }) => {
+                        assert_eq!(tp, returns)
                     }
+                    _ => unreachable!(),
                 }
-                TypeDeclaration { constructor, .. } => {
-                    let lhs = node.tp.as_ref().unwrap();
-                    let rhs = self.ast.get_node(*constructor).tp.as_ref().unwrap();
-                    if let NewType { tp, .. } = &lhs.tp {
-                        if let Fn { returns, .. } = &rhs.tp {
-                            if tp == returns {
-                                return Ok(());
-                            } else {
-                                println!("{:?} != {:?}", lhs.tp, rhs.tp);
-                                panic!();
-                            }
-                        }
-                    }
-                    unreachable!()
-                }
+                Ok(())
+            }
 
-                ConstDeclaration { expr, .. } | StaticDeclaration { expr, .. } => {
-                    let lhs = node.tp.as_ref().unwrap();
-                    let rhs = self.ast.get_node(*expr).tp.as_ref().unwrap();
-                    if lhs.tp == rhs.tp {
-                        Ok(())
-                    } else {
-                        Err(self.ast.error(
-                            &format!(
-                                "Left and right hand side must have the same types, '{:?}' != '{:?}'",
-                                lhs.tp, rhs.tp
-                            ),
-                            "",
-                            vec![*expr, self.ast.get_node(*expr).parent_id.unwrap()],
-                        ))
-                    }
+            ConstDeclaration { expr, .. } | StaticDeclaration { expr, .. } => {
+                let lhs = node.tp();
+                let rhs = self.ast.get_node(*expr).tp();
+                if lhs != rhs {
+                    Err(self.ast.error(
+                        &format!(
+                            "Left and right hand side must have the same types, '{:?}' != '{:?}'",
+                            lhs, rhs
+                        ),
+                        "",
+                        vec![*expr, self.ast.get_node(*expr).parent_id.unwrap()],
+                    ))?
                 }
-                Return {
-                    func,
-                    expr,
-                    automatic,
-                } => {
-                    let func = self.ast.get_node(*func);
-                    let func_tp = func.tp.as_ref().unwrap();
-                    if let Fn { returns, .. } = &func_tp.tp {
-                        match (&**returns, expr) {
-                            (NodeType::Void, None) => Ok(()),
-                            (NodeType::Void, Some(ret_id)) => Err(self.ast.error(
-                                "Return value should be of type void.",
-                                "Not allowed to return a value from here",
-                                vec![*ret_id],
-                            )),
-                            (expected, None) => {
-                                if *automatic {
-                                    let mut nodes = vec![];
-                                    let body_id = **func
-                                        .body
-                                        .children()
-                                        .collect::<Vec<&NodeID>>()
-                                        .last()
-                                        .unwrap();
-                                    nodes.push(body_id);
-                                    let statements = self
-                                        .ast
-                                        .get_node(body_id)
-                                        .body
-                                        .children()
-                                        .cloned()
-                                        .collect::<Vec<NodeID>>();
+                Ok(())
+            }
+            Return {
+                func,
+                expr,
+                automatic,
+            } => {
+                let func = self.ast.get_node(*func);
+                let func_tp = func.tp();
+                if let Fn { returns, .. } = &func_tp {
+                    match (&**returns, expr) {
+                        (NodeType::Void, None) => Ok(()),
+                        (NodeType::Void, Some(ret_id)) => Err(self.ast.error(
+                            "Return value should be of type void.",
+                            "Not allowed to return a value from here",
+                            vec![*ret_id],
+                        )),
+                        (expected, None) => {
+                            if *automatic {
+                                let mut nodes = vec![];
+                                let body_id = **func
+                                    .body
+                                    .children()
+                                    .collect::<Vec<&NodeID>>()
+                                    .last()
+                                    .unwrap();
+                                nodes.push(body_id);
+                                let statements = self
+                                    .ast
+                                    .get_node(body_id)
+                                    .body
+                                    .children()
+                                    .cloned()
+                                    .collect::<Vec<NodeID>>();
 
-                                    // The last statement will be the automatically inserted return statement.
-                                    if statements.len() >= 2 {
-                                        let last_node_id = statements[statements.len() - 2];
-                                        nodes.push(last_node_id);
-                                    }
+                                // The last statement will be the automatically inserted return statement.
+                                if statements.len() >= 2 {
+                                    let last_node_id = statements[statements.len() - 2];
+                                    nodes.push(last_node_id);
+                                }
 
-                                    Err(self.ast.error(
+                                Err(self.ast.error(
                                         "Function missing return statement",
                                         &format!("A return of type {:?} must be provided as the final statement of the function", expected),
                                        nodes
                                     ))
-                                } else {
-                                    Err(self.ast.error(
-                                        "Return value can not be of type void",
-                                        "A value must be provided when returning from here",
-                                        vec![node.id],
-                                    ))
-                                }
-                            }
-                            (tp, Some(ret_id)) => {
-                                let ret = self.ast.get_node(*ret_id).tp.as_ref().unwrap();
-                                if ret.tp == *tp {
-                                    Ok(())
-                                } else {
-                                    Err(self.ast.error(
-                                        &format!("Return statement does not return the right type, {:?} expected, {:?} provided", func.tp, ret.tp),
-                                        "Wrong return type for function",
-                                        vec![*ret_id],
-                                    ))
-                                }
+                            } else {
+                                Err(self.ast.error(
+                                    "Return value can not be of type void",
+                                    "A value must be provided when returning from here",
+                                    vec![node.id()],
+                                ))
                             }
                         }
-                    } else {
-                        unreachable!()
+                        (tp, Some(ret_id)) => {
+                            let ret = self.ast.get_node(*ret_id).tp();
+                            if ret != tp {
+                                Err(self.ast.error(
+                                        &format!("Return statement does not return the right type, {:?} expected, {:?} provided", func, ret),
+                                        "Wrong return type for function",
+                                        vec![*ret_id],
+                                    ))?
+                            }
+                            Ok(())
+                        }
                     }
+                } else {
+                    unreachable!()
                 }
-                Call(NBCall { func, args }) => {
-                    let call = CallNode::from(node).unwrap();
-                    let caller = node;
-                    let func = self.ast.get_node(*func);
-                    let func_tp = &func.tp.as_ref().unwrap().tp;
-                    let args = args
-                        .iter()
-                        .map(|id| self.ast.get_node(*id).tp.as_ref().unwrap().tp.clone())
-                        .collect();
-                    let call = &match func_tp {
-                        Fn { returns, .. } | NewType { tp: returns, .. } => Fn {
-                            args,
-                            returns: returns.clone(),
-                        },
-                        _ => unreachable!(),
-                    };
-                    self.fits_function_call(func, caller, func_tp, call)?;
-                    Ok(())
-                }
-                Unlinked { .. } => Err(self.ast.error(
-                    "Encountered a node with unlinked type",
-                    "expression with unlinked type",
-                    vec![node.id],
-                )),
             }
-        } else {
-            Err(self.ast.error(
-                "Encountered a node without a type",
-                "expression with missing type",
-                vec![node.id],
-            ))
+            Call(NBCall { func, args }) => {
+                let caller = node;
+                let func = self.ast.get_node(*func);
+                let func_tp = func.tp();
+                let args = args
+                    .iter()
+                    .map(|id| self.ast.get_node(*id).tp().clone())
+                    .collect();
+                let call = &match func_tp {
+                    Fn { returns, .. } | NewType { tp: returns, .. } => Fn {
+                        args,
+                        returns: returns.clone(),
+                    },
+                    _ => unreachable!(),
+                };
+                self.fits_function_call(func, caller, func_tp, call)?;
+                Ok(())
+            }
+            Unlinked { .. } => Err(self.ast.error(
+                "Encountered a node with unlinked type",
+                "expression with unlinked type",
+                vec![node.id()],
+            )),
         }
     }
 
@@ -321,7 +300,7 @@ where
                 Err(self.ast.error(
                     &format!("missplaced vararg",),
                     "Too many arguments",
-                    vec![shape.id],
+                    vec![shape.id()],
                 ))
             }
         } else if hole_args_len < shape_args.len() {
@@ -336,9 +315,9 @@ where
                     .map(|id| *id)
                     .collect::<Vec<NodeID>>();
                 if nodes.len() == 0 {
-                    nodes.push(shape.id);
+                    nodes.push(shape.id());
                 }
-                nodes.push(hole.id);
+                nodes.push(hole.id());
                 Err(self.ast.error(
                     &format!(
                         "wrong number of arguments, {} expected, {} provided",
@@ -352,7 +331,7 @@ where
         } else if hole_args_len > shape_args.len() {
             let mut nodes = shape.body.children().map(|id| *id).collect::<Vec<NodeID>>();
             if nodes.len() == 0 {
-                nodes.push(shape.id);
+                nodes.push(shape.id());
             }
             Err(self.ast.error(
                 &format!(
@@ -382,7 +361,7 @@ where
             (Any, Void) if *shape != Void => Err(self.ast.error(
                 "function expected Any type of value, nothing (Void) provided.",
                 "Argument required here",
-                vec![caller.id, func.id],
+                vec![caller.id(), func.id()],
             )),
             (Any, _) => Ok(()),
             (hole, shape) if hole == shape => Ok(()),
@@ -392,7 +371,7 @@ where
                     hole, shape
                 ),
                 "Wrong argument type",
-                vec![caller.id, func.id],
+                vec![caller.id(), func.id()],
             )),
         }
     }
@@ -485,7 +464,7 @@ where
                     Err(self.ast.error(
                         "constructor does not return correct struct",
                         "",
-                        vec![func.id],
+                        vec![func.id()],
                     ))
                 } else {
                     Ok(())
@@ -495,7 +474,7 @@ where
             (_, Fn { .. }) => Err(self.ast.error(
                 &format!("tried to call non-callable function"),
                 "Can not call",
-                vec![caller.id, func.id],
+                vec![caller.id(), func.id()],
             )),
             (hole, shape) => unreachable!("{:?} =! {:?}", hole, shape),
         }

@@ -105,8 +105,7 @@ where
                     }
 
                     let is_fn = if let Some(returns) = *returns {
-                        let return_tp = self.ast.get_node(returns).tp.clone().map(|t| t.tp);
-                        if let Some(NodeType::Fn { .. }) = return_tp {
+                        if let Some(NodeType::Fn { .. }) = self.ast.get_node(returns).maybe_tp() {
                             true
                         } else {
                             false

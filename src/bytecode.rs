@@ -443,11 +443,11 @@ where
             Block { body } => self.ev_block(node_id, body),
             Call(NBCall { func, args }) => self.ev_call(node_id, *func, args, true),
             VariableValue { variable, path } => self.ev_variable_value(node_id, *variable, path),
+            TypeDeclaration { constructor, .. } => {
+                self.ev_declaration(node_id, Some(**constructor))
+            }
             ConstDeclaration { expr, .. }
             | StaticDeclaration { expr, .. }
-            | TypeDeclaration {
-                constructor: expr, ..
-            }
             | Import { expr, .. } => self.ev_declaration(node_id, Some(*expr)),
             VariableDeclaration { expr, .. } => self.ev_declaration(node_id, *expr),
             VariableAssignment {
@@ -619,7 +619,7 @@ where
     fn get_field_index(&self, var_id: NodeID, path: &Option<Vec<String>>) -> Option<Vec<usize>> {
         if let Some(path) = path {
             let mut index_path = Vec::with_capacity(path.len());
-            let mut tp = &self.ast.get_node(var_id).tp.as_ref().unwrap().tp;
+            let mut tp = self.ast.get_node(var_id).tp();
             for path_name in path {
                 let fields = if let NodeType::Struct { fields } = &tp {
                     fields
@@ -681,7 +681,7 @@ where
         ignore_return: bool,
     ) -> StackUsage {
         let node = self.ast.get_node(proc_var_id);
-        let return_values = match &node.tp.as_ref().unwrap().tp {
+        let return_values = match node.tp() {
             NodeType::Fn { returns, .. } => match &**returns {
                 NodeType::Void => 0,
                 _ => 1,

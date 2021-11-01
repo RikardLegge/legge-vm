@@ -5,6 +5,7 @@ use crate::token::Token;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::{fmt, mem};
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -20,73 +21,52 @@ impl NodeID {
     }
 }
 
-pub struct CallNode(NodeID);
+#[derive(Debug, Copy, Clone)]
+pub struct ProcedureDeclarationNode(NodeID);
 
-impl CallNode {
+impl Deref for ProcedureDeclarationNode {
+    type Target = NodeID;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl ProcedureDeclarationNode {
+    pub fn new(id: NodeID) -> Self {
+        Self(id)
+    }
+
     pub fn id(&self) -> NodeID {
         self.0
     }
 
-    pub fn tp(&self, ast: &Ast) -> Option<NodeType> {
-        if let Some(InferredType { tp, .. }) = &ast.get_node(self.id()).tp {
-            Some(tp.clone())
-        } else {
-            let args = {
-                let arg_ids = self.args(ast);
-                let mut args = Vec::with_capacity(arg_ids.len());
-                for id in arg_ids {
-                    match &ast.get_node(*id).tp {
-                        Some(InferredType { tp, .. }) => args.push(tp.clone()),
-                        None => return None,
-                    }
-                }
-                args
-            };
-            let returns = {
-                let function = ast.get_node(self.target(ast));
-                unimplemented!()
-                // let returns = match function {
-                //     NodeType::Fn { returns, .. } => returns,
-                //     NodeType::NewType { tp, .. } => tp,
-                //     _ => unimplemented!(),
-                // };
-                // returns.clone()
-            };
-            // Some(NodeType::Fn { args, returns })
-        }
-    }
-
-    pub fn target(&self, ast: &Ast) -> NodeID {
-        match &ast.get_node(self.id()).body {
-            NodeBody::Call(call) => call.func,
-            _ => unreachable!(),
-        }
-    }
-
     pub fn args<'a>(&'_ self, ast: &'a Ast) -> &'a [NodeID] {
         match &ast.get_node(self.id()).body {
-            NodeBody::Call(call) => &call.args,
+            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { args, .. }) => &args,
             _ => unreachable!(),
         }
     }
 
-    pub fn from<T>(node: &Node<T>) -> Option<CallNode> {
-        match node.body {
-            NodeBody::Call(_) => Some(CallNode(node.id)),
-            _ => None,
+    pub fn returns(&self, ast: &Ast) -> Option<NodeID> {
+        match &ast.get_node(self.id()).body {
+            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { returns, .. }) => *returns,
+            _ => unreachable!(),
         }
     }
-}
 
-pub struct FnNode {
-    pub id: NodeID,
+    pub fn body(&self, ast: &Ast) -> NodeID {
+        match &ast.get_node(self.id()).body {
+            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { body, .. }) => *body,
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct Node<T = state::StateAny> {
-    pub id: NodeID,
+    id: NodeID,
     pub tokens: Vec<Token>,
-    pub tp: Option<InferredType>,
+    tp: Option<InferredType>,
     pub body: NodeBody<T>,
     pub parent_id: Option<NodeID>,
     pub referenced_by: HashSet<NodeReference>,
@@ -96,12 +76,53 @@ pub struct Node<T = state::StateAny> {
 }
 
 impl<T> Debug for Node<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, _: &mut Formatter<'_>) -> fmt::Result {
         todo!()
     }
 }
 
+impl<T> Node<T>
+where
+    T: TypesInferred,
+{
+    pub fn tp(&self) -> &NodeType {
+        match &self.tp {
+            Some(tp) => &tp.tp,
+            None => unreachable!(),
+        }
+    }
+
+    pub fn tp_source(&self) -> NodeTypeSource {
+        match &self.tp {
+            Some(tp) => tp.source,
+            None => unreachable!(),
+        }
+    }
+}
+
 impl<T> Node<T> {
+    pub fn id(&self) -> NodeID {
+        self.id
+    }
+
+    pub fn maybe_tp(&self) -> Option<&NodeType> {
+        match &self.tp {
+            Some(tp) => Some(&tp.tp),
+            None => None,
+        }
+    }
+
+    pub fn maybe_tp_source(&self) -> Option<NodeTypeSource> {
+        match &self.tp {
+            Some(tp) => Some(tp.source),
+            None => None,
+        }
+    }
+
+    pub fn infer_type(&mut self, itp: InferredType) {
+        self.tp = Some(itp);
+    }
+
     pub fn is_closure_boundary(&self) -> bool {
         match self.body {
             NodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. }) => true,
@@ -426,31 +447,45 @@ mod state {
     pub trait TypesInferred {}
     pub trait TypesChecked {}
 
+    pub trait NotAny {}
+    pub trait NotLinked {}
+    pub trait NotTypesInferred {}
+    pub trait NotTypesChecked {}
+
     #[derive(Debug, Copy, Clone)]
     pub struct StateAny {}
     impl Any for StateAny {}
+    impl NotLinked for StateAny {}
+    impl NotTypesInferred for StateAny {}
+    impl NotTypesChecked for StateAny {}
 
     #[derive(Debug, Copy, Clone)]
     pub struct StateLinked {}
-    impl Linked for StateLinked {}
     impl Any for StateLinked {}
+    impl Linked for StateLinked {}
+    impl NotTypesInferred for StateLinked {}
+    impl NotTypesChecked for StateLinked {}
 
     #[derive(Debug, Copy, Clone)]
     pub struct StateTypesInferred {}
-    impl TypesInferred for StateTypesInferred {}
-    impl Linked for StateTypesInferred {}
     impl Any for StateTypesInferred {}
+    impl Linked for StateTypesInferred {}
+    impl TypesInferred for StateTypesInferred {}
+    impl NotTypesChecked for StateTypesInferred {}
 
     #[derive(Debug, Copy, Clone)]
     pub struct StateTypesChecked {}
-    impl TypesChecked for StateTypesChecked {}
-    impl TypesInferred for StateTypesChecked {}
-    impl Linked for StateTypesChecked {}
     impl Any for StateTypesChecked {}
+    impl Linked for StateTypesChecked {}
+    impl TypesInferred for StateTypesChecked {}
+    impl TypesChecked for StateTypesChecked {}
 }
 
 pub use state::{Any, Linked, TypesChecked, TypesInferred};
-pub use state::{StateAny, StateLinked, StateTypesChecked, StateTypesInferred};
+pub use state::{
+    NotAny, NotLinked, NotTypesChecked, NotTypesInferred, StateAny, StateLinked, StateTypesChecked,
+    StateTypesInferred,
+};
 
 pub struct Ast<T = state::StateAny> {
     nodes: Vec<Node<state::StateAny>>,

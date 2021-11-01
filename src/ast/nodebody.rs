@@ -1,4 +1,4 @@
-use crate::ast::ast::{PartialNodeValue, PartialType, StateAny};
+use crate::ast::ast::{PartialNodeValue, PartialType, ProcedureDeclarationNode, StateAny};
 use crate::ast::NodeID;
 use crate::token::ArithmeticOP;
 
@@ -74,7 +74,7 @@ pub enum NodeBody<T = StateAny> {
     TypeDeclaration {
         ident: String,
         tp: NodeID,
-        constructor: NodeID,
+        constructor: ProcedureDeclarationNode,
         default_value: Option<PartialNodeValue<T>>,
     },
     VariableAssignment {
@@ -206,7 +206,7 @@ impl<'a, T> Iterator for NodeBodyIterator<'a, T> {
             TypeDeclaration {
                 constructor, tp, ..
             } => match self.index {
-                0 => Some(constructor),
+                0 => Some(&**constructor),
                 1 => Some(tp),
                 _ => None,
             },

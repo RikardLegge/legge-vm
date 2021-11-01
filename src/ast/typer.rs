@@ -4,7 +4,7 @@ use crate::ast::{Ast, Err, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Re
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
 use std::collections::VecDeque;
-use std::{mem, result};
+use std::result;
 
 pub fn infer_types<T>(
     mut ast: Ast<T>,
@@ -74,15 +74,10 @@ where
     }
 
     fn get_type(&self, node_id: &NodeID) -> Option<NodeType> {
-        match self.get_inferred_type(node_id) {
-            Some(inf) => Some(inf.tp.clone()),
+        match self.ast.get_node(*node_id).maybe_tp() {
+            Some(tp) => Some(tp.clone()),
             None => self.ast.partial_type(*node_id).map(|(_, tp)| tp.clone()),
         }
-    }
-
-    fn get_inferred_type(&self, node_id: &NodeID) -> &Option<InferredType> {
-        let node = self.ast.get_node(*node_id);
-        &node.tp
     }
 
     fn node_value_type(&self, value: &NodeValue<T>) -> NodeType {
@@ -155,7 +150,7 @@ where
                 if args_inferred {
                     let arg_types = arg_types.into_iter().map(|tp| tp.unwrap()).collect();
                     let return_type = match *returns {
-                        Some(returns) => self.ast.get_node(returns).tp.clone().map(|t| t.tp),
+                        Some(returns) => self.ast.get_node(returns).maybe_tp().cloned(),
                         None => Some(Void),
                     };
                     if let Some(return_type) = return_type {
@@ -188,7 +183,7 @@ where
                                 Err(self.ast.error(
                                     "When instantiating a type, use the default instantiation function by adding ()",
                                     &format!("Replace with {}()", ident),
-                                    vec![node.id],
+                                    vec![node.id()],
                                 ))?
                             }
                             _ => unreachable!("{:?}", *variable),
@@ -268,8 +263,8 @@ where
             VariableAssignment { .. } => InferredType::maybe(Some(Void), Declared),
             Call(NBCall { func, .. }) => {
                 let var = self.ast.get_node(*func);
-                if let Some(tp) = &var.tp {
-                    match &tp.tp {
+                if let Some(tp) = var.maybe_tp() {
+                    match tp {
                         Fn{returns, ..} |
                         NewType {tp: returns, .. }=> {
                             InferredType::maybe(Some((**returns).clone()), Value)
@@ -280,7 +275,7 @@ where
                                 var
                             ),
                             "",
-                            vec![node.id, *func],
+                            vec![node.id(), *func],
                         ))?
                     }
                 } else {
@@ -303,7 +298,7 @@ where
         while let Some(node_id) = self.queue.pop_front() {
             let node = self.ast.get_node(node_id);
             for &child_id in node.body.children() {
-                if let None = self.ast.get_node(child_id).tp {
+                if let None = self.ast.get_node(child_id).maybe_tp() {
                     self.queue.push_back(child_id)
                 }
             }
@@ -311,7 +306,7 @@ where
             if let Some(tp) = tp {
                 let source = tp.source;
                 let node = self.ast.get_node_mut(node_id);
-                node.tp = Some(tp);
+                node.infer_type(tp);
                 // Do not mark values which are only used as type checked
                 if source != NodeTypeSource::Usage {
                     self.since_last_changed = 0;

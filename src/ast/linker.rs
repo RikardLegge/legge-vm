@@ -338,7 +338,7 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
             }
 
             let node = self.ast.get_node(node_id);
-            if let None = node.tp {
+            if let None = node.maybe_tp() {
                 self.link_types(node_id)?;
             }
         }

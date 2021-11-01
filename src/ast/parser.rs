@@ -1,5 +1,5 @@
 use super::{Ast, NodeID, NodeValue, Result};
-use crate::ast::ast::{PartialNodeValue, PartialType};
+use crate::ast::ast::{PartialNodeValue, PartialType, ProcedureDeclarationNode};
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody, UnlinkedNodeBody};
 use crate::ast::NodeType;
 use crate::token::TokenType::EndStatement;
@@ -166,10 +166,8 @@ where
         use crate::ast::nodebody::NodeBody::*;
 
         match self.ast.get_node(node).body {
-            TypeDeclaration {
-                constructor: expr, ..
-            }
-            | ConstDeclaration { expr, .. }
+            TypeDeclaration { constructor, .. } => self.should_terminate_statement(*constructor),
+            ConstDeclaration { expr, .. }
             | StaticDeclaration { expr, .. }
             | VariableDeclaration {
                 expr: Some(expr), ..
@@ -654,7 +652,7 @@ where
                 returns: Some(tp),
                 body,
             });
-            self.add_node(node, constructor)
+            ProcedureDeclarationNode::new(self.add_node(node, constructor))
         };
 
         let body = NodeBody::TypeDeclaration {
