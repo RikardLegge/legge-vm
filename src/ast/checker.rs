@@ -2,7 +2,7 @@ use super::{Ast, Node, Result};
 use crate::ast::ast::{CallNode, StateTypesChecked, TypesInferred};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{Err, NodeID, NodeType};
-use std::{mem, result};
+use std::result;
 
 pub fn check_types<T: TypesInferred>(
     mut ast: Ast<T>,
@@ -13,7 +13,7 @@ where
     let root_id = ast.root();
     let checker = Checker::new(&mut ast);
     match checker.check_all_types(root_id) {
-        Ok(()) => Ok(unsafe { mem::transmute::<Ast<T>, Ast<StateTypesChecked>>(ast) }),
+        Ok(()) => Ok(ast.guarantee_integrity::<StateTypesChecked>()),
         Err(err) => Err((ast, err)),
     }
 }

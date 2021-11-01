@@ -1,5 +1,5 @@
-use crate::ast::ast::PartialType;
-use crate::ast::{NodeID, NodeValue};
+use crate::ast::ast::{PartialNodeValue, PartialType, StateAny};
+use crate::ast::NodeID;
 use crate::token::ArithmeticOP;
 
 #[derive(Debug, Clone)]
@@ -16,11 +16,11 @@ pub struct NBProcedureDeclaration {
 }
 
 #[derive(Debug, Clone)]
-pub enum NodeBody {
+pub enum NodeBody<T = StateAny> {
     Empty,
     ConstValue {
         tp: Option<NodeID>,
-        value: NodeValue,
+        value: PartialNodeValue<T>,
     },
     TypeReference {
         tp: NodeID,
@@ -75,7 +75,7 @@ pub enum NodeBody {
         ident: String,
         tp: NodeID,
         constructor: NodeID,
-        default_value: Option<NodeValue>,
+        default_value: Option<PartialNodeValue<T>>,
     },
     VariableAssignment {
         variable: NodeID,
@@ -96,11 +96,11 @@ pub enum NodeBody {
     },
     Call(NBCall),
 
-    Unlinked(UnlinkedNodeBody),
+    Unlinked(UnlinkedNodeBody<T>),
 }
 
-impl NodeBody {
-    pub fn children(&self) -> NodeBodyIterator {
+impl<T> NodeBody<T> {
+    pub fn children(&self) -> NodeBodyIterator<T> {
         NodeBodyIterator {
             index: 0,
             body: self,
@@ -110,7 +110,7 @@ impl NodeBody {
 }
 
 #[derive(Debug, Clone)]
-pub enum UnlinkedNodeBody {
+pub enum UnlinkedNodeBody<T = StateAny> {
     VariableAssignment {
         ident: String,
         path: Option<Vec<String>>,
@@ -118,7 +118,7 @@ pub enum UnlinkedNodeBody {
     },
     Value {
         tp: Option<NodeID>,
-        value: NodeValue,
+        value: PartialNodeValue<T>,
     },
     VariableValue {
         ident: String,
@@ -138,8 +138,8 @@ pub enum UnlinkedNodeBody {
     },
 }
 
-impl UnlinkedNodeBody {
-    pub fn children(&self) -> UnlinkedNodeBodyIterator {
+impl<T> UnlinkedNodeBody<T> {
+    pub fn children(&self) -> UnlinkedNodeBodyIterator<T> {
         UnlinkedNodeBodyIterator {
             index: 0,
             body: self,
@@ -147,13 +147,13 @@ impl UnlinkedNodeBody {
     }
 }
 
-pub struct NodeBodyIterator<'a> {
+pub struct NodeBodyIterator<'a, T = StateAny> {
     index: usize,
-    body: &'a NodeBody,
-    unlinked: Option<UnlinkedNodeBodyIterator<'a>>,
+    body: &'a NodeBody<T>,
+    unlinked: Option<UnlinkedNodeBodyIterator<'a, T>>,
 }
 
-impl<'a> Iterator for NodeBodyIterator<'a> {
+impl<'a, T> Iterator for NodeBodyIterator<'a, T> {
     type Item = &'a NodeID;
 
     fn next(&mut self) -> Option<&'a NodeID> {
@@ -249,12 +249,12 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
     }
 }
 
-pub struct UnlinkedNodeBodyIterator<'a> {
+pub struct UnlinkedNodeBodyIterator<'a, T = StateAny> {
     index: usize,
-    body: &'a UnlinkedNodeBody,
+    body: &'a UnlinkedNodeBody<T>,
 }
 
-impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
+impl<'a, T> Iterator for UnlinkedNodeBodyIterator<'a, T> {
     type Item = &'a NodeID;
 
     fn next(&mut self) -> Option<&'a NodeID> {

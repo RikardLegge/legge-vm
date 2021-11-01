@@ -1,5 +1,5 @@
 use super::{Ast, NodeID, Result};
-use crate::ast::ast::{Linked, NodeReference, SideEffect};
+use crate::ast::ast::{Linked, NodeReference, PartialNodeValue, SideEffect};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{Err, Node, NodeType, NodeValue};
 use std::collections::{HashSet, VecDeque};
@@ -218,7 +218,7 @@ where
         let node = self.ast.get_node(node_id);
         match node.body {
             NodeBody::ConstValue {
-                value: NodeValue::RuntimeFn(_),
+                value: PartialNodeValue::Linked(NodeValue::RuntimeFn(_)),
                 ..
             } => Some(SideEffect::Execute),
             _ => None,

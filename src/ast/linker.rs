@@ -1,9 +1,9 @@
 use super::NodeReferenceType::*;
 use super::{Ast, NodeID, Result};
-use crate::ast::ast::{NodeReferenceLocation, PartialType, StateLinked};
+use crate::ast::ast::{NodeReferenceLocation, PartialNodeValue, PartialType, StateLinked};
 use crate::ast::nodebody::UnlinkedNodeBody::*;
 use crate::ast::nodebody::{NBCall, NodeBody};
-use crate::ast::{Any, Err, NodeType, NodeValue};
+use crate::ast::{Err, NodeType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
 use std::{mem, result};
@@ -11,30 +11,21 @@ use std::{mem, result};
 pub fn link<T>(
     mut ast: Ast<T>,
     runtime: &Runtime,
-) -> result::Result<Ast<StateLinked>, (Ast<T>, Err)>
-where
-    T: Any,
-{
+) -> result::Result<Ast<StateLinked>, (Ast<T>, Err)> {
     let root_id = ast.root();
     let linker = Linker::new(&mut ast, runtime);
     match linker.link(root_id) {
-        Ok(()) => Ok(unsafe { mem::transmute::<Ast<T>, Ast<StateLinked>>(ast) }),
+        Ok(()) => Ok(ast.guarantee_integrity::<StateLinked>()),
         Err(err) => Err((ast, err)),
     }
 }
 
-struct Linker<'a, 'b, T>
-where
-    T: Any,
-{
+struct Linker<'a, 'b, T> {
     ast: &'a mut Ast<T>,
     runtime: &'b Runtime,
 }
 
-impl<'a, 'b, T> Linker<'a, 'b, T>
-where
-    T: Any,
-{
+impl<'a, 'b, T> Linker<'a, 'b, T> {
     fn new(ast: &'a mut Ast<T>, runtime: &'b Runtime) -> Self {
         Self { ast, runtime }
     }
@@ -69,22 +60,28 @@ where
         }
     }
 
-    fn resolve_value(&mut self, node_id: NodeID, value: NodeValue) -> Result<NodeValue> {
-        match value {
-            NodeValue::Int(_)
-            | NodeValue::Bool(_)
-            | NodeValue::String(_)
-            | NodeValue::Float(_)
-            | NodeValue::RuntimeFn(_) => Ok(value),
-            NodeValue::Struct(fields) => {
-                let mut new_fields = Vec::with_capacity(fields.len());
-                for (name, field) in fields {
-                    let new_value = self.resolve_value(node_id, field)?;
-                    new_fields.push((name, new_value));
+    fn resolve_value(
+        &mut self,
+        node_id: NodeID,
+        value: PartialNodeValue<T>,
+    ) -> Result<PartialNodeValue<T>> {
+        Ok(match value {
+            PartialNodeValue::Linked(value) => match value {
+                NodeValue::Int(_)
+                | NodeValue::Bool(_)
+                | NodeValue::String(_)
+                | NodeValue::Float(_)
+                | NodeValue::RuntimeFn(_) => value.into(),
+                NodeValue::Struct(fields) => {
+                    let mut new_fields = Vec::with_capacity(fields.len());
+                    for (name, field) in fields {
+                        let new_value = self.resolve_value(node_id, field)?;
+                        new_fields.push((name, new_value));
+                    }
+                    NodeValue::Struct(new_fields).into()
                 }
-                Ok(NodeValue::Struct(new_fields))
-            }
-            NodeValue::Unlinked(ident) => {
+            },
+            PartialNodeValue::Unlinked(ident) => {
                 let (target_id, _) = match self.closest_variable(node_id, &ident)? {
                     Some(target) => target,
                     None => Err(self.ast.error(
@@ -93,16 +90,16 @@ where
                         vec![node_id],
                     ))?,
                 };
-                let value = match &self.ast.get_node(target_id).body {
+                match &self.ast.get_node(target_id).body {
                     NodeBody::TypeDeclaration { default_value, .. } => match default_value {
-                        Some(default_value) => default_value.clone(),
+                        Some(default_value) => (*default_value).clone(),
                         None => unreachable!(),
                     },
                     _ => unreachable!(),
-                };
-                Ok(value)
+                }
             }
-        }
+            _ => unreachable!(),
+        })
     }
 
     fn resolve_type(&mut self, tp: NodeType, parts: &[NodeID]) -> Result<Option<NodeType>> {
@@ -297,7 +294,7 @@ where
                             if &func.name == ident {
                                 body = Some(NodeBody::ConstValue {
                                     tp: None,
-                                    value: NodeValue::RuntimeFn(i),
+                                    value: NodeValue::RuntimeFn(i).into(),
                                 });
                                 break;
                             }

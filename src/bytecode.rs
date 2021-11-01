@@ -1,6 +1,6 @@
 use crate::ast;
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
-use crate::ast::{Ast, NodeID, NodeType, NodeValue, TypesInferred};
+use crate::ast::{Ast, Linked, NodeID, NodeType, NodeValue, TypesChecked, TypesInferred};
 use crate::token::ArithmeticOP;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
@@ -8,7 +8,7 @@ use std::ops::AddAssign;
 
 pub fn from_ast<T>(ast: &ast::Ast<T>) -> Bytecode
 where
-    T: TypesInferred,
+    T: Linked + TypesInferred + TypesChecked,
 {
     let root_id = ast.root();
     let mut bc = Generator::new(ast);
@@ -212,7 +212,7 @@ struct Generator<'a, T> {
 
 impl<'a, T> Generator<'a, T>
 where
-    T: TypesInferred,
+    T: Linked + TypesInferred + TypesChecked,
 {
     fn new(ast: &'a Ast<T>) -> Self {
         let placeholder = Instruction {
@@ -820,7 +820,7 @@ where
         match &expr.body {
             Op { op, lhs, rhs } => self.ev_operation(expr_id, *op, *lhs, *rhs),
             PrefixOp { op, rhs } => self.ev_prefix_operation(expr_id, *op, *rhs),
-            ConstValue { value, .. } => self.ev_const(expr_id, value),
+            ConstValue { value, .. } => self.ev_const(expr_id, value.into()),
             ProcedureDeclaration(NBProcedureDeclaration { args, body, .. }) => {
                 self.ev_procedure(expr_id, args, *body)
             }
@@ -831,7 +831,7 @@ where
         }
     }
 
-    fn default_value(&self, node_value: &NodeValue) -> Value {
+    fn default_value(&self, node_value: &NodeValue<T>) -> Value {
         use NodeValue::*;
         match node_value {
             Int(val) => Value::Int(*val),
@@ -839,12 +839,15 @@ where
             Bool(val) => Value::Bool(*val),
             String(val) => Value::String(val.clone()),
             RuntimeFn(id) => Value::RuntimeFn(*id),
-            Struct(val) => Value::Struct(val.iter().map(|(_, v)| self.default_value(v)).collect()),
-            Unlinked(_) => unreachable!(),
+            Struct(val) => Value::Struct(
+                val.iter()
+                    .map(|(_, v)| self.default_value(v.into()))
+                    .collect(),
+            ),
         }
     }
 
-    fn ev_const(&mut self, node_id: NodeID, node_value: &NodeValue) -> StackUsage {
+    fn ev_const(&mut self, node_id: NodeID, node_value: &NodeValue<T>) -> StackUsage {
         let value = self.default_value(node_value);
         self.add_op(node_id, OP::PushImmediate(value));
         StackUsage::new(0, 1)

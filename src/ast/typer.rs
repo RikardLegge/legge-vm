@@ -15,7 +15,7 @@ where
 {
     let typer = Typer::new(&mut ast, runtime);
     match typer.infer_all_types() {
-        Ok(()) => Ok(unsafe { mem::transmute::<Ast<T>, Ast<StateTypesInferred>>(ast) }),
+        Ok(()) => Ok(ast.guarantee_integrity::<StateTypesInferred>()),
         Err(err) => Err((ast, err)),
     }
 }
@@ -85,7 +85,7 @@ where
         &node.tp
     }
 
-    fn node_value_type(&self, value: &NodeValue) -> NodeType {
+    fn node_value_type(&self, value: &NodeValue<T>) -> NodeType {
         match value {
             NodeValue::Int(..) => NodeType::Int,
             NodeValue::Float(..) => NodeType::Float,
@@ -95,7 +95,7 @@ where
                 let field_types = fields
                     .iter()
                     .map(|(name, value)| {
-                        let tp = self.node_value_type(value);
+                        let tp = self.node_value_type(value.into());
                         (name.clone(), tp)
                     })
                     .collect();
@@ -107,7 +107,6 @@ where
                 let func = &self.runtime.functions[*id];
                 func.tp.clone()
             }
-            NodeValue::Unlinked(_) => unreachable!(),
         }
     }
 
@@ -133,7 +132,7 @@ where
                 };
                 let tp = match tp {
                     Some(tp) => tp,
-                    None => self.node_value_type(value),
+                    None => self.node_value_type(value.into()),
                 };
                 Some(InferredType::new(tp, Declared))
             }
@@ -192,7 +191,7 @@ where
                                     vec![node.id],
                                 ))?
                             }
-                            _ => unreachable!("{:?}, {:?}", *variable, body),
+                            _ => unreachable!("{:?}", *variable),
                         }
                     }
                     let mut value_tp = &value_tp;

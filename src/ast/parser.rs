@@ -1,5 +1,5 @@
 use super::{Ast, NodeID, NodeValue, Result};
-use crate::ast::ast::PartialType;
+use crate::ast::ast::{PartialNodeValue, PartialType};
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody, UnlinkedNodeBody};
 use crate::ast::NodeType;
 use crate::token::TokenType::EndStatement;
@@ -213,14 +213,14 @@ where
                 node,
                 NodeBody::ConstValue {
                     tp: None,
-                    value: NodeValue::Int(int),
+                    value: NodeValue::Int(int).into(),
                 },
             )),
             Float(float, _, _) => Ok(self.add_node(
                 node,
                 NodeBody::ConstValue {
                     tp: None,
-                    value: NodeValue::Float(float),
+                    value: NodeValue::Float(float).into(),
                 },
             )),
             Op(op) => self.do_operation(node, op, None),
@@ -264,21 +264,21 @@ where
                 node,
                 NodeBody::ConstValue {
                     tp: None,
-                    value: NodeValue::Int(int),
+                    value: NodeValue::Int(int).into(),
                 },
             ),
             Float(float, _, _) => self.add_node(
                 node,
                 NodeBody::ConstValue {
                     tp: None,
-                    value: NodeValue::Float(float),
+                    value: NodeValue::Float(float).into(),
                 },
             ),
             String(value) => self.add_node(
                 node,
                 NodeBody::ConstValue {
                     tp: None,
-                    value: NodeValue::String(value),
+                    value: NodeValue::String(value).into(),
                 },
             ),
             Op(op) => self.do_operation(node, op, None)?,
@@ -364,7 +364,7 @@ where
             node,
             NodeBody::ConstValue {
                 tp: None,
-                value: NodeValue::Bool(value),
+                value: NodeValue::Bool(value).into(),
             },
         ))
     }
@@ -529,13 +529,13 @@ where
         Ok((node_id, tp_ref))
     }
 
-    fn default_value(&self, tp: &NodeType) -> (NodeValue, bool) {
+    fn default_value(&self, tp: &NodeType) -> (PartialNodeValue, bool) {
         let mut linked = true;
         let value = match tp {
-            NodeType::Int => NodeValue::Int(0),
-            NodeType::Bool => NodeValue::Bool(false),
-            NodeType::Float => NodeValue::Float(0.0),
-            NodeType::String => NodeValue::String("".into()),
+            NodeType::Int => NodeValue::Int(0).into(),
+            NodeType::Bool => NodeValue::Bool(false).into(),
+            NodeType::Float => NodeValue::Float(0.0).into(),
+            NodeType::String => NodeValue::String("".into()).into(),
             NodeType::Struct { fields } => NodeValue::Struct(
                 fields
                     .iter()
@@ -547,10 +547,11 @@ where
                         (name.clone(), tp)
                     })
                     .collect(),
-            ),
+            )
+            .into(),
             NodeType::Unknown { ident } => {
                 linked = false;
-                NodeValue::Unlinked(ident.clone())
+                PartialNodeValue::Unlinked(ident.clone())
             }
             _ => unimplemented!(),
         };

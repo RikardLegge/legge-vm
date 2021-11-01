@@ -52,7 +52,7 @@ impl CallNode {
                 // };
                 // returns.clone()
             };
-            Some(NodeType::Fn { args, returns })
+            // Some(NodeType::Fn { args, returns })
         }
     }
 
@@ -87,7 +87,7 @@ pub struct Node<T = state::StateAny> {
     pub id: NodeID,
     pub tokens: Vec<Token>,
     pub tp: Option<InferredType>,
-    pub body: NodeBody,
+    pub body: NodeBody<T>,
     pub parent_id: Option<NodeID>,
     pub referenced_by: HashSet<NodeReference>,
     pub references: HashSet<NodeReference>,
@@ -304,15 +304,84 @@ pub enum NodeType {
     },
 }
 
-#[derive(Debug, Clone)]
-pub enum NodeValue {
+#[derive(Debug)]
+pub enum PartialNodeValue<T = StateAny> {
+    Linked(NodeValue<T>),
+    Unlinked(String),
+    _TP(PhantomData<T>),
+}
+
+impl<T> Clone for PartialNodeValue<T> {
+    fn clone(&self) -> Self {
+        use PartialNodeValue::*;
+        match self {
+            Linked(v) => Linked((*v).clone()),
+            Unlinked(v) => Unlinked(v.clone()),
+            _ => unreachable!(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        *self = source.clone()
+    }
+}
+
+impl<'a, T> Into<&'a NodeValue<T>> for &'a PartialNodeValue<T>
+where
+    T: Linked,
+{
+    fn into(self) -> &'a NodeValue<T> {
+        match self {
+            PartialNodeValue::Linked(v) => v,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<T> Into<NodeValue<T>> for PartialNodeValue<T>
+where
+    T: Linked,
+{
+    fn into(self) -> NodeValue<T> {
+        match self {
+            PartialNodeValue::Linked(v) => v,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum NodeValue<T = StateAny> {
     Int(isize),
     Float(f64),
     Bool(bool),
     String(String),
     RuntimeFn(usize),
-    Struct(Vec<(String, NodeValue)>),
-    Unlinked(String),
+    Struct(Vec<(String, PartialNodeValue<T>)>),
+}
+
+impl<T> Clone for NodeValue<T> {
+    fn clone(&self) -> Self {
+        use NodeValue::*;
+        match self {
+            Int(v) => Int(*v),
+            Float(v) => Float(*v),
+            Bool(v) => Bool(*v),
+            RuntimeFn(v) => RuntimeFn(*v),
+            String(v) => String(v.clone()),
+            Struct(v) => Struct(v.clone()),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        *self = source.clone()
+    }
+}
+
+impl<T> Into<PartialNodeValue<T>> for NodeValue<T> {
+    fn into(self) -> PartialNodeValue<T> {
+        PartialNodeValue::Linked(self)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -397,6 +466,10 @@ impl<T> fmt::Debug for Ast<T> {
 }
 
 impl<T> Ast<T> {
+    pub fn guarantee_integrity<U>(self) -> Ast<U> {
+        unsafe { mem::transmute::<Ast<T>, Ast<U>>(self) }
+    }
+
     pub fn unimplemented(&self, id: NodeID) -> Result {
         Err(Err::new(self, "Unimplemented", "", vec![id]))
     }
