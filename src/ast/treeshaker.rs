@@ -88,7 +88,18 @@ impl<'a> Shaker<'a> {
                             self.side_effect_nodes.push((arg_ref.id, effect.clone()));
                         }
                     }
-                    if let Some(NodeType::Fn { .. }) = returns {
+
+                    let is_fn = if let Some(returns) = *returns {
+                        let return_tp = self.ast.get_node(returns).tp.clone().map(|t| t.tp);
+                        if let Some(NodeType::Fn { .. }) = return_tp {
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+                    if is_fn {
                         if let Some(parent_id) = self.child_dependent_on_parent(node) {
                             self.side_effect_nodes.push((
                                 parent_id,
@@ -188,7 +199,10 @@ impl<'a> TreeShaker<'a> {
     fn has_side_effect(&self, node_id: NodeID) -> Option<SideEffect> {
         let node = self.ast.get_node(node_id);
         match node.body {
-            NodeBody::ConstValue(NodeValue::RuntimeFn(_)) => Some(SideEffect::Execute),
+            NodeBody::ConstValue {
+                value: NodeValue::RuntimeFn(_),
+                ..
+            } => Some(SideEffect::Execute),
             _ => None,
         }
     }

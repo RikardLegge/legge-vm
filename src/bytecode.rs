@@ -612,18 +612,24 @@ impl<'a> Generator<'a> {
             let mut index_path = Vec::with_capacity(path.len());
             let mut tp = &self.ast.get_node(var_id).tp.as_ref().unwrap().tp;
             for path_name in path {
-                match tp {
-                    NodeType::Struct { fields } => {
-                        let index = fields.iter().position(|(name, _)| name == path_name);
-                        match index {
-                            Some(index) => {
-                                tp = &fields[index].1;
-                                index_path.push(index)
-                            }
-                            None => unimplemented!(),
-                        }
+                let fields = if let NodeType::Struct { fields } = &tp {
+                    fields
+                } else if let NodeType::Type { content, .. } = &tp {
+                    if let NodeType::Struct { fields } = &**content {
+                        fields
+                    } else {
+                        unimplemented!("{:?}", tp)
                     }
-                    _ => unreachable!(),
+                } else {
+                    unimplemented!("{:?}", tp)
+                };
+                let index = fields.iter().position(|(name, _)| name == path_name);
+                match index {
+                    Some(index) => {
+                        tp = &fields[index].1;
+                        index_path.push(index)
+                    }
+                    None => unimplemented!(),
                 }
             }
             Some(index_path)
@@ -671,7 +677,7 @@ impl<'a> Generator<'a> {
                 NodeType::Void => 0,
                 _ => 1,
             },
-            NodeType::Type { .. } => 1,
+            NodeType::NewType { .. } => 1,
             _ => unreachable!(),
         };
 
@@ -805,7 +811,7 @@ impl<'a> Generator<'a> {
         match &expr.body {
             Op { op, lhs, rhs } => self.ev_operation(expr_id, *op, *lhs, *rhs),
             PrefixOp { op, rhs } => self.ev_prefix_operation(expr_id, *op, *rhs),
-            ConstValue(value) => self.ev_const(expr_id, value),
+            ConstValue { value, .. } => self.ev_const(expr_id, value),
             ProcedureDeclaration { args, body, .. } => self.ev_procedure(expr_id, args, *body),
             VariableValue { variable, path } => self.ev_variable_value(expr_id, *variable, path),
             Call { func, args } => self.ev_call(expr_id, *func, args, false),

@@ -209,8 +209,12 @@ pub enum NodeType {
         args: Vec<NodeType>,
         returns: Box<NodeType>,
     },
-    Type {
+    NewType {
         tp: Box<NodeType>,
+    },
+    Type {
+        ident: String,
+        content: Box<NodeType>,
     },
     Unknown {
         ident: String,
@@ -232,9 +236,55 @@ pub enum NodeValue {
 }
 
 #[derive(Debug, Clone)]
+pub enum PartialType {
+    Complete(NodeType),
+    Uncomplete(NodeType),
+}
+
+impl PartialType {
+    pub fn new(complete: bool, tp: NodeType) -> Self {
+        if complete {
+            Self::Complete(tp)
+        } else {
+            Self::Uncomplete(tp)
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        match self {
+            PartialType::Complete(_) => true,
+            PartialType::Uncomplete(_) => false,
+        }
+    }
+
+    pub fn option(&self) -> Option<&NodeType> {
+        match self {
+            PartialType::Complete(tp) => Some(tp),
+            PartialType::Uncomplete(_) => None,
+        }
+    }
+
+    pub fn tp(&self) -> &NodeType {
+        match self {
+            PartialType::Complete(tp) | PartialType::Uncomplete(tp) => tp,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum NodeBody {
     Empty,
-    ConstValue(NodeValue),
+    ConstValue {
+        tp: Option<NodeID>,
+        value: NodeValue,
+    },
+    TypeReference {
+        tp: NodeID,
+    },
+    PartialType {
+        tp: PartialType,
+        parts: Vec<NodeID>,
+    },
     Op {
         op: ArithmeticOP,
         lhs: NodeID,
@@ -242,7 +292,7 @@ pub enum NodeBody {
     },
     ProcedureDeclaration {
         args: Vec<NodeID>,
-        returns: Option<NodeType>,
+        returns: Option<NodeID>,
         body: NodeID,
     },
     PrefixOp {
@@ -268,22 +318,22 @@ pub enum NodeBody {
 
     VariableDeclaration {
         ident: String,
-        tp: Option<NodeType>,
+        tp: Option<NodeID>,
         expr: Option<NodeID>,
     },
     ConstDeclaration {
         ident: String,
-        tp: Option<NodeType>,
+        tp: Option<NodeID>,
         expr: NodeID,
     },
     StaticDeclaration {
         ident: String,
-        tp: Option<NodeType>,
+        tp: Option<NodeID>,
         expr: NodeID,
     },
     TypeDeclaration {
         ident: String,
-        tp: NodeType,
+        tp: NodeID,
         constructor: NodeID,
         default_value: Option<NodeValue>,
     },
@@ -329,17 +379,17 @@ pub enum UnlinkedNodeBody {
         path: Option<Vec<String>>,
         expr: NodeID,
     },
-    Value(NodeValue),
+    Value {
+        tp: Option<NodeID>,
+        value: NodeValue,
+    },
     VariableValue {
         ident: String,
         path: Option<Vec<String>>,
     },
-    Type {
-        def: Box<NodeBody>,
-        expr: Option<NodeID>,
-    },
     Return {
         expr: Option<NodeID>,
+        automatic: bool,
     },
     Break,
     Call {
@@ -526,6 +576,10 @@ impl Ast {
         }
     }
 
+    pub fn get_node_type(&self, node_id: NodeID) -> Option<NodeType> {
+        self.get_node(node_id).tp.clone().map(|t| t.tp)
+    }
+
     pub fn get_node_mut(&mut self, node_id: NodeID) -> &mut Node {
         match self.nodes.get_mut(node_id.0) {
             Some(node) => node,
@@ -617,6 +671,23 @@ impl Ast {
             }
         }
     }
+
+    pub fn partial_type(&self, node_id: NodeID) -> Option<(NodeID, &NodeType)> {
+        let node = self.get_node(node_id);
+        match &node.body {
+            NodeBody::TypeDeclaration { tp, .. } | NodeBody::TypeReference { tp } => {
+                self.partial_type(*tp)
+            }
+            NodeBody::PartialType { tp, .. } => {
+                let tp = match tp.tp() {
+                    NodeType::NewType { tp, .. } => tp,
+                    tp => tp,
+                };
+                Some((node_id, tp))
+            }
+            _ => None,
+        }
+    }
 }
 
 pub struct NodeBodyIterator<'a> {
@@ -641,36 +712,67 @@ impl<'a> Iterator for NodeBodyIterator<'a> {
                 1 => Some(body),
                 _ => None,
             },
-            ProcedureDeclaration { args, body, .. } => {
+            ProcedureDeclaration {
+                args,
+                body,
+                returns,
+            } => {
                 if self.index < args.len() {
                     args.get(self.index)
                 } else if self.index == args.len() {
                     Some(body)
+                } else if self.index == args.len() + 1 {
+                    match returns {
+                        Some(v) => Some(v),
+                        None => None,
+                    }
                 } else {
                     None
                 }
             }
             Block { body } => body.get(self.index),
             Call { args, .. } => args.get(self.index),
+            PartialType { parts, .. } => parts.get(self.index),
 
-            Return { expr, .. } | VariableDeclaration { expr, .. } => match self.index {
+            Return { expr, .. } => match self.index {
                 0 => expr.as_ref(),
                 _ => None,
             },
             PrefixOp { rhs: value, .. }
             | Loop { body: value }
             | Expression(value)
-            | TypeDeclaration {
-                constructor: value, ..
-            }
-            | ConstDeclaration { expr: value, .. }
-            | StaticDeclaration { expr: value, .. }
             | VariableAssignment { expr: value, .. }
             | Import { expr: value, .. } => match self.index {
                 0 => Some(value),
                 _ => None,
             },
-            VariableValue { .. } | Comment { .. } | Break { .. } | ConstValue { .. } | Empty => {
+            TypeDeclaration {
+                constructor, tp, ..
+            } => match self.index {
+                0 => Some(constructor),
+                1 => Some(tp),
+                _ => None,
+            },
+            VariableDeclaration { expr: None, tp, .. } => match self.index {
+                0 => tp.as_ref(),
+                _ => None,
+            },
+            VariableDeclaration {
+                expr: Some(expr),
+                tp,
+                ..
+            }
+            | ConstDeclaration { expr, tp, .. }
+            | StaticDeclaration { expr, tp, .. } => match self.index {
+                0 => Some(expr),
+                1 => tp.as_ref(),
+                _ => None,
+            },
+            ConstValue { tp, .. } => match self.index {
+                0 => tp.as_ref(),
+                _ => None,
+            },
+            TypeReference { .. } | VariableValue { .. } | Comment { .. } | Break { .. } | Empty => {
                 None
             }
             Unlinked(body) => {
@@ -705,11 +807,7 @@ impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
                 0 => Some(expr),
                 _ => None,
             },
-            Return { expr } => match self.index {
-                0 => expr.as_ref(),
-                _ => None,
-            },
-            Type { expr, .. } => match self.index {
+            Return { expr, .. } => match self.index {
                 0 => expr.as_ref(),
                 _ => None,
             },

@@ -1,32 +1,12 @@
-print_count_context_message :: fn(id: int, context: Context, message: string) {
-    // Import function with side effect.
-    import log;
-    log(id, context, message);
+A -> type {
+  name: string
+}
+B -> type {
+  a: A
 }
 
-auto_increment_count :: fn(f: Fn(int, Context, string)) -> Fn(Context, string) {
-    ff :: f;
-    count := 0;
-    return fn(ctx: Context, v: string) {
-        c :: count;
-        count = count + 1;
-        ff(c, ctx.name, v);
-    };
-}
+b := B();
+b.a.name = "test";
 
-with_context :: fn(ctx: Context, f: Fn(Context, string)) -> Fn(string) {
-    return fn(v: string) {
-        f(ctx, v);
-    };
-}
-
-Context -> type {
-   name: string
-}
-
-context :: Context();
-context.name = "hello";
-
-print :: with_context(context, auto_increment_count(print_count_context_message));
-
-print("world");
+import exit;
+exit(b);

@@ -58,32 +58,13 @@ impl<'a> Typer<'a> {
     fn get_type(&self, node_id: &NodeID) -> Option<NodeType> {
         match self.get_inferred_type(node_id) {
             Some(inf) => Some(inf.tp.clone()),
-            None => None,
+            None => self.ast.partial_type(*node_id).map(|(_, tp)| tp.clone()),
         }
     }
 
     fn get_inferred_type(&self, node_id: &NodeID) -> &Option<InferredType> {
         let node = self.ast.get_node(*node_id);
         &node.tp
-    }
-
-    // fn get_ref_type(&self, node_id: &NodeID, ref_tp: NodeReferenceType) -> Option<NodeType> {
-    //     let mut tp = None;
-    //     let node = self.ast.get_node(*node_id);
-    //     for node_ref in &node.referenced_by {
-    //         if node_ref.ref_tp == ref_tp {
-    //             let ref_tp = self.get_type(&node_ref.id);
-    //             if ref_tp.is_some() {
-    //                 tp = ref_tp;
-    //                 break;
-    //             }
-    //         }
-    //     }
-    //     tp
-    // }
-
-    fn get_type_from_declaration(&self, _: &NodeID, tp: &NodeType) -> Result<Option<NodeType>> {
-        Ok(Some(tp.clone()))
     }
 
     fn node_value_type(&self, value: &NodeValue) -> NodeType {
@@ -117,7 +98,27 @@ impl<'a> Typer<'a> {
         use super::NodeType::*;
         use super::NodeTypeSource::*;
         let tp = match &node.body {
-            ConstValue(value) => Some(InferredType::new(self.node_value_type(value), Declared)),
+            TypeReference { tp } => self
+                .ast
+                .partial_type(*tp)
+                .map(|(_, tp)| InferredType::new(tp.clone(), NodeTypeSource::Declared)),
+            PartialType { tp, .. } => tp
+                .option()
+                .map(|tp| InferredType::new(tp.clone(), NodeTypeSource::Declared)),
+            ConstValue { value, tp } => {
+                let tp = match tp {
+                    Some(tp_id) => match self.ast.partial_type(*tp_id) {
+                        Some((_, tp)) => Some(tp.clone()),
+                        None => None,
+                    },
+                    None => None,
+                };
+                let tp = match tp {
+                    Some(tp) => tp,
+                    None => self.node_value_type(value),
+                };
+                Some(InferredType::new(tp, Declared))
+            }
             Op { op, lhs, rhs } => {
                 use ArithmeticOP::*;
                 match op {
@@ -136,8 +137,8 @@ impl<'a> Typer<'a> {
                 let args_inferred = arg_types.iter().all(|tp| tp.is_some());
                 if args_inferred {
                     let arg_types = arg_types.into_iter().map(|tp| tp.unwrap()).collect();
-                    let return_type = match returns {
-                        Some(tp) => self.get_type_from_declaration(&node.id, tp)?,
+                    let return_type = match *returns {
+                        Some(returns) => self.ast.get_node(returns).tp.clone().map(|t| t.tp),
                         None => Some(Void),
                     };
                     if let Some(return_type) = return_type {
@@ -159,7 +160,7 @@ impl<'a> Typer<'a> {
             VariableValue { variable, path } => {
                 if let Some(value_tp) = self.get_type(variable) {
                     let mut value_tp = value_tp;
-                    if let NodeType::Type { .. } = value_tp {
+                    if let NodeType::NewType { .. } = value_tp {
                         let body = &self.ast.get_node(*variable).body;
                         match body {
                             NodeBody::ConstDeclaration{expr, ..}
@@ -173,28 +174,35 @@ impl<'a> Typer<'a> {
                                     vec![node.id],
                                 ))?
                             }
-                            _ => unreachable!(),
+                            _ => unreachable!("{:?}, {:?}", *variable, body),
                         }
                     }
                     let mut value_tp = &value_tp;
                     if let Some(path) = path {
                         for path_field in path {
-                            if let NodeType::Struct { fields } = &value_tp {
-                                let mut tp = None;
-                                for (field, field_tp) in fields {
-                                    if path_field == field {
-                                        tp = Some(field_tp);
-                                        break;
-                                    }
-                                }
-                                match tp {
-                                    Some(tp) => {
-                                        value_tp = tp;
-                                    }
-                                    None => unreachable!(),
+                            let fields = if let NodeType::Struct { fields } = &value_tp {
+                                fields
+                            } else if let NodeType::Type { content, .. } = &value_tp {
+                                if let NodeType::Struct { fields } = &**content {
+                                    fields
+                                } else {
+                                    unimplemented!("{:?}", value_tp)
                                 }
                             } else {
-                                self.ast.unimplemented(node.id)?;
+                                unimplemented!("{:?}", value_tp)
+                            };
+                            let mut tp = None;
+                            for (field, field_tp) in fields {
+                                if path_field == field {
+                                    tp = Some(field_tp);
+                                    break;
+                                }
+                            }
+                            match tp {
+                                Some(tp) => {
+                                    value_tp = tp;
+                                }
+                                None => unreachable!(),
                             }
                         }
                     }
@@ -212,7 +220,7 @@ impl<'a> Typer<'a> {
             }
             VariableDeclaration { tp, expr, .. } => {
                 if let Some(tp) = tp {
-                    InferredType::maybe(self.get_type_from_declaration(&node.id, tp)?, Declared)
+                    InferredType::maybe(self.ast.get_node_type(*tp), Declared)
                 } else if let Some(expr) = expr {
                     self.not_void(expr)?;
                     InferredType::maybe(self.get_type(expr), Value)
@@ -222,7 +230,7 @@ impl<'a> Typer<'a> {
             }
             ConstDeclaration { tp, expr, .. } | StaticDeclaration { tp, expr, .. } => {
                 if let Some(tp) = tp {
-                    InferredType::maybe(self.get_type_from_declaration(&node.id, tp)?, Declared)
+                    InferredType::maybe(self.ast.get_node_type(*tp), Declared)
                 } else if let Some(expr_tp) = self.get_type(expr) {
                     self.not_void(expr)?;
                     InferredType::maybe(Some(expr_tp), Value)
@@ -231,7 +239,7 @@ impl<'a> Typer<'a> {
                 }
             }
             TypeDeclaration { tp, .. } => {
-                InferredType::maybe(self.get_type_from_declaration(&node.id, tp)?, Declared)
+                InferredType::maybe(self.ast.get_node_type(*tp), Declared)
             }
             Import { expr, .. } => {
                 if let Some(tp) = self.get_type(expr) {
@@ -246,7 +254,7 @@ impl<'a> Typer<'a> {
                 if let Some(tp) = &var.tp {
                     match &tp.tp {
                         Fn{returns, ..} |
-                        Type{tp: returns }=> {
+                        NewType {tp: returns, .. }=> {
                             InferredType::maybe(Some((**returns).clone()), Value)
                         }
                         _ => Err(self.ast.error(
@@ -297,7 +305,6 @@ impl<'a> Typer<'a> {
             self.since_last_changed += 1;
             self.queue.push_back(node_id);
             if self.since_last_changed > 2 * self.queue.len() {
-                println!("{:?}", self.ast);
                 return Err(self.ast.error(
                     "Failed to complete type check, unable to infer the type of the following expressions",
                     "unable to infer type"

@@ -29,6 +29,8 @@ impl<'a> Checker<'a> {
                 | Expression { .. }
                 | VariableValue { .. }
                 | ProcedureDeclaration { .. }
+                | TypeReference { .. }
+                | PartialType { .. }
                 | Import { .. } => Ok(()),
                 Op { op, lhs, rhs } => {
                     let lhs_tp = self.ast.get_node(*lhs).tp.as_ref().unwrap();
@@ -65,31 +67,35 @@ impl<'a> Checker<'a> {
                     let mut variable_tp = &variable_node.tp.as_ref().unwrap().tp;
                     if let Some(path) = path {
                         for path_field in path {
-                            if let NodeType::Struct { fields } = &variable_tp {
-                                let mut tp = None;
-                                for (field, field_tp) in fields {
-                                    if path_field == field {
-                                        tp = Some(field_tp);
-                                        break;
-                                    }
-                                }
-                                match tp {
-                                    Some(tp) => {
-                                        variable_tp = tp;
-                                    }
-                                    None => {
-                                        return Err(self.ast.error(
-                                            &format!(
-                                                "Struct does not have the field '{}'",
-                                                path_field
-                                            ),
-                                            "",
-                                            vec![node.id],
-                                        ));
-                                    }
+                            let fields = if let NodeType::Struct { fields } = &variable_tp {
+                                fields
+                            } else if let NodeType::Type { content, .. } = &variable_tp {
+                                if let NodeType::Struct { fields } = &**content {
+                                    fields
+                                } else {
+                                    unimplemented!("{:?}", variable_tp)
                                 }
                             } else {
-                                unimplemented!()
+                                unimplemented!("{:?}", variable_tp)
+                            };
+                            let mut tp = None;
+                            for (field, field_tp) in fields {
+                                if path_field == field {
+                                    tp = Some(field_tp);
+                                    break;
+                                }
+                            }
+                            match tp {
+                                Some(tp) => {
+                                    variable_tp = tp;
+                                }
+                                None => {
+                                    return Err(self.ast.error(
+                                        &format!("Struct does not have the field '{}'", path_field),
+                                        "",
+                                        vec![node.id],
+                                    ));
+                                }
                             }
                         }
                     }
@@ -133,7 +139,7 @@ impl<'a> Checker<'a> {
                 TypeDeclaration { constructor, .. } => {
                     let lhs = node.tp.as_ref().unwrap();
                     let rhs = self.ast.get_node(*constructor).tp.as_ref().unwrap();
-                    if let Type { tp } = &lhs.tp {
+                    if let NewType { tp, .. } = &lhs.tp {
                         if let Fn { returns, .. } = &rhs.tp {
                             if tp == returns {
                                 return Ok(());
@@ -240,7 +246,7 @@ impl<'a> Checker<'a> {
                         .map(|id| self.ast.get_node(*id).tp.as_ref().unwrap().tp.clone())
                         .collect();
                     let call = &match func_tp {
-                        Fn { returns, .. } | Type { tp: returns } => Fn {
+                        Fn { returns, .. } | NewType { tp: returns, .. } => Fn {
                             args,
                             returns: returns.clone(),
                         },
@@ -447,7 +453,7 @@ impl<'a> Checker<'a> {
     ) -> Result<()> {
         use NodeType::*;
         match (hole, shape) {
-            (Type { tp: fields }, Fn { args, returns }) => {
+            (NewType { tp: fields, .. }, Fn { args, returns }) => {
                 if args.len() > 0 {
                     let nodes = caller.body.children().map(|id| *id).collect();
                     Err(self.ast.error(

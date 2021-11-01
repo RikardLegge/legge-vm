@@ -1,4 +1,5 @@
 use super::{Ast, NodeBody, NodeID, NodeValue, Result, UnlinkedNodeBody};
+use crate::ast::ast::PartialType;
 use crate::ast::NodeType;
 use crate::token::TokenType::EndStatement;
 use crate::token::{ArithmeticOP, Token, TokenType};
@@ -149,10 +150,10 @@ where
         return PendingNode { id };
     }
 
-    fn add_node(&mut self, pending: PendingNode, body: NodeBody) -> NodeID {
-        let node = self.ast.get_node_mut(pending.id);
+    fn add_node(&mut self, pending_node: PendingNode, body: NodeBody) -> NodeID {
+        let node = self.ast.get_node_mut(pending_node.id);
         node.body = body;
-        pending.id
+        pending_node.id
     }
 
     fn add_uncomplete_node(&mut self, pending: PendingNode, body: UnlinkedNodeBody) -> NodeID {
@@ -177,8 +178,7 @@ where
             | If { .. }
             | Loop { .. }
             | Comment { .. }
-            | Empty
-            | Unlinked(UnlinkedNodeBody::Type { .. }) => false,
+            | Empty => false,
             _ => true,
         }
     }
@@ -208,10 +208,20 @@ where
         let node = self.node(parent_id);
 
         let node = match self.next_token(&node)? {
-            Int(int, _) => Ok(self.add_node(node, NodeBody::ConstValue(NodeValue::Int(int)))),
-            Float(float, _, _) => {
-                Ok(self.add_node(node, NodeBody::ConstValue(NodeValue::Float(float))))
-            }
+            Int(int, _) => Ok(self.add_node(
+                node,
+                NodeBody::ConstValue {
+                    tp: None,
+                    value: NodeValue::Int(int),
+                },
+            )),
+            Float(float, _, _) => Ok(self.add_node(
+                node,
+                NodeBody::ConstValue {
+                    tp: None,
+                    value: NodeValue::Float(float),
+                },
+            )),
             Op(op) => self.do_operation(node, op, None),
             Name(symbol) => self.do_statement_symbol(node, &symbol),
             LeftCurlyBrace => self.do_block(node),
@@ -249,11 +259,27 @@ where
         let node = self.node(parent_id);
 
         let node = match self.next_token(&node)? {
-            Int(int, _) => self.add_node(node, NodeBody::ConstValue(NodeValue::Int(int))),
-            Float(float, _, _) => {
-                self.add_node(node, NodeBody::ConstValue(NodeValue::Float(float)))
-            }
-            String(value) => self.add_node(node, NodeBody::ConstValue(NodeValue::String(value))),
+            Int(int, _) => self.add_node(
+                node,
+                NodeBody::ConstValue {
+                    tp: None,
+                    value: NodeValue::Int(int),
+                },
+            ),
+            Float(float, _, _) => self.add_node(
+                node,
+                NodeBody::ConstValue {
+                    tp: None,
+                    value: NodeValue::Float(float),
+                },
+            ),
+            String(value) => self.add_node(
+                node,
+                NodeBody::ConstValue {
+                    tp: None,
+                    value: NodeValue::String(value),
+                },
+            ),
             Op(op) => self.do_operation(node, op, None)?,
             Name(symbol) => self.do_expression_symbol(node, &symbol, None)?,
             LeftCurlyBrace => self.do_block(node)?,
@@ -333,7 +359,13 @@ where
     }
 
     fn do_bool(&mut self, node: PendingNode, value: bool) -> Result {
-        Ok(self.add_node(node, NodeBody::ConstValue(NodeValue::Bool(value))))
+        Ok(self.add_node(
+            node,
+            NodeBody::ConstValue {
+                tp: None,
+                value: NodeValue::Bool(value),
+            },
+        ))
     }
 
     fn do_loop(&mut self, node: PendingNode) -> Result {
@@ -405,47 +437,82 @@ where
         Ok(self.add_node(node, body))
     }
 
-    fn do_type(&mut self, node: &PendingNode) -> Result<NodeType> {
+    fn do_type(&mut self, parent: &PendingNode) -> Result<(NodeID, &PartialType)> {
+        use PartialType::*;
         use TokenType::*;
-        let token = self.next_token(node)?;
-        let tp = match token {
+
+        let node = self.node(parent.id);
+        let token = self.next_token(&node)?;
+        let (tp, parts) = match token {
             Name(ident) => match ident.as_ref() {
-                "int" => NodeType::Int,
-                "float" => NodeType::Float,
-                "string" => NodeType::String,
-                "bool" => NodeType::Bool,
-                "void" => NodeType::Void,
+                "int" => (Complete(NodeType::Int), vec![]),
+                "float" => (Complete(NodeType::Float), vec![]),
+                "string" => (Complete(NodeType::String), vec![]),
+                "bool" => (Complete(NodeType::Bool), vec![]),
+                "void" => (Complete(NodeType::Void), vec![]),
                 "Fn" => {
-                    let mut args = Vec::new();
-                    let mut ret = NodeType::Void;
-                    self.ensure_next_token(node, LeftBrace)?;
-                    match self.peek_token()? {
+                    self.ensure_next_token(&node, LeftBrace)?;
+
+                    let mut complete = true;
+                    let mut parts = Vec::new();
+                    let args = match self.peek_token()? {
                         RightBrace => {
-                            self.next_token(node)?;
+                            self.next_token(&node)?;
+                            vec![]
                         }
-                        _ => loop {
-                            args.push(self.do_type(node)?);
-                            match self.next_token(node)? {
-                                ListSeparator => (),
-                                RightBrace => break,
-                                _ => Err(self.ast.error(
-                                    &format!("Invalid token found in place of ')' or ','"),
-                                    "",
-                                    vec![node.id],
-                                ))?,
+                        _ => {
+                            let mut args = Vec::new();
+                            loop {
+                                let (arg_id, tp_ref) = self.do_type(&node)?;
+                                if !tp_ref.is_complete() {
+                                    complete = false;
+                                }
+                                parts.push(arg_id);
+                                args.push(tp_ref.tp().clone());
+                                match self.next_token(&node)? {
+                                    ListSeparator => (),
+                                    RightBrace => break args,
+                                    _ => Err(self.ast.error(
+                                        &format!("Invalid token found in place of ')' or ','"),
+                                        "",
+                                        vec![node.id],
+                                    ))?,
+                                }
                             }
-                        },
-                    }
-                    if self.peek_token()? == &ReturnTypes {
-                        self.next_token(node)?;
-                        ret = self.do_type(node)?;
-                    }
-                    NodeType::Fn {
+                        }
+                    };
+                    let ret = if self.peek_token()? == &ReturnTypes {
+                        self.next_token(&node)?;
+                        let (ret_id, tp_ref) = self.do_type(&node)?;
+                        if !tp_ref.is_complete() {
+                            complete = false;
+                        }
+                        parts.push(ret_id);
+                        tp_ref.tp()
+                    } else {
+                        let tp_ref = Complete(NodeType::Void);
+                        let ret = self.node(node.id);
+                        let ret_id = self.add_node(
+                            ret,
+                            NodeBody::PartialType {
+                                parts: vec![],
+                                tp: tp_ref,
+                            },
+                        );
+                        let tp_ref = match &self.ast.get_node(ret_id).body {
+                            NodeBody::PartialType { tp, .. } => tp,
+                            _ => unreachable!(),
+                        };
+                        parts.push(ret_id);
+                        tp_ref.tp()
+                    };
+                    let tp = NodeType::Fn {
                         args,
-                        returns: Box::new(ret),
-                    }
+                        returns: Box::new(ret.clone()),
+                    };
+                    (PartialType::new(complete, tp), parts)
                 }
-                _ => NodeType::Unknown { ident },
+                _ => (PartialType::Uncomplete(NodeType::Unknown { ident }), vec![]),
             },
             _ => Err(self.ast.error(
                 &format!("Invalid token found when expecting type"),
@@ -453,7 +520,12 @@ where
                 vec![node.id],
             ))?,
         };
-        Ok(tp)
+        let node_id = self.add_node(node, NodeBody::PartialType { parts, tp });
+        let tp_ref = match &self.ast.get_node(node_id).body {
+            NodeBody::PartialType { tp, .. } => tp,
+            _ => unreachable!(),
+        };
+        Ok((node_id, tp_ref))
     }
 
     fn default_value(&self, tp: &NodeType) -> (NodeValue, bool) {
@@ -487,14 +559,19 @@ where
     fn do_type_definition(&mut self, node: PendingNode, ident: &str) -> Result {
         self.ensure_next_token(&node, TokenType::LeftCurlyBrace)?;
 
+        let mut parts = Vec::new();
         let mut fields = Vec::new();
-
+        let mut complete = true;
         loop {
             match self.next_token(&node)? {
                 TokenType::Name(key) => {
                     self.ensure_next_token(&node, TokenType::TypeDeclaration)?;
-                    let tp = self.do_type(&node)?;
-                    fields.push((key, tp));
+                    let (id, tp_ref) = self.do_type(&node)?;
+                    if !tp_ref.is_complete() {
+                        complete = false;
+                    }
+                    parts.push(id);
+                    fields.push((key, tp_ref.tp().clone()));
                 }
                 TokenType::RightCurlyBrace => break,
                 _ => Err(self.ast.error(
@@ -509,7 +586,19 @@ where
         }
 
         let self_tp = NodeType::Struct { fields };
-        let known_type;
+        let tp_ref = PartialType::new(
+            complete,
+            NodeType::NewType {
+                tp: Box::new(NodeType::Type {
+                    ident: ident.into(),
+                    content: Box::new(self_tp.clone()),
+                }),
+            },
+        );
+        let tp = {
+            let tp = self.node(node.id);
+            self.add_node(tp, NodeBody::PartialType { parts, tp: tp_ref })
+        };
         let mut default_value = None;
         let constructor = {
             let node = self.node(node.id);
@@ -522,20 +611,30 @@ where
 
                     let value_id = {
                         let node = self.node(node.id);
-                        let (value, linked) = self.default_value(&self_tp);
-                        known_type = linked;
-                        if known_type {
+                        let (value, is_linked) = self.default_value(&self_tp);
+                        if is_linked {
                             default_value = Some(value.clone());
-                            let value = NodeBody::ConstValue(value);
+                            let tp = {
+                                let node = self.node(node.id);
+                                self.add_node(node, NodeBody::TypeReference { tp })
+                            };
+                            let value = NodeBody::ConstValue {
+                                tp: Some(tp),
+                                value,
+                            };
                             self.add_node(node, value)
                         } else {
-                            let value = UnlinkedNodeBody::Value(value);
+                            let value = UnlinkedNodeBody::Value {
+                                tp: Some(tp),
+                                value,
+                            };
                             self.add_uncomplete_node(node, value)
                         }
                     };
 
                     let ret = NodeBody::Unlinked(UnlinkedNodeBody::Return {
                         expr: Some(value_id),
+                        automatic: true,
                     });
                     self.add_node(node, ret)
                 };
@@ -544,46 +643,26 @@ where
                 self.add_node(node, body)
             };
 
+            let tp = {
+                let node = self.node(node.id);
+                self.add_node(node, NodeBody::TypeReference { tp })
+            };
             let constructor = NodeBody::ProcedureDeclaration {
                 args: Vec::new(),
-                returns: Some(self_tp.clone()),
+                returns: Some(tp),
                 body,
             };
-            if known_type {
-                self.add_node(node, constructor)
-            } else {
-                self.add_uncomplete_node(
-                    node,
-                    UnlinkedNodeBody::Type {
-                        def: Box::new(constructor),
-                        expr: Some(body),
-                    },
-                )
-            }
+            self.add_node(node, constructor)
         };
 
-        let tp = NodeType::Type {
-            tp: Box::new(self_tp),
-        };
-        let variable = NodeBody::TypeDeclaration {
+        let body = NodeBody::TypeDeclaration {
             ident: ident.into(),
             tp,
             constructor,
             default_value,
         };
-        if known_type {
-            let node_id = self.add_node(node, variable);
-            Ok(node_id)
-        } else {
-            let node_id = self.add_uncomplete_node(
-                node,
-                UnlinkedNodeBody::Type {
-                    def: Box::new(variable),
-                    expr: Some(constructor),
-                },
-            );
-            Ok(node_id)
-        }
+        let node_id = self.add_node(node, body);
+        Ok(node_id)
     }
 
     fn do_procedure(&mut self, node: PendingNode) -> Result {
@@ -593,18 +672,18 @@ where
             let arg_node = self.node(node.id);
             match self.next_token(&arg_node)? {
                 TokenType::Name(ident) => {
-                    let tp = match self.peek_token()? {
+                    let (id, _) = match self.peek_token()? {
                         TokenType::TypeDeclaration => {
                             self.next_token(&arg_node)?;
-                            Some(self.do_type(&arg_node)?)
+                            self.do_type(&arg_node)?
                         }
-                        _ => None,
+                        _ => unreachable!(),
                     };
                     let body = self.add_node(
                         arg_node,
                         NodeBody::VariableDeclaration {
                             ident,
-                            tp,
+                            tp: Some(id),
                             expr: None,
                         },
                     );
@@ -628,7 +707,8 @@ where
         let returns = match self.peek_token()? {
             TokenType::ReturnTypes => {
                 self.next_token(&node)?;
-                Some(self.do_type(&node)?)
+                let (id, _) = self.do_type(&node)?;
+                Some(id)
             }
             _ => None,
         };
@@ -648,8 +728,7 @@ where
                 match last.body {
                     // Ignore comments when searching for last statement
                     NodeBody::Comment(..) => continue,
-                    NodeBody::Unlinked(UnlinkedNodeBody::Return { .. })
-                    | NodeBody::Return { .. } => {
+                    NodeBody::Unlinked(UnlinkedNodeBody::Return { .. }) => {
                         has_return = true;
                         break;
                     }
@@ -660,10 +739,9 @@ where
         };
         if !has_return {
             let ret_node = self.node(body);
-            let ret_node = self.add_node(
+            let ret_node = self.add_uncomplete_node(
                 ret_node,
-                NodeBody::Return {
-                    func: node.id,
+                UnlinkedNodeBody::Return {
                     expr: None,
                     automatic: true,
                 },
@@ -697,7 +775,7 @@ where
                     // TypeDeclaration + Assignment = VariableDeclaration
                     return self.do_variable_declaration(node, ident, None);
                 }
-                let tp = self.do_type(&node)?;
+                let (tp, _) = self.do_type(&node)?;
                 match self.peek_token()? {
                     ConstDeclaration | VariableDeclaration => {
                         self.do_variable_or_assignment(node, ident, Some(tp))
@@ -757,7 +835,7 @@ where
         &mut self,
         node: PendingNode,
         ident: &str,
-        tp: Option<NodeType>,
+        tp: Option<NodeID>,
     ) -> Result {
         use crate::token::TokenType::*;
 
@@ -839,7 +917,7 @@ where
         &mut self,
         node: PendingNode,
         ident: &str,
-        tp: Option<NodeType>,
+        tp: Option<NodeID>,
     ) -> Result {
         self.next_token(&node)?;
         let expr = self.do_expression(node.id)?;
@@ -915,6 +993,12 @@ where
         } else {
             None
         };
-        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Return { expr }))
+        Ok(self.add_uncomplete_node(
+            node,
+            UnlinkedNodeBody::Return {
+                expr,
+                automatic: false,
+            },
+        ))
     }
 }
