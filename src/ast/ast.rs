@@ -1,9 +1,11 @@
 use super::Result;
+use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody};
 use crate::ast::Err;
-use crate::token::{ArithmeticOP, Token};
+use crate::token::Token;
 use std::collections::HashSet;
-use std::fmt;
 use std::fmt::{Debug, Formatter};
+use std::marker::PhantomData;
+use std::{fmt, mem};
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct NodeID(usize);
@@ -18,8 +20,73 @@ impl NodeID {
     }
 }
 
+pub struct CallNode(NodeID);
+
+impl CallNode {
+    pub fn id(&self) -> NodeID {
+        self.0
+    }
+
+    pub fn tp(&self, ast: &Ast) -> Option<NodeType> {
+        if let Some(InferredType { tp, .. }) = &ast.get_node(self.id()).tp {
+            Some(tp.clone())
+        } else {
+            let args = {
+                let arg_ids = self.args(ast);
+                let mut args = Vec::with_capacity(arg_ids.len());
+                for id in arg_ids {
+                    match &ast.get_node(*id).tp {
+                        Some(InferredType { tp, .. }) => args.push(tp.clone()),
+                        None => return None,
+                    }
+                }
+                args
+            };
+            let returns = {
+                let function = ast.get_node(self.target(ast));
+                unimplemented!()
+                // let returns = match function {
+                //     NodeType::Fn { returns, .. } => returns,
+                //     NodeType::NewType { tp, .. } => tp,
+                //     _ => unimplemented!(),
+                // };
+                // returns.clone()
+            };
+            Some(NodeType::Fn { args, returns })
+        }
+    }
+
+    pub fn target(&self, ast: &Ast) -> NodeID {
+        match &ast.get_node(self.id()).body {
+            NodeBody::Call(call) => call.func,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn args<'a>(&'_ self, ast: &'a Ast) -> &'a [NodeID] {
+        match &ast.get_node(self.id()).body {
+            NodeBody::Call(call) => &call.args,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn from<T: Debug>(node: &Node<T>) -> Option<CallNode> {
+        match node.body {
+            NodeBody::Call(_) => Some(CallNode(node.id)),
+            _ => None,
+        }
+    }
+}
+
+pub struct FnNode {
+    pub id: NodeID,
+}
+
 #[derive(Debug, Clone)]
-pub struct Node {
+pub struct Node<T = state::StateAny>
+where
+    T: Debug,
+{
     pub id: NodeID,
     pub tokens: Vec<Token>,
     pub tp: Option<InferredType>,
@@ -28,12 +95,16 @@ pub struct Node {
     pub referenced_by: HashSet<NodeReference>,
     pub references: HashSet<NodeReference>,
     pub reference_types: HashSet<SideEffect>,
+    _tp: PhantomData<T>,
 }
 
-impl Node {
+impl<T> Node<T>
+where
+    T: Debug,
+{
     pub fn is_closure_boundary(&self) -> bool {
         match self.body {
-            NodeBody::ProcedureDeclaration { .. } => true,
+            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. }) => true,
             _ => false,
         }
     }
@@ -48,7 +119,7 @@ impl Node {
             .any(|ref_by| ref_by.ref_loc == NodeReferenceLocation::Closure)
     }
 
-    pub fn child_tokens(&self, ast: &Ast) -> Vec<Token> {
+    pub fn child_tokens(&self, ast: &Ast<T>) -> Vec<Token> {
         let mut tokens = Vec::new();
         for child_id in self.body.children() {
             let child = ast.get_node(*child_id);
@@ -56,6 +127,15 @@ impl Node {
             tokens.append(&mut child.child_tokens(ast))
         }
         tokens
+    }
+}
+
+impl<T> Node<T>
+where
+    T: TypesInferred + Debug,
+{
+    pub fn inferred_tp(&self) -> &InferredType {
+        self.tp.as_ref().unwrap()
     }
 }
 
@@ -271,158 +351,58 @@ impl PartialType {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum NodeBody {
-    Empty,
-    ConstValue {
-        tp: Option<NodeID>,
-        value: NodeValue,
-    },
-    TypeReference {
-        tp: NodeID,
-    },
-    PartialType {
-        tp: PartialType,
-        parts: Vec<NodeID>,
-    },
-    Op {
-        op: ArithmeticOP,
-        lhs: NodeID,
-        rhs: NodeID,
-    },
-    ProcedureDeclaration {
-        args: Vec<NodeID>,
-        returns: Option<NodeID>,
-        body: NodeID,
-    },
-    PrefixOp {
-        op: ArithmeticOP,
-        rhs: NodeID,
-    },
-    Block {
-        body: Vec<NodeID>,
-    },
-    If {
-        condition: NodeID,
-        body: NodeID,
-    },
-    Loop {
-        body: NodeID,
-    },
-    Expression(NodeID),
-    Comment(String),
-    Import {
-        ident: String,
-        expr: NodeID,
-    },
+mod state {
+    pub trait Any {}
+    pub trait Linked {}
+    pub trait TypesInferred {}
+    pub trait TypesChecked {}
 
-    VariableDeclaration {
-        ident: String,
-        tp: Option<NodeID>,
-        expr: Option<NodeID>,
-    },
-    ConstDeclaration {
-        ident: String,
-        tp: Option<NodeID>,
-        expr: NodeID,
-    },
-    StaticDeclaration {
-        ident: String,
-        tp: Option<NodeID>,
-        expr: NodeID,
-    },
-    TypeDeclaration {
-        ident: String,
-        tp: NodeID,
-        constructor: NodeID,
-        default_value: Option<NodeValue>,
-    },
-    VariableAssignment {
-        variable: NodeID,
-        path: Option<Vec<String>>,
-        expr: NodeID,
-    },
-    VariableValue {
-        variable: NodeID,
-        path: Option<Vec<String>>,
-    },
-    Return {
-        func: NodeID,
-        expr: Option<NodeID>,
-        automatic: bool,
-    },
-    Break {
-        r#loop: NodeID,
-    },
-    Call {
-        func: NodeID,
-        args: Vec<NodeID>,
-    },
+    #[derive(Debug, Copy, Clone)]
+    pub struct StateAny {}
+    impl Any for StateAny {}
 
-    Unlinked(UnlinkedNodeBody),
+    #[derive(Debug, Copy, Clone)]
+    pub struct StateLinked {}
+    impl Linked for StateLinked {}
+    impl Any for StateLinked {}
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct StateTypesInferred {}
+    impl TypesInferred for StateTypesInferred {}
+    impl Linked for StateTypesInferred {}
+    impl Any for StateTypesInferred {}
+
+    #[derive(Debug, Copy, Clone)]
+    pub struct StateTypesChecked {}
+    impl TypesChecked for StateTypesChecked {}
+    impl TypesInferred for StateTypesChecked {}
+    impl Linked for StateTypesChecked {}
+    impl Any for StateTypesChecked {}
 }
 
-impl NodeBody {
-    pub fn children(&self) -> NodeBodyIterator {
-        NodeBodyIterator {
-            index: 0,
-            body: self,
-            unlinked: None,
-        }
-    }
-}
+pub use state::{Any, Linked, TypesChecked, TypesInferred};
+pub use state::{StateAny, StateLinked, StateTypesChecked, StateTypesInferred};
 
-#[derive(Debug, Clone)]
-pub enum UnlinkedNodeBody {
-    VariableAssignment {
-        ident: String,
-        path: Option<Vec<String>>,
-        expr: NodeID,
-    },
-    Value {
-        tp: Option<NodeID>,
-        value: NodeValue,
-    },
-    VariableValue {
-        ident: String,
-        path: Option<Vec<String>>,
-    },
-    Return {
-        expr: Option<NodeID>,
-        automatic: bool,
-    },
-    Break,
-    Call {
-        ident: String,
-        args: Vec<NodeID>,
-    },
-    ImportValue {
-        ident: String,
-    },
-}
-
-impl UnlinkedNodeBody {
-    pub fn children(&self) -> UnlinkedNodeBodyIterator {
-        UnlinkedNodeBodyIterator {
-            index: 0,
-            body: self,
-        }
-    }
-}
-
-pub struct Ast {
-    nodes: Vec<Node>,
+pub struct Ast<T = state::StateAny> {
+    nodes: Vec<Node<state::StateAny>>,
     root: NodeID,
+    _tp: PhantomData<T>,
 }
 
-impl fmt::Debug for Ast {
+impl<T> fmt::Debug for Ast<T>
+where
+    T: Debug,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.fmt_debug_node(f, 0, self.root)?;
         write!(f, "\n")
     }
 }
 
-impl Ast {
+impl<T> Ast<T>
+where
+    T: Debug,
+{
     pub fn unimplemented(&self, id: NodeID) -> Result {
         Err(Err::new(self, "Unimplemented", "", vec![id]))
     }
@@ -435,11 +415,12 @@ impl Ast {
         Self {
             root: NodeID::zero(),
             nodes: Vec::new(),
+            _tp: PhantomData::default(),
         }
     }
 
-    pub fn nodes(&self) -> &[Node] {
-        &self.nodes
+    pub fn nodes(&self) -> &[Node<T>] {
+        unsafe { mem::transmute::<&[Node], &[Node<T>]>(&self.nodes) }
     }
 
     pub fn add_ref(
@@ -510,6 +491,7 @@ impl Ast {
             tokens: vec![],
             body: NodeBody::Empty,
             reference_types: HashSet::new(),
+            _tp: PhantomData::default(),
         };
         let id = node.id;
         self.nodes.push(node);
@@ -569,9 +551,9 @@ impl Ast {
         Ok(())
     }
 
-    pub fn get_node(&self, node_id: NodeID) -> &Node {
+    pub fn get_node(&self, node_id: NodeID) -> &Node<T> {
         match self.nodes.get(node_id.0) {
-            Some(node) => node,
+            Some(node) => unsafe { mem::transmute::<&Node, &Node<T>>(node) },
             None => panic!("Could not find Node({}) in ast", node_id.0),
         }
     }
@@ -580,9 +562,9 @@ impl Ast {
         self.get_node(node_id).tp.clone().map(|t| t.tp)
     }
 
-    pub fn get_node_mut(&mut self, node_id: NodeID) -> &mut Node {
+    pub fn get_node_mut(&mut self, node_id: NodeID) -> &mut Node<T> {
         match self.nodes.get_mut(node_id.0) {
-            Some(node) => node,
+            Some(node) => unsafe { mem::transmute::<&mut Node, &mut Node<T>>(node) },
             None => panic!("Could not find Node({}) in ast", node_id.0),
         }
     }
@@ -590,7 +572,7 @@ impl Ast {
     pub fn closest_fn(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
-                NodeBody::ProcedureDeclaration { .. } => Some(node.id),
+                NodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. }) => Some(node.id),
                 _ => None,
             })
         })
@@ -612,7 +594,7 @@ impl Ast {
         node_id: NodeID,
         target_ident: &str,
     ) -> Result<Option<(NodeID, NodeReferenceLocation)>> {
-        use NodeBody::*;
+        use crate::ast::nodebody::NodeBody::*;
         self.closest(node_id, |node| {
             let mut closest_id = None;
             for &child_id in node.body.children() {
@@ -647,7 +629,7 @@ impl Ast {
         test: F,
     ) -> Result<Option<(NodeID, NodeReferenceLocation)>>
     where
-        F: Fn(&Node) -> Result<Option<NodeID>>,
+        F: Fn(&Node<T>) -> Result<Option<NodeID>>,
     {
         let mut location = NodeReferenceLocation::Local;
         loop {
@@ -687,136 +669,5 @@ impl Ast {
             }
             _ => None,
         }
-    }
-}
-
-pub struct NodeBodyIterator<'a> {
-    index: usize,
-    body: &'a NodeBody,
-    unlinked: Option<UnlinkedNodeBodyIterator<'a>>,
-}
-
-impl<'a> Iterator for NodeBodyIterator<'a> {
-    type Item = &'a NodeID;
-
-    fn next(&mut self) -> Option<&'a NodeID> {
-        use NodeBody::*;
-        let option = match self.body {
-            Op { lhs, rhs, .. } => match self.index {
-                0 => Some(lhs),
-                1 => Some(rhs),
-                _ => None,
-            },
-            If { condition, body } => match self.index {
-                0 => Some(condition),
-                1 => Some(body),
-                _ => None,
-            },
-            ProcedureDeclaration {
-                args,
-                body,
-                returns,
-            } => {
-                if self.index < args.len() {
-                    args.get(self.index)
-                } else if self.index == args.len() {
-                    Some(body)
-                } else if self.index == args.len() + 1 {
-                    match returns {
-                        Some(v) => Some(v),
-                        None => None,
-                    }
-                } else {
-                    None
-                }
-            }
-            Block { body } => body.get(self.index),
-            Call { args, .. } => args.get(self.index),
-            PartialType { parts, .. } => parts.get(self.index),
-
-            Return { expr, .. } => match self.index {
-                0 => expr.as_ref(),
-                _ => None,
-            },
-            PrefixOp { rhs: value, .. }
-            | Loop { body: value }
-            | Expression(value)
-            | VariableAssignment { expr: value, .. }
-            | Import { expr: value, .. } => match self.index {
-                0 => Some(value),
-                _ => None,
-            },
-            TypeDeclaration {
-                constructor, tp, ..
-            } => match self.index {
-                0 => Some(constructor),
-                1 => Some(tp),
-                _ => None,
-            },
-            VariableDeclaration { expr: None, tp, .. } => match self.index {
-                0 => tp.as_ref(),
-                _ => None,
-            },
-            VariableDeclaration {
-                expr: Some(expr),
-                tp,
-                ..
-            }
-            | ConstDeclaration { expr, tp, .. }
-            | StaticDeclaration { expr, tp, .. } => match self.index {
-                0 => Some(expr),
-                1 => tp.as_ref(),
-                _ => None,
-            },
-            ConstValue { tp, .. } => match self.index {
-                0 => tp.as_ref(),
-                _ => None,
-            },
-            TypeReference { .. } | VariableValue { .. } | Comment { .. } | Break { .. } | Empty => {
-                None
-            }
-            Unlinked(body) => {
-                if let None = self.unlinked {
-                    self.unlinked = Some(body.children());
-                }
-                match &mut self.unlinked {
-                    Some(iter) => iter.next(),
-                    None => unreachable!(),
-                }
-            }
-        };
-        if option.is_some() {
-            self.index += 1;
-        }
-        option
-    }
-}
-
-pub struct UnlinkedNodeBodyIterator<'a> {
-    index: usize,
-    body: &'a UnlinkedNodeBody,
-}
-
-impl<'a> Iterator for UnlinkedNodeBodyIterator<'a> {
-    type Item = &'a NodeID;
-
-    fn next(&mut self) -> Option<&'a NodeID> {
-        use UnlinkedNodeBody::*;
-        let option = match self.body {
-            VariableAssignment { expr, .. } => match self.index {
-                0 => Some(expr),
-                _ => None,
-            },
-            Return { expr, .. } => match self.index {
-                0 => expr.as_ref(),
-                _ => None,
-            },
-            Call { args, .. } => args.get(self.index),
-            VariableValue { .. } | Break | ImportValue { .. } | Value { .. } => None,
-        };
-        if option.is_some() {
-            self.index += 1;
-        }
-        option
     }
 }

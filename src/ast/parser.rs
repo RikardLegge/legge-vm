@@ -1,5 +1,6 @@
-use super::{Ast, NodeBody, NodeID, NodeValue, Result, UnlinkedNodeBody};
+use super::{Ast, NodeID, NodeValue, Result};
 use crate::ast::ast::PartialType;
+use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody, UnlinkedNodeBody};
 use crate::ast::NodeType;
 use crate::token::TokenType::EndStatement;
 use crate::token::{ArithmeticOP, Token, TokenType};
@@ -162,7 +163,7 @@ where
     }
 
     fn should_terminate_statement(&mut self, node: NodeID) -> bool {
-        use self::NodeBody::*;
+        use crate::ast::nodebody::NodeBody::*;
 
         match self.ast.get_node(node).body {
             TypeDeclaration {
@@ -174,7 +175,7 @@ where
                 expr: Some(expr), ..
             } => self.should_terminate_statement(expr),
             Block { .. }
-            | ProcedureDeclaration { .. }
+            | ProcedureDeclaration(NBProcedureDeclaration { .. })
             | If { .. }
             | Loop { .. }
             | Comment { .. }
@@ -647,11 +648,11 @@ where
                 let node = self.node(node.id);
                 self.add_node(node, NodeBody::TypeReference { tp })
             };
-            let constructor = NodeBody::ProcedureDeclaration {
+            let constructor = NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                 args: Vec::new(),
                 returns: Some(tp),
                 body,
-            };
+            });
             self.add_node(node, constructor)
         };
 
@@ -755,11 +756,11 @@ where
         }
         Ok(self.add_node(
             node,
-            NodeBody::ProcedureDeclaration {
+            NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                 args,
                 returns,
                 body,
-            },
+            }),
         ))
     }
 
@@ -850,15 +851,15 @@ where
                 self.next_token(&node)?;
                 let expr = self.do_expression(node.id)?;
                 let node = match self.ast.get_node(expr).body {
-                    NodeBody::ProcedureDeclaration { .. } | NodeBody::ConstValue { .. } => self
-                        .add_node(
-                            node,
-                            NodeBody::StaticDeclaration {
-                                ident: ident.into(),
-                                tp,
-                                expr,
-                            },
-                        ),
+                    NodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. })
+                    | NodeBody::ConstValue { .. } => self.add_node(
+                        node,
+                        NodeBody::StaticDeclaration {
+                            ident: ident.into(),
+                            tp,
+                            expr,
+                        },
+                    ),
                     _ => self.add_node(
                         node,
                         NodeBody::ConstDeclaration {

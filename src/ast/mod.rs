@@ -1,21 +1,26 @@
 mod ast;
 mod checker;
 mod linker;
+pub mod nodebody;
 mod parser;
 mod treeshaker;
 mod typer;
 
+use colored::*;
+
+use std::collections::HashSet;
+use std::fmt::Debug;
 use std::result;
 
 use crate::debug;
 use crate::runtime::Runtime;
 use crate::token::Token;
-pub use ast::{
-    Ast, Node, NodeBody, NodeID, NodeReferenceType, NodeType, NodeTypeSource, NodeValue,
-    UnlinkedNodeBody,
-};
-use colored::*;
-use std::collections::HashSet;
+
+use crate::ast::ast::StateTypesChecked;
+pub use crate::ast::ast::{Any, Linked, TypesChecked, TypesInferred};
+pub use ast::{Ast, Node, NodeID, NodeReferenceType, NodeType, NodeTypeSource, NodeValue};
+
+pub type ValidAst = Ast<StateTypesChecked>;
 
 pub type Result<N = NodeID> = result::Result<N, Err>;
 
@@ -26,7 +31,12 @@ pub struct Err {
 }
 
 impl Err {
-    pub fn new(ast: &Ast, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Self {
+    pub fn new<T: Debug>(
+        ast: &Ast<T>,
+        details: &str,
+        row_details: &str,
+        nodes: Vec<NodeID>,
+    ) -> Self {
         let node_info = Self::print_line(nodes, ast, row_details);
         // panic!("\nAst Error: {}\n{}\n", details, node_info.join("\n\n"));
         Err {
@@ -35,7 +45,7 @@ impl Err {
         }
     }
 
-    pub fn print_line(nodes: Vec<NodeID>, ast: &Ast, msg: &str) -> String {
+    pub fn print_line<T: Debug>(nodes: Vec<NodeID>, ast: &Ast<T>, msg: &str) -> String {
         if nodes.is_empty() {
             return "".into();
         }
@@ -140,41 +150,56 @@ impl Err {
     }
 }
 
-pub fn from_tokens<I>(iter: I, runtime: &Runtime) -> Result<(Ast, debug::AstTiming)>
+pub fn from_tokens<I>(
+    iter: I,
+    runtime: &Runtime,
+) -> Result<(Ast<StateTypesChecked>, debug::AstTiming)>
 where
     I: Iterator<Item = Token>,
 {
     let mut timing = debug::AstTiming::default();
     let start = debug::start_timer();
-    let mut ast = parser::ast_from_tokens(iter)?;
+    let ast = parser::ast_from_tokens(iter)?;
     timing.from_tokens = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    if let Err(err) = linker::link(&mut ast, runtime) {
-        println!("{:?}", ast);
-        Err(err)?;
-    }
+    let ast = match linker::link(ast, runtime) {
+        Ok(ast) => ast,
+        Err((ast, err)) => {
+            println!("{:?}", ast);
+            Err(err)?
+        }
+    };
     timing.linker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    if let Err(err) = typer::infer_types(&mut ast, runtime) {
-        println!("{:?}", ast);
-        Err(err)?;
-    }
+    let ast = match typer::infer_types(ast, runtime) {
+        Ok(ast) => ast,
+        Err((ast, err)) => {
+            println!("{:?}", ast);
+            Err(err)?
+        }
+    };
     timing.type_inference = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    if let Err(err) = checker::check_types(&ast) {
-        println!("{:?}", ast);
-        Err(err)?;
-    }
+    let ast = match checker::check_types(ast) {
+        Ok(ast) => ast,
+        Err((ast, err)) => {
+            println!("{:?}", ast);
+            Err(err)?
+        }
+    };
     timing.type_checker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    if let Err(err) = treeshaker::treeshake(&mut ast) {
-        println!("{:?}", ast);
-        Err(err)?;
-    }
+    let ast = match treeshaker::treeshake(ast) {
+        Ok(ast) => ast,
+        Err((ast, err)) => {
+            println!("{:?}", ast);
+            Err(err)?
+        }
+    };
     timing.treeshaker = debug::stop_timer(start);
 
     Ok((ast, timing))

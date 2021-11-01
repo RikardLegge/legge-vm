@@ -1,22 +1,41 @@
-use crate::ast::ast::InferredType;
-use crate::ast::{Ast, Node, NodeBody, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
+use crate::ast::ast::{InferredType, Linked, StateTypesInferred};
+use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
+use crate::ast::{Ast, Err, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
 use std::collections::VecDeque;
+use std::fmt::Debug;
+use std::{mem, result};
 
-pub fn infer_types(ast: &mut Ast, runtime: &Runtime) -> Result<()> {
-    Typer::new(ast, runtime).infer_all_types()
+pub fn infer_types<T>(
+    mut ast: Ast<T>,
+    runtime: &Runtime,
+) -> result::Result<Ast<StateTypesInferred>, (Ast<T>, Err)>
+where
+    T: Linked + Debug,
+{
+    let typer = Typer::new(&mut ast, runtime);
+    match typer.infer_all_types() {
+        Ok(()) => Ok(unsafe { mem::transmute::<Ast<T>, Ast<StateTypesInferred>>(ast) }),
+        Err(err) => Err((ast, err)),
+    }
 }
 
-pub struct Typer<'a> {
+pub struct Typer<'a, T>
+where
+    T: Linked,
+{
     queue: VecDeque<NodeID>,
-    ast: &'a mut Ast,
+    ast: &'a mut Ast<T>,
     runtime: &'a Runtime,
     since_last_changed: usize,
 }
 
-impl<'a> Typer<'a> {
-    pub fn new(ast: &'a mut Ast, runtime: &'a Runtime) -> Self {
+impl<'a, T> Typer<'a, T>
+where
+    T: Linked + Debug,
+{
+    pub fn new(ast: &'a mut Ast<T>, runtime: &'a Runtime) -> Self {
         let queue = VecDeque::from(vec![ast.root()]);
         let since_last_changed = 0;
         Self {
@@ -93,10 +112,10 @@ impl<'a> Typer<'a> {
         }
     }
 
-    pub fn infer_type(&self, node: &Node) -> Result<Option<InferredType>> {
-        use super::NodeBody::*;
+    pub fn infer_type(&self, node: &Node<T>) -> Result<Option<InferredType>> {
         use super::NodeType::*;
         use super::NodeTypeSource::*;
+        use crate::ast::nodebody::NodeBody::*;
         let tp = match &node.body {
             TypeReference { tp } => self
                 .ast
@@ -131,7 +150,7 @@ impl<'a> Typer<'a> {
                     }
                 }
             }
-            ProcedureDeclaration { args, returns, .. } => {
+            ProcedureDeclaration(NBProcedureDeclaration { args, returns, .. }) => {
                 let arg_types: Vec<Option<NodeType>> =
                     args.iter().map(|id| self.get_type(id)).collect();
                 let args_inferred = arg_types.iter().all(|tp| tp.is_some());
@@ -249,7 +268,7 @@ impl<'a> Typer<'a> {
                 }
             }
             VariableAssignment { .. } => InferredType::maybe(Some(Void), Declared),
-            Call { func, .. } => {
+            Call(NBCall { func, .. }) => {
                 let var = self.ast.get_node(*func);
                 if let Some(tp) = &var.tp {
                     match &tp.tp {

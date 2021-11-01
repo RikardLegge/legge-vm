@@ -6,7 +6,7 @@ pub mod runtime;
 pub mod testing;
 pub mod token;
 
-use crate::ast::Ast;
+use crate::ast::ValidAst;
 pub use debug::Timing;
 
 #[allow(dead_code)]
@@ -23,7 +23,7 @@ pub fn compile(
     runtime: &runtime::Runtime,
     log_level: LogLevel,
     code: String,
-) -> Option<(bytecode::Bytecode, Ast)> {
+) -> Option<(bytecode::Bytecode, ValidAst)> {
     let start = debug::start_timer();
     let tokens = token::from_chars(code.chars());
     timing.token = debug::stop_timer(start);

@@ -1,21 +1,41 @@
 use super::{Ast, Node, Result};
-use crate::ast::{NodeBody, NodeID, NodeType};
+use crate::ast::ast::{CallNode, StateTypesChecked, TypesInferred};
+use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
+use crate::ast::{Err, NodeID, NodeType};
+use std::fmt::Debug;
+use std::{mem, result};
 
-pub fn check_types(ast: &Ast) -> Result<()> {
-    Checker::new(ast).check_all_types(ast.root())
+pub fn check_types<T: TypesInferred + Debug>(
+    mut ast: Ast<T>,
+) -> result::Result<Ast<StateTypesChecked>, (Ast<T>, Err)>
+where
+    T: TypesInferred + Debug,
+{
+    let root_id = ast.root();
+    let checker = Checker::new(&mut ast);
+    match checker.check_all_types(root_id) {
+        Ok(()) => Ok(unsafe { mem::transmute::<Ast<T>, Ast<StateTypesChecked>>(ast) }),
+        Err(err) => Err((ast, err)),
+    }
 }
 
-pub struct Checker<'a> {
-    ast: &'a Ast,
+pub struct Checker<'a, T>
+where
+    T: TypesInferred,
+{
+    ast: &'a mut Ast<T>,
 }
 
-impl<'a> Checker<'a> {
-    pub fn new(ast: &'a Ast) -> Self {
+impl<'a, T> Checker<'a, T>
+where
+    T: TypesInferred + Debug,
+{
+    pub fn new(ast: &'a mut Ast<T>) -> Self {
         Self { ast }
     }
 
-    pub fn check_type(&self, node: &Node) -> Result<()> {
-        use NodeBody::*;
+    pub fn check_type(&self, node: &Node<T>) -> Result<()> {
+        use crate::ast::nodebody::NodeBody::*;
         use NodeType::*;
         if node.tp.is_some() {
             match &node.body {
@@ -28,7 +48,7 @@ impl<'a> Checker<'a> {
                 | Loop { .. }
                 | Expression { .. }
                 | VariableValue { .. }
-                | ProcedureDeclaration { .. }
+                | ProcedureDeclaration(NBProcedureDeclaration { .. })
                 | TypeReference { .. }
                 | PartialType { .. }
                 | Import { .. } => Ok(()),
@@ -237,7 +257,8 @@ impl<'a> Checker<'a> {
                         unreachable!()
                     }
                 }
-                Call { func, args } => {
+                Call(NBCall { func, args }) => {
+                    let call = CallNode::from(node).unwrap();
                     let caller = node;
                     let func = self.ast.get_node(*func);
                     let func_tp = &func.tp.as_ref().unwrap().tp;
@@ -272,8 +293,8 @@ impl<'a> Checker<'a> {
 
     fn correct_number_of_arguments<'b>(
         &'_ self,
-        hole: &'b Node,
-        shape: &'b Node,
+        hole: &'b Node<T>,
+        shape: &'b Node<T>,
         hole_args: &'b [NodeType],
         shape_args: &'b [NodeType],
     ) -> Result<Option<&'b NodeType>> {
@@ -350,8 +371,8 @@ impl<'a> Checker<'a> {
 
     fn fits_function_argument(
         &self,
-        func: &Node,
-        caller: &Node,
+        func: &Node<T>,
+        caller: &Node<T>,
         hole: &NodeType,
         shape: &NodeType,
     ) -> Result<()> {
@@ -379,8 +400,8 @@ impl<'a> Checker<'a> {
 
     fn fits_function_function(
         &self,
-        func: &Node,
-        caller: &Node,
+        func: &Node<T>,
+        caller: &Node<T>,
         hole: &NodeType,
         shape: &NodeType,
     ) -> Result<()> {
@@ -446,8 +467,8 @@ impl<'a> Checker<'a> {
 
     fn fits_function_call(
         &self,
-        func: &Node,
-        caller: &Node,
+        func: &Node<T>,
+        caller: &Node<T>,
         hole: &NodeType,
         shape: &NodeType,
     ) -> Result<()> {

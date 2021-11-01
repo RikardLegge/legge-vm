@@ -1,11 +1,15 @@
 use crate::ast;
-use crate::ast::{Ast, NodeBody, NodeID, NodeType, NodeValue};
+use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
+use crate::ast::{Ast, NodeID, NodeType, NodeValue, TypesInferred};
 use crate::token::ArithmeticOP;
 use std::fmt;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::ops::AddAssign;
 
-pub fn from_ast(ast: &ast::Ast) -> Bytecode {
+pub fn from_ast<T>(ast: &ast::Ast<T>) -> Bytecode
+where
+    T: TypesInferred + Debug,
+{
     let root_id = ast.root();
     let mut bc = Generator::new(ast);
     let root_scope = bc.evaluate(root_id);
@@ -199,15 +203,18 @@ impl StackUsage {
     }
 }
 
-struct Generator<'a> {
+struct Generator<'a, T> {
     procedures: Vec<Instruction>,
-    ast: &'a Ast,
+    ast: &'a Ast<T>,
     scopes: Vec<Scope>,
     contexts: Vec<Context>,
 }
 
-impl<'a> Generator<'a> {
-    fn new(ast: &'a Ast) -> Self {
+impl<'a, T> Generator<'a, T>
+where
+    T: TypesInferred + Debug,
+{
+    fn new(ast: &'a Ast<T>) -> Self {
         let placeholder = Instruction {
             node_id: ast.root(),
             op: OP::Panic,
@@ -385,9 +392,9 @@ impl<'a> Generator<'a> {
         self.get_scope_mut().instructions[index].op = op
     }
 
-    fn with_context<F, T>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> T
+    fn with_context<F, K>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> K
     where
-        F: Fn(&mut Self) -> T,
+        F: Fn(&mut Self) -> K,
     {
         self.push_context(node_id, tp);
         let result = func(self);
@@ -424,7 +431,7 @@ impl<'a> Generator<'a> {
     }
 
     fn ev_node(&mut self, node_id: NodeID) -> StackUsage {
-        use crate::ast::NodeBody::*;
+        use crate::ast::nodebody::NodeBody::*;
         let node = self.ast.get_node(node_id);
         if node.is_dead() {
             return StackUsage::zero();
@@ -434,7 +441,7 @@ impl<'a> Generator<'a> {
             Op { op, lhs, rhs } => self.ev_operation(node_id, *op, *lhs, *rhs),
             PrefixOp { op, rhs } => self.ev_prefix_operation(node_id, *op, *rhs),
             Block { body } => self.ev_block(node_id, body),
-            Call { func, args } => self.ev_call(node_id, *func, args, true),
+            Call(NBCall { func, args }) => self.ev_call(node_id, *func, args, true),
             VariableValue { variable, path } => self.ev_variable_value(node_id, *variable, path),
             ConstDeclaration { expr, .. }
             | StaticDeclaration { expr, .. }
@@ -448,7 +455,9 @@ impl<'a> Generator<'a> {
                 path,
                 expr,
             } => self.ev_assignment(node_id, *variable, path, *expr),
-            ProcedureDeclaration { args, body, .. } => self.ev_procedure(node_id, args, *body),
+            ProcedureDeclaration(NBProcedureDeclaration { args, body, .. }) => {
+                self.ev_procedure(node_id, args, *body)
+            }
             Return { func, expr, .. } => self.ev_return(node_id, *func, *expr),
             If { condition, body } => self.ev_if(node_id, *condition, *body),
             Loop { body } => self.ev_loop(node_id, *body),
@@ -806,15 +815,17 @@ impl<'a> Generator<'a> {
     }
 
     fn ev_expression(&mut self, expr_id: NodeID) -> StackUsage {
-        use crate::ast::NodeBody::*;
+        use crate::ast::nodebody::NodeBody::*;
         let expr = self.ast.get_node(expr_id);
         match &expr.body {
             Op { op, lhs, rhs } => self.ev_operation(expr_id, *op, *lhs, *rhs),
             PrefixOp { op, rhs } => self.ev_prefix_operation(expr_id, *op, *rhs),
             ConstValue { value, .. } => self.ev_const(expr_id, value),
-            ProcedureDeclaration { args, body, .. } => self.ev_procedure(expr_id, args, *body),
+            ProcedureDeclaration(NBProcedureDeclaration { args, body, .. }) => {
+                self.ev_procedure(expr_id, args, *body)
+            }
             VariableValue { variable, path } => self.ev_variable_value(expr_id, *variable, path),
-            Call { func, args } => self.ev_call(expr_id, *func, args, false),
+            Call(NBCall { func, args }) => self.ev_call(expr_id, *func, args, false),
             Expression(value) => self.ev_expression(*value),
             _ => panic!("Unsupported node {:?} used as expression", expr),
         }

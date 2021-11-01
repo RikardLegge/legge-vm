@@ -1,24 +1,42 @@
 use super::NodeReferenceType::*;
-use super::UnlinkedNodeBody::*;
-use super::{Ast, NodeBody, NodeID, Result};
-use crate::ast::ast::{NodeReferenceLocation, PartialType};
-use crate::ast::{NodeType, NodeValue};
+use super::{Ast, NodeID, Result};
+use crate::ast::ast::{NodeReferenceLocation, PartialType, StateLinked};
+use crate::ast::nodebody::UnlinkedNodeBody::*;
+use crate::ast::nodebody::{NBCall, NodeBody};
+use crate::ast::{Any, Err, NodeType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
-use std::mem;
+use std::fmt::Debug;
+use std::{mem, result};
 
-pub fn link(ast: &mut Ast, runtime: &Runtime) -> Result<()> {
+pub fn link<T>(
+    mut ast: Ast<T>,
+    runtime: &Runtime,
+) -> result::Result<Ast<StateLinked>, (Ast<T>, Err)>
+where
+    T: Any + Debug,
+{
     let root_id = ast.root();
-    Linker::new(ast, runtime).link(root_id)
+    let linker = Linker::new(&mut ast, runtime);
+    match linker.link(root_id) {
+        Ok(()) => Ok(unsafe { mem::transmute::<Ast<T>, Ast<StateLinked>>(ast) }),
+        Err(err) => Err((ast, err)),
+    }
 }
 
-struct Linker<'a, 'b> {
-    ast: &'a mut Ast,
+struct Linker<'a, 'b, T>
+where
+    T: Any + Debug,
+{
+    ast: &'a mut Ast<T>,
     runtime: &'b Runtime,
 }
 
-impl<'a, 'b> Linker<'a, 'b> {
-    fn new(ast: &'a mut Ast, runtime: &'b Runtime) -> Self {
+impl<'a, 'b, T> Linker<'a, 'b, T>
+where
+    T: Any + Debug,
+{
+    fn new(ast: &'a mut Ast<T>, runtime: &'b Runtime) -> Self {
         Self { ast, runtime }
     }
 
@@ -272,7 +290,7 @@ impl<'a, 'b> Linker<'a, 'b> {
                         };
                         self.ast
                             .add_ref((func, GoTo), (node_id, ExecuteValue), location);
-                        NodeBody::Call { func, args }
+                        NodeBody::Call(NBCall { func, args })
                     }
                     ImportValue { ident } => {
                         let mut body = None;
