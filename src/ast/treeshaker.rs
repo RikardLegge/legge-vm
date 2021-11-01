@@ -65,7 +65,10 @@ where
             self.stack.insert(node_id);
 
             let node = self.ast.get_node_mut(node_id);
-            node.reference_types.insert(effect.clone());
+            node.reference_types
+                .as_mut()
+                .unwrap()
+                .insert(effect.clone());
 
             let node = self.ast.get_node(node_id);
             match node.body {
@@ -152,7 +155,13 @@ where
     }
 
     fn find_mark_alive_triggers(&mut self, node_id: NodeID, effect: &SideEffect) {
-        let effect_is_processed = self.ast.get_node(node_id).reference_types.contains(&effect);
+        let effect_is_processed = self
+            .ast
+            .get_node(node_id)
+            .reference_types
+            .as_ref()
+            .unwrap()
+            .contains(&effect);
         if !self.stack.contains(&node_id) && !effect_is_processed {
             self.stack.insert(node_id);
 
@@ -228,7 +237,8 @@ where
         let mut queue = VecDeque::from(vec![root_id]);
         let mut side_effect_nodes = Vec::new();
         while let Some(node_id) = queue.pop_front() {
-            let node = self.ast.get_node(node_id);
+            let node = self.ast.get_node_mut(node_id);
+            node.reference_types = Some(HashSet::new());
             for &child in node.body.children() {
                 queue.push_back(child);
             }

@@ -16,8 +16,8 @@ use crate::debug;
 use crate::runtime::Runtime;
 use crate::token::Token;
 
-use crate::ast::ast::StateTypesChecked;
-pub use crate::ast::ast::{Any, Linked, TypesChecked, TypesInferred};
+use ast::StateTypesChecked;
+pub use ast::{Any, Linked, TypesChecked, TypesInferred};
 pub use ast::{Ast, Node, NodeID, NodeReferenceType, NodeType, NodeTypeSource, NodeValue};
 
 pub type ValidAst = Ast<StateTypesChecked>;
@@ -187,15 +187,15 @@ where
     };
     timing.type_checker = debug::stop_timer(start);
 
-    let start = debug::start_timer();
-    let ast = match treeshaker::treeshake(ast) {
-        Ok(ast) => ast,
-        Err((ast, err)) => {
-            println!("{:?}", ast);
-            Err(err)?
-        }
-    };
-    timing.treeshaker = debug::stop_timer(start);
+    // let start = debug::start_timer();
+    // let ast = match treeshaker::treeshake(ast) {
+    //     Ok(ast) => ast,
+    //     Err((ast, err)) => {
+    //         println!("{:?}", ast);
+    //         Err(err)?
+    //     }
+    // };
+    // timing.treeshaker = debug::stop_timer(start);
 
     Ok((ast, timing))
 }

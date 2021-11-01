@@ -11,6 +11,7 @@ pub struct Runtime {
 }
 
 pub struct FunctionDefinition {
+    pub namespace: String,
     pub name: String,
     pub arguments: Vec<NodeType>,
     pub returns: NodeType,
@@ -21,24 +22,26 @@ pub struct FunctionDefinition {
 pub fn std() -> Runtime {
     use crate::ast::NodeType::*;
     let functions = vec![
-        ff("int", vec![Any], Int, &to_int),
-        ff("float", vec![Any], Float, &to_float),
+        ff("std", "int", vec![Any], Int, &to_int),
+        ff("std", "float", vec![Any], Float, &to_float),
         ff(
-            "log",
+            "std",
+            "print",
             vec![VarArg {
                 args: Box::new(Any),
             }],
             Void,
             &log,
         ),
-        ff("sin", vec![Int], Int, &sin),
-        ff("assert", vec![Any, Any], Void, &assert),
-        ff("exit", vec![Any], Void, &exit),
+        ff("std", "assert", vec![Any, Any], Void, &assert),
+        ff("std", "exit", vec![Any], Void, &exit),
+        ff("math", "sin", vec![Int], Int, &sin),
     ];
     Runtime { functions }
 }
 
 fn ff(
+    namespace: &str,
     name: &str,
     arguments: Vec<NodeType>,
     returns: NodeType,
@@ -49,7 +52,8 @@ fn ff(
         returns: Box::new(returns.clone()),
     };
     FunctionDefinition {
-        name: name.to_string(),
+        namespace: namespace.into(),
+        name: name.into(),
         arguments,
         returns,
         function,

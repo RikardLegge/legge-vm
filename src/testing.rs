@@ -6,7 +6,7 @@ use super::run_code;
 use super::LogLevel;
 
 pub fn run_test(code: &str, expected_result: Option<Value>) {
-    let code = format!("import exit;{}", code);
+    let code = format!("import std.exit;{}", code);
     let result = Rc::new(RefCell::new(None));
     let assign_result = result.clone();
     run_code(code.into(), LogLevel::LogNone, move |v| {

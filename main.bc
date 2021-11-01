@@ -1,9 +1,10 @@
-wrap :: fn(f: Fn() -> B) -> B {
-  return f();
+import std.exit;
+
+wrap :: fn(f: Fn(int) -> int) -> Fn() -> int {
+    v :: 21;
+    return fn() -> int {
+        return f(v);
+    };
 }
-
-B -> type {}
-b := B();
-
-import exit;
-exit(wrap(fn() -> B {return B();}));
+val :: wrap(fn(a: int) -> int{return 2*a;});
+exit(val());

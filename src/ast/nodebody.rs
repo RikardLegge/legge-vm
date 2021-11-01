@@ -52,6 +52,7 @@ pub enum NodeBody<T = StateAny> {
     Expression(NodeID),
     Comment(String),
     Import {
+        namespace: String,
         ident: String,
         expr: NodeID,
     },
@@ -134,6 +135,7 @@ pub enum UnlinkedNodeBody<T = StateAny> {
         args: Vec<NodeID>,
     },
     ImportValue {
+        namespace: String,
         ident: String,
     },
 }

@@ -188,7 +188,7 @@ bc_test! {test_var_assign {
 } == Int(2) }
 
 bc_test! {test_call_builtin {
-    import sin;
+    import math.sin;
     exit(sin(sin(sin(0))));
 } == Int(0) }
 

@@ -71,7 +71,7 @@ pub struct Node<T = state::StateAny> {
     pub parent_id: Option<NodeID>,
     pub referenced_by: HashSet<NodeReference>,
     pub references: HashSet<NodeReference>,
-    pub reference_types: HashSet<SideEffect>,
+    pub reference_types: Option<HashSet<SideEffect>>,
     _tp: PhantomData<T>,
 }
 
@@ -131,7 +131,10 @@ impl<T> Node<T> {
     }
 
     pub fn is_dead(&self) -> bool {
-        self.reference_types.is_empty()
+        match &self.reference_types {
+            Some(references) => references.is_empty(),
+            None => false,
+        }
     }
 
     pub fn has_closure_references(&self) -> bool {
@@ -592,7 +595,7 @@ impl<T> Ast<T> {
             tp: None,
             tokens: vec![],
             body: NodeBody::Empty,
-            reference_types: HashSet::new(),
+            reference_types: None,
             _tp: PhantomData::default(),
         };
         let id = node.id;

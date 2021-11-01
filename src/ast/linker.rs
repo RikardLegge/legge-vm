@@ -288,10 +288,10 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
                             .add_ref((func, GoTo), (node_id, ExecuteValue), location);
                         NodeBody::Call(NBCall { func, args })
                     }
-                    ImportValue { ident } => {
+                    ImportValue { ident, namespace } => {
                         let mut body = None;
                         for (i, func) in self.runtime.functions.iter().enumerate() {
-                            if &func.name == ident {
+                            if &func.name == ident && &func.namespace == namespace {
                                 body = Some(NodeBody::ConstValue {
                                     tp: None,
                                     value: NodeValue::RuntimeFn(i).into(),

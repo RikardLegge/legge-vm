@@ -343,15 +343,29 @@ where
 
     fn do_import(&mut self, node: PendingNode) -> Result {
         match self.next_token(&node)? {
-            TokenType::Name(ident) => {
-                let body_node = self.node(node.id);
-                let def = self.add_node(
-                    body_node,
-                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue {
-                        ident: ident.clone(),
-                    }),
-                );
-                Ok(self.add_node(node, NodeBody::Import { ident, expr: def }))
+            TokenType::Name(namespace) => {
+                self.ensure_next_token(&node, TokenType::Dot)?;
+                match self.next_token(&node)? {
+                    TokenType::Name(ident) => {
+                        let body_node = self.node(node.id);
+                        let expr = self.add_node(
+                            body_node,
+                            NodeBody::Unlinked(UnlinkedNodeBody::ImportValue {
+                                namespace: namespace.clone(),
+                                ident: ident.clone(),
+                            }),
+                        );
+                        Ok(self.add_node(
+                            node,
+                            NodeBody::Import {
+                                ident,
+                                namespace,
+                                expr,
+                            },
+                        ))
+                    }
+                    _ => unimplemented!(),
+                }
             }
             _ => unimplemented!(),
         }
