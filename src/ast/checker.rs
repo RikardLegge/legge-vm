@@ -2,14 +2,13 @@ use super::{Ast, Node, Result};
 use crate::ast::ast::{CallNode, StateTypesChecked, TypesInferred};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{Err, NodeID, NodeType};
-use std::fmt::Debug;
 use std::{mem, result};
 
-pub fn check_types<T: TypesInferred + Debug>(
+pub fn check_types<T: TypesInferred>(
     mut ast: Ast<T>,
 ) -> result::Result<Ast<StateTypesChecked>, (Ast<T>, Err)>
 where
-    T: TypesInferred + Debug,
+    T: TypesInferred,
 {
     let root_id = ast.root();
     let checker = Checker::new(&mut ast);
@@ -28,7 +27,7 @@ where
 
 impl<'a, T> Checker<'a, T>
 where
-    T: TypesInferred + Debug,
+    T: TypesInferred,
 {
     pub fn new(ast: &'a mut Ast<T>) -> Self {
         Self { ast }

@@ -31,12 +31,7 @@ pub struct Err {
 }
 
 impl Err {
-    pub fn new<T: Debug>(
-        ast: &Ast<T>,
-        details: &str,
-        row_details: &str,
-        nodes: Vec<NodeID>,
-    ) -> Self {
+    pub fn new<T>(ast: &Ast<T>, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Self {
         let node_info = Self::print_line(nodes, ast, row_details);
         // panic!("\nAst Error: {}\n{}\n", details, node_info.join("\n\n"));
         Err {
@@ -45,7 +40,7 @@ impl Err {
         }
     }
 
-    pub fn print_line<T: Debug>(nodes: Vec<NodeID>, ast: &Ast<T>, msg: &str) -> String {
+    pub fn print_line<T>(nodes: Vec<NodeID>, ast: &Ast<T>, msg: &str) -> String {
         if nodes.is_empty() {
             return "".into();
         }

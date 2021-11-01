@@ -8,7 +8,7 @@ use std::ops::AddAssign;
 
 pub fn from_ast<T>(ast: &ast::Ast<T>) -> Bytecode
 where
-    T: TypesInferred + Debug,
+    T: TypesInferred,
 {
     let root_id = ast.root();
     let mut bc = Generator::new(ast);
@@ -212,7 +212,7 @@ struct Generator<'a, T> {
 
 impl<'a, T> Generator<'a, T>
 where
-    T: TypesInferred + Debug,
+    T: TypesInferred,
 {
     fn new(ast: &'a Ast<T>) -> Self {
         let placeholder = Instruction {

@@ -4,7 +4,6 @@ use crate::ast::{Ast, Err, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Re
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
 use std::collections::VecDeque;
-use std::fmt::Debug;
 use std::{mem, result};
 
 pub fn infer_types<T>(
@@ -12,7 +11,7 @@ pub fn infer_types<T>(
     runtime: &Runtime,
 ) -> result::Result<Ast<StateTypesInferred>, (Ast<T>, Err)>
 where
-    T: Linked + Debug,
+    T: Linked,
 {
     let typer = Typer::new(&mut ast, runtime);
     match typer.infer_all_types() {
@@ -33,7 +32,7 @@ where
 
 impl<'a, T> Typer<'a, T>
 where
-    T: Linked + Debug,
+    T: Linked,
 {
     pub fn new(ast: &'a mut Ast<T>, runtime: &'a Runtime) -> Self {
         let queue = VecDeque::from(vec![ast.root()]);

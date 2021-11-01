@@ -6,7 +6,6 @@ use crate::ast::nodebody::{NBCall, NodeBody};
 use crate::ast::{Any, Err, NodeType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
-use std::fmt::Debug;
 use std::{mem, result};
 
 pub fn link<T>(
@@ -14,7 +13,7 @@ pub fn link<T>(
     runtime: &Runtime,
 ) -> result::Result<Ast<StateLinked>, (Ast<T>, Err)>
 where
-    T: Any + Debug,
+    T: Any,
 {
     let root_id = ast.root();
     let linker = Linker::new(&mut ast, runtime);
@@ -26,7 +25,7 @@ where
 
 struct Linker<'a, 'b, T>
 where
-    T: Any + Debug,
+    T: Any,
 {
     ast: &'a mut Ast<T>,
     runtime: &'b Runtime,
@@ -34,7 +33,7 @@ where
 
 impl<'a, 'b, T> Linker<'a, 'b, T>
 where
-    T: Any + Debug,
+    T: Any,
 {
     fn new(ast: &'a mut Ast<T>, runtime: &'b Runtime) -> Self {
         Self { ast, runtime }

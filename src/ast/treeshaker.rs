@@ -3,10 +3,9 @@ use crate::ast::ast::{Linked, NodeReference, SideEffect};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{Err, Node, NodeType, NodeValue};
 use std::collections::{HashSet, VecDeque};
-use std::fmt::Debug;
 use std::result;
 
-pub fn treeshake<T: Linked + Debug>(mut ast: Ast<T>) -> result::Result<Ast<T>, (Ast<T>, Err)> {
+pub fn treeshake<T: Linked>(mut ast: Ast<T>) -> result::Result<Ast<T>, (Ast<T>, Err)> {
     let root_id = ast.root();
     let shaker = TreeShaker::new(&mut ast);
     match shaker.shake(root_id) {
@@ -17,14 +16,14 @@ pub fn treeshake<T: Linked + Debug>(mut ast: Ast<T>) -> result::Result<Ast<T>, (
 
 struct TreeShaker<'a, T>
 where
-    T: Linked + Debug,
+    T: Linked,
 {
     ast: &'a mut Ast<T>,
 }
 
 struct Shaker<'a, T>
 where
-    T: Linked + Debug,
+    T: Linked,
 {
     ast: &'a mut Ast<T>,
     stack: HashSet<NodeID>,
@@ -34,7 +33,7 @@ where
 
 impl<'a, T> Shaker<'a, T>
 where
-    T: Linked + Debug,
+    T: Linked,
 {
     fn new(ast: &'a mut Ast<T>) -> Self {
         Self {
@@ -209,7 +208,7 @@ where
 
 impl<'a, T> TreeShaker<'a, T>
 where
-    T: Linked + Debug,
+    T: Linked,
 {
     fn new(ast: &'a mut Ast<T>) -> Self {
         Self { ast }

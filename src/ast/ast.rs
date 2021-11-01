@@ -70,7 +70,7 @@ impl CallNode {
         }
     }
 
-    pub fn from<T: Debug>(node: &Node<T>) -> Option<CallNode> {
+    pub fn from<T>(node: &Node<T>) -> Option<CallNode> {
         match node.body {
             NodeBody::Call(_) => Some(CallNode(node.id)),
             _ => None,
@@ -82,11 +82,8 @@ pub struct FnNode {
     pub id: NodeID,
 }
 
-#[derive(Debug, Clone)]
-pub struct Node<T = state::StateAny>
-where
-    T: Debug,
-{
+#[derive(Clone)]
+pub struct Node<T = state::StateAny> {
     pub id: NodeID,
     pub tokens: Vec<Token>,
     pub tp: Option<InferredType>,
@@ -98,10 +95,13 @@ where
     _tp: PhantomData<T>,
 }
 
-impl<T> Node<T>
-where
-    T: Debug,
-{
+impl<T> Debug for Node<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        todo!()
+    }
+}
+
+impl<T> Node<T> {
     pub fn is_closure_boundary(&self) -> bool {
         match self.body {
             NodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. }) => true,
@@ -132,7 +132,7 @@ where
 
 impl<T> Node<T>
 where
-    T: TypesInferred + Debug,
+    T: TypesInferred,
 {
     pub fn inferred_tp(&self) -> &InferredType {
         self.tp.as_ref().unwrap()
@@ -389,20 +389,14 @@ pub struct Ast<T = state::StateAny> {
     _tp: PhantomData<T>,
 }
 
-impl<T> fmt::Debug for Ast<T>
-where
-    T: Debug,
-{
+impl<T> fmt::Debug for Ast<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.fmt_debug_node(f, 0, self.root)?;
         write!(f, "\n")
     }
 }
 
-impl<T> Ast<T>
-where
-    T: Debug,
-{
+impl<T> Ast<T> {
     pub fn unimplemented(&self, id: NodeID) -> Result {
         Err(Err::new(self, "Unimplemented", "", vec![id]))
     }
