@@ -125,13 +125,13 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
                 mut returns,
             } => {
                 for i in 0..args.len() {
-                    match self.fix_unknown_types(parts[i])? {
+                    match self.link_types(parts[i])? {
                         Some(tp) => args[i] = tp,
                         None => return Ok(None),
                     }
                 }
 
-                match self.fix_unknown_types(*parts.last().unwrap())? {
+                match self.link_types(*parts.last().unwrap())? {
                     Some(tp) => *returns = tp,
                     None => return Ok(None),
                 }
@@ -156,7 +156,7 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
             },
             NodeType::Struct { mut fields } => {
                 for i in 0..fields.len() {
-                    match self.fix_unknown_types(parts[i])? {
+                    match self.link_types(parts[i])? {
                         Some(tp) => fields[i].1 = tp,
                         None => return Ok(None),
                     };
@@ -168,12 +168,12 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
         Ok(tp)
     }
 
-    fn fix_unknown_types(&mut self, node_id: NodeID) -> Result<Option<NodeType>> {
+    fn link_types(&mut self, node_id: NodeID) -> Result<Option<NodeType>> {
         let node = self.ast.get_node(node_id);
         let tp = match &node.body {
             NodeBody::TypeDeclaration { tp, .. } => {
                 let tp = *tp;
-                self.fix_unknown_types(tp)?
+                self.link_types(tp)?
             }
             NodeBody::PartialType { tp, parts } => match tp {
                 PartialType::Complete(tp) => Some(tp.clone()),
@@ -339,7 +339,7 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
 
             let node = self.ast.get_node(node_id);
             if let None = node.tp {
-                self.fix_unknown_types(node_id)?;
+                self.link_types(node_id)?;
             }
         }
         Ok(())
