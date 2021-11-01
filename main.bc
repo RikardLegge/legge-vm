@@ -1,12 +1,9 @@
-A -> type {
-  name: string
-}
-B -> type {
-  a: A
+wrap :: fn(f: Fn() -> B) -> B {
+  return f();
 }
 
+B -> type {}
 b := B();
-b.a.name = "test";
 
 import exit;
-exit(b);
+exit(wrap(fn() -> B {return B();}));
