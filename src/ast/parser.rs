@@ -666,7 +666,7 @@ where
                 returns: Some(tp),
                 body,
             });
-            ProcedureDeclarationNode::new(self.add_node(node, constructor))
+            ProcedureDeclarationNode::try_new(self.add_node(node, constructor), &self.ast).unwrap()
         };
 
         let body = NodeBody::TypeDeclaration {
@@ -691,7 +691,11 @@ where
                             self.next_token(&arg_node)?;
                             self.do_type(&arg_node)?
                         }
-                        _ => unreachable!(),
+                        _ => Err(self.ast.error(
+                            &format!("Invalid token found for type declaration"),
+                            "",
+                            vec![arg_node.id],
+                        ))?,
                     };
                     let body = self.add_node(
                         arg_node,

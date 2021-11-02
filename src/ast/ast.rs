@@ -32,8 +32,11 @@ impl Deref for ProcedureDeclarationNode {
 }
 
 impl ProcedureDeclarationNode {
-    pub fn new(id: NodeID) -> Self {
-        Self(id)
+    pub fn try_new(id: NodeID, ast: &Ast) -> Option<Self> {
+        match ast.get_node(id).body {
+            NodeBody::ProcedureDeclaration(_) => Some(Self(id)),
+            _ => None,
+        }
     }
 
     pub fn id(&self) -> NodeID {
@@ -48,21 +51,21 @@ impl ProcedureDeclarationNode {
     }
 
     pub fn returns(&self, ast: &Ast) -> Option<NodeID> {
-        match &ast.get_node(self.id()).body {
-            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { returns, .. }) => *returns,
+        match ast.get_node(self.id()).body {
+            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { returns, .. }) => returns,
             _ => unreachable!(),
         }
     }
 
     pub fn body(&self, ast: &Ast) -> NodeID {
-        match &ast.get_node(self.id()).body {
-            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { body, .. }) => *body,
+        match ast.get_node(self.id()).body {
+            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { body, .. }) => body,
             _ => unreachable!(),
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Node<T = state::StateAny> {
     id: NodeID,
     pub tokens: Vec<Token>,
@@ -73,12 +76,6 @@ pub struct Node<T = state::StateAny> {
     pub references: HashSet<NodeReference>,
     pub reference_types: Option<HashSet<SideEffect>>,
     _tp: PhantomData<T>,
-}
-
-impl<T> Debug for Node<T> {
-    fn fmt(&self, _: &mut Formatter<'_>) -> fmt::Result {
-        todo!()
-    }
 }
 
 impl<T> Node<T>
@@ -445,50 +442,43 @@ impl PartialType {
 }
 
 mod state {
-    pub trait Any {}
-    pub trait Linked {}
-    pub trait TypesInferred {}
-    pub trait TypesChecked {}
+    use std::fmt::Debug;
 
-    pub trait NotAny {}
-    pub trait NotLinked {}
-    pub trait NotTypesInferred {}
-    pub trait NotTypesChecked {}
+    pub trait _Any {}
+    pub trait _Linked {}
+    pub trait _TypesInferred {}
+    pub trait _TypesChecked {}
+
+    pub trait Any = _Any + Debug;
+    pub trait Linked = _Linked + Debug;
+    pub trait TypesInferred = _TypesInferred + Debug;
+    pub trait TypesChecked = _TypesChecked + Debug;
 
     #[derive(Debug, Copy, Clone)]
     pub struct StateAny {}
-    impl Any for StateAny {}
-    impl NotLinked for StateAny {}
-    impl NotTypesInferred for StateAny {}
-    impl NotTypesChecked for StateAny {}
+    impl _Any for StateAny {}
 
     #[derive(Debug, Copy, Clone)]
     pub struct StateLinked {}
-    impl Any for StateLinked {}
-    impl Linked for StateLinked {}
-    impl NotTypesInferred for StateLinked {}
-    impl NotTypesChecked for StateLinked {}
+    impl _Any for StateLinked {}
+    impl _Linked for StateLinked {}
 
     #[derive(Debug, Copy, Clone)]
     pub struct StateTypesInferred {}
-    impl Any for StateTypesInferred {}
-    impl Linked for StateTypesInferred {}
-    impl TypesInferred for StateTypesInferred {}
-    impl NotTypesChecked for StateTypesInferred {}
+    impl _Any for StateTypesInferred {}
+    impl _Linked for StateTypesInferred {}
+    impl _TypesInferred for StateTypesInferred {}
 
     #[derive(Debug, Copy, Clone)]
     pub struct StateTypesChecked {}
-    impl Any for StateTypesChecked {}
-    impl Linked for StateTypesChecked {}
-    impl TypesInferred for StateTypesChecked {}
-    impl TypesChecked for StateTypesChecked {}
+    impl _Any for StateTypesChecked {}
+    impl _Linked for StateTypesChecked {}
+    impl _TypesInferred for StateTypesChecked {}
+    impl _TypesChecked for StateTypesChecked {}
 }
 
 pub use state::{Any, Linked, TypesChecked, TypesInferred};
-pub use state::{
-    NotAny, NotLinked, NotTypesChecked, NotTypesInferred, StateAny, StateLinked, StateTypesChecked,
-    StateTypesInferred,
-};
+pub use state::{StateAny, StateLinked, StateTypesChecked, StateTypesInferred};
 
 pub struct Ast<T = state::StateAny> {
     nodes: Vec<Node<state::StateAny>>,

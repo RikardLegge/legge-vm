@@ -1,10 +1,22 @@
-import std.exit;
-
-wrap :: fn(f: Fn(int) -> int) -> Fn() -> int {
-    v :: 21;
-    return fn() -> int {
-        return f(v);
-    };
+if(true) {
+  import std.touch;
+  A -> type {
+     value: int
+  }
+  B -> type {
+     a: A
+  }
+  factory :: fn (new_a: Fn(int) -> A) -> Fn(int) -> B {
+      return fn(value: int) -> B {
+          b := B();
+          b.a = new_a(value);
+          return b;
+      };
+  }
+  new :: factory(fn(v: int) -> A {
+      a := A();
+      a.value = v;
+      return a;
+  });
+  touch(new(42));
 }
-val :: wrap(fn(a: int) -> int{return 2*a;});
-exit(val());

@@ -247,6 +247,28 @@ bc_test! {test_custom_type_nested {
     exit(b);
 } == Struct(vec![Struct(vec![Int(10)])]) }
 
+bc_test! {test_custom_type_nested_returned_by_fn {
+    A -> type {
+       value: int
+    }
+    B -> type {
+       a: A
+    }
+    factory :: fn (new_a: Fn(int) -> A) -> Fn(int) -> B {
+        return fn(value: int) -> B {
+            b := B();
+            b.a = new_a(value);
+            return b;
+        };
+    }
+    new :: factory(fn(v: int) -> A {
+        a := A();
+        a.value = v;
+        return a;
+    });
+    exit(factory(42));
+} == Struct(vec![Struct(vec![Int(42)])]) }
+
 bc_test_should_fail! {test_var_assign_other_type {
     a := 1;
     a = true;

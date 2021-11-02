@@ -34,6 +34,6 @@ pub struct AstTiming {
 
 impl AstTiming {
     pub fn total(&self) -> Duration {
-        self.from_tokens + self.linker + self.type_inference + self.type_checker
+        self.from_tokens + self.linker + self.treeshaker + self.type_inference + self.type_checker
     }
 }

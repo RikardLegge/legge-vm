@@ -187,15 +187,15 @@ where
     };
     timing.type_checker = debug::stop_timer(start);
 
-    // let start = debug::start_timer();
-    // let ast = match treeshaker::treeshake(ast) {
-    //     Ok(ast) => ast,
-    //     Err((ast, err)) => {
-    //         println!("{:?}", ast);
-    //         Err(err)?
-    //     }
-    // };
-    // timing.treeshaker = debug::stop_timer(start);
+    let start = debug::start_timer();
+    let ast = match treeshaker::treeshake(ast) {
+        Ok(ast) => ast,
+        Err((ast, err)) => {
+            println!("{:?}", ast);
+            Err(err)?
+        }
+    };
+    timing.treeshaker = debug::stop_timer(start);
 
     Ok((ast, timing))
 }

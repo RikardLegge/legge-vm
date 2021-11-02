@@ -31,10 +31,19 @@ pub fn std() -> Runtime {
                 args: Box::new(Any),
             }],
             Void,
-            &log,
+            &print,
         ),
         ff("std", "assert", vec![Any, Any], Void, &assert),
         ff("std", "exit", vec![Any], Void, &exit),
+        ff(
+            "std",
+            "touch",
+            vec![VarArg {
+                args: Box::new(Any),
+            }],
+            Void,
+            &touch,
+        ),
         ff("math", "sin", vec![Int], Int, &sin),
     ];
     Runtime { functions }
@@ -106,7 +115,7 @@ fn assert(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
     Ok(None)
 }
 
-fn log(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
+fn print(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
     let last_arg = args.pop();
     for arg in args {
         print!("{:?}, ", arg);
@@ -115,6 +124,10 @@ fn log(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {
         print!("{:?}", arg);
     }
     println!();
+    Ok(None)
+}
+
+fn touch(_: &mut Interpreter, _: &mut Vec<Value>) -> FunctionReturn {
     Ok(None)
 }
 

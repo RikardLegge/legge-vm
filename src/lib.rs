@@ -1,3 +1,5 @@
+#![feature(trait_alias)]
+
 pub mod ast;
 pub mod bytecode;
 mod debug;
@@ -36,7 +38,7 @@ pub fn compile(
             return None;
         }
     };
-    if log_level >= LogLevel::LogTiming {
+    if log_level >= LogLevel::LogEval {
         println!("{:?}", ast);
     }
     timing.ast = ast_timing;
@@ -44,7 +46,7 @@ pub fn compile(
     let start = debug::start_timer();
     let bytecode = bytecode::from_ast(&ast);
     timing.bytecode = debug::stop_timer(start);
-    if log_level >= LogLevel::LogTiming {
+    if log_level >= LogLevel::LogEval {
         println!("{:?}", bytecode);
     }
     return Some((bytecode, ast));
