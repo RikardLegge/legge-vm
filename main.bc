@@ -16,4 +16,5 @@
         a.value = v;
         return a;
     });
-    exit(factory(42));
+    import std.exit;
+    exit(new(""));

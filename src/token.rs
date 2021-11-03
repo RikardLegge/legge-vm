@@ -16,7 +16,7 @@ pub fn from_chars(iter: Chars, size_prediction: Option<usize>) -> Vec<Token> {
     tokens
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ArithmeticOP {
     Add,
     Sub,
@@ -27,7 +27,7 @@ pub enum ArithmeticOP {
     LEq,
 }
 
-impl fmt::Debug for ArithmeticOP {
+impl fmt::Display for ArithmeticOP {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use ArithmeticOP::*;
         match self {
@@ -59,7 +59,7 @@ pub struct Token {
     pub tp: TokenType,
 }
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum KeyName {
     Import,
     Type,
@@ -73,7 +73,7 @@ pub enum KeyName {
     Continue,
 }
 
-impl fmt::Debug for KeyName {
+impl fmt::Display for KeyName {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use KeyName::*;
         match self {
@@ -159,9 +159,9 @@ impl fmt::Display for TokenType {
             ReturnTypes => write!(f, "->"),
             Dot => write!(f, "."),
             Name(ident) => write!(f, "{}", ident),
-            KeyName(key) => write!(f, "{:?}", key),
+            KeyName(key) => write!(f, "{}", key),
             String(str) => write!(f, "\"{}\"", str),
-            Op(op) => write!(f, "{:?}", op),
+            Op(op) => write!(f, "{}", op),
 
             // Enable nice formatting of numbers with leading zeros
             Int(num, significant) => format_number_leading_zeros(f, *num as f64, *significant, 0),

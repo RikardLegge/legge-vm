@@ -329,6 +329,51 @@ pub enum NodeType {
     },
 }
 
+impl fmt::Display for NodeType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use NodeType::*;
+        match self {
+            VarArg { args } => {
+                write!(f, "{}...", &**args)
+            }
+            Any => write!(f, "any"),
+            NotYetImplemented => write!(f, "[NOT YET IMPLEMENTED]"),
+            Void => write!(f, "void"),
+            Int => write!(f, "int"),
+            Float => write!(f, "float"),
+            Bool => write!(f, "bool"),
+            String => write!(f, "string"),
+            Fn { args, returns } => {
+                write!(f, "Fn(")?;
+                for (i, arg) in args.iter().enumerate() {
+                    write!(f, "{}", arg)?;
+                    if i != args.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                match &**returns {
+                    NodeType::Void => (),
+                    returns => write!(f, " -> {}", returns)?,
+                }
+                write!(f, ")")
+            }
+            NewType { tp } => write!(f, "{}", tp),
+            Type { ident, content } => write!(f, "{} -> type {}", ident, content),
+            Unknown { ident } => write!(f, "UNKNOWN({})", ident),
+            Struct { fields } => {
+                write!(f, "{{ ")?;
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    write!(f, "{}: {}", k, v)?;
+                    if i != fields.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, " }}")
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum PartialNodeValue<T = StateAny> {
     Linked(NodeValue<T>),
@@ -587,11 +632,11 @@ impl<T> Ast<T> {
             .references
             .remove(&references);
         if !removed_referenced && !removed_referencer {
-            format!("WARNING: reference missing between target {:?} and referer {:?} during reference removal", target_id, referencer_id);
+            println!("WARNING: reference missing between target {:?} and referer {:?} during reference removal", target_id, referencer_id);
         } else if !removed_referenced && removed_referencer {
-            format!("WARNING: reference missing from target {:?} to referer {:?} during reference removal", target_id, referencer_id);
+            println!("WARNING: reference missing from target {:?} to referer {:?} during reference removal", target_id, referencer_id);
         } else if removed_referenced && !removed_referencer {
-            format!("WARNING: removed reference missing to target {:?} from referer {:?} during reference removal", target_id, referencer_id);
+            println!("WARNING: removed reference missing to target {:?} from referer {:?} during reference removal", target_id, referencer_id);
         }
     }
 
@@ -649,7 +694,7 @@ impl<T> Ast<T> {
             if !node.has_closure_references() {
                 write!(f, " ")?;
             }
-            write!(f, "{{ {:?}, {:?} }} ", source, tp)?;
+            write!(f, "{{ {:?}, {} }} ", source, tp)?;
         }
         write!(f, "= {:?}", node.body)?;
 

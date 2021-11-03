@@ -58,13 +58,13 @@ where
                     Ok(())
                 } else {
                     Err(self.ast.single_error(
-                            &format!(
-                                "Types for left and right hand side of op {:?} do not match ({:?} != {:?})",
-                                op, lhs_tp, rhs_tp
-                            ),
-                            "Both sides must have the same type",
-                            vec![node.id(), *lhs, *rhs],
-                        ))
+                        &format!(
+                            "Types for left and right hand side of op {} do not match ({} != {})",
+                            op, lhs_tp, rhs_tp
+                        ),
+                        "Both sides must have the same type",
+                        vec![node.id(), *lhs, *rhs],
+                    ))
                 }
             }
             VariableAssignment {
@@ -359,16 +359,23 @@ where
         }
     }
 
-    fn get_function_trace(&self, referer: NodeID) -> Vec<NodeID> {
+    fn get_function_trace(&self, referer: NodeID, depth: usize) -> Vec<NodeID> {
         let mut trace = vec![referer];
         match &self.ast.get_node(referer).body {
             NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                 returns: Some(id), ..
-            }) => trace.push(*id),
-            NodeBody::Call(NBCall { func: child, .. })
-            | NodeBody::StaticDeclaration { expr: child, .. } => {
-                trace.append(&mut self.get_function_trace(*child))
+            }) => {
+                if depth > 0 {
+                    trace = self.get_function_trace(*id, depth - 1);
+                }
             }
+            NodeBody::Call(NBCall { func: child, .. }) => {
+                trace.append(&mut self.get_function_trace(*child, depth + 1))
+            }
+            NodeBody::StaticDeclaration { expr: child, .. } => {
+                trace.append(&mut self.get_function_trace(*child, depth))
+            }
+            NodeBody::PartialType { .. } => {}
             body => unimplemented!("{:?}", body),
         };
         trace
@@ -394,7 +401,7 @@ where
             (Any, _) => Ok(()),
             (hole, shape) if hole == shape => Ok(()),
             _ => {
-                let trace_ids = self.get_function_trace(func.id());
+                let trace_ids = self.get_function_trace(func.id(), 0);
                 let mut error_parts =
                     vec![ErrPart::new("Provided argument".into(), vec![caller.id()])];
 
@@ -402,6 +409,22 @@ where
                     match &self.ast.get_node(func_id).body {
                         NodeBody::Call(_) => error_parts
                             .push(ErrPart::new("Created through...".into(), vec![func_id])),
+
+                        NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
+                            args,
+                            returns,
+                            ..
+                        }) => error_parts.push(match arg_i {
+                            Some(i) => ErrPart::new("Expected argument".into(), vec![args[i]]),
+                            None => match returns {
+                                None => {
+                                    ErrPart::new("Expected void return value".into(), vec![func_id])
+                                }
+                                Some(return_id) => {
+                                    ErrPart::new("Expected return".into(), vec![*return_id])
+                                }
+                            },
+                        }),
 
                         NodeBody::PartialType {
                             tp: Complete(Fn { returns, .. }),

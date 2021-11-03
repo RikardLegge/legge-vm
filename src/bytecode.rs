@@ -615,10 +615,10 @@ where
                     if let NodeType::Struct { fields } = &**content {
                         fields
                     } else {
-                        unimplemented!("{:?}", tp)
+                        unimplemented!("{}", tp)
                     }
                 } else {
-                    unimplemented!("{:?}", tp)
+                    unimplemented!("{}", tp)
                 };
                 let index = fields.iter().position(|(name, _)| name == path_name);
                 match index {
@@ -772,7 +772,7 @@ where
                 self.add_op(node_id, OP::SubI);
                 StackUsage::new(usage.popped, 1)
             }
-            _ => panic!("Invalid prefix operation: {:?}", op),
+            _ => panic!("Invalid prefix operation: {}", op),
         }
     }
 

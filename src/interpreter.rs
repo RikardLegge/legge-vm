@@ -433,18 +433,18 @@ impl fmt::Debug for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Value::ProcAddress(id, _) => {
-                write!(f, "Fn_{:?}", id)
+                write!(f, "Fn_{}", id)
             }
             Value::StackFrame(_) => {
                 write!(f, "Frame {{ ... }}")
             }
             Value::Unset => write!(f, "_"),
-            Value::Int(val) => write!(f, "{:?}", val),
-            Value::Float(val) => write!(f, "{:?}", val),
-            Value::Bool(val) => write!(f, "{:?}", val),
-            Value::String(val) => write!(f, "{:?}", val),
-            Value::PC(val) => write!(f, "{:?}", val),
-            Value::RuntimeFn(val) => write!(f, "{:?}", val),
+            Value::Int(val) => write!(f, "{}", val),
+            Value::Float(val) => write!(f, "{}", val),
+            Value::Bool(val) => write!(f, "{}", val),
+            Value::String(val) => write!(f, "{}", val),
+            Value::PC(val) => write!(f, "{}", val),
+            Value::RuntimeFn(val) => write!(f, "{}", val),
             Value::Struct(val) => write!(f, "{:?}", val),
         }
     }

@@ -64,12 +64,12 @@ fn missing_token_error(ast: &Ast, node: NodeID, expected: &[&TokenType]) -> ast:
 fn invalid_keyword_error(ast: &Ast, node: NodeID, got: KeyName, expected: &[KeyName]) -> ast::Err {
     let expected_message = match expected {
         &[] => unreachable!(),
-        &[one] => format!("{:?}", one),
+        &[one] => format!("{}", one),
         many => [
             "one of { ",
             &many
                 .iter()
-                .map(|t| format!("{:?}", t))
+                .map(|t| format!("{}", t))
                 .collect::<Vec<String>>()
                 .join(", "),
             " }",
@@ -78,7 +78,7 @@ fn invalid_keyword_error(ast: &Ast, node: NodeID, got: KeyName, expected: &[KeyN
     };
 
     ast.single_error(
-        &format!("Found {:?} while expecting {}", got, expected_message),
+        &format!("Found {} while expecting {}", got, expected_message),
         &format!(
             "Consider replacing with {}",
             expected_message.to_string().red()

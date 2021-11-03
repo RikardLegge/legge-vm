@@ -266,7 +266,7 @@ bc_test! {test_custom_type_nested_returned_by_fn {
         a.value = v;
         return a;
     });
-    exit(factory(42));
+    exit(new(42));
 } == Struct(vec![Struct(vec![Int(42)])]) }
 
 bc_test_should_fail! {test_var_assign_other_type {
