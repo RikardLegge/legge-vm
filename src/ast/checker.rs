@@ -446,7 +446,7 @@ where
                 }
                 Err(self.ast.error(
                     format!(
-                        "function arguments are of the wrong type, {:?} expected, {:?} provided",
+                        "function arguments are of the wrong type, {} expected, {} provided",
                         hole, shape
                     ),
                     error_parts,

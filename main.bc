@@ -17,4 +17,4 @@
         return a;
     });
     import std.exit;
-    exit(new(""));
+    exit(new(1));

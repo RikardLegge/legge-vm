@@ -45,7 +45,10 @@ pub struct Err {
 }
 
 impl Err {
-    pub fn from_parts<T>(ast: &Ast<T>, details: String, parts: Vec<ErrPart>) -> Self {
+    pub fn from_parts<T>(ast: &Ast<T>, details: String, parts: Vec<ErrPart>) -> Self
+    where
+        T: Debug,
+    {
         let node_info = Self::print_line(ast, &parts);
         Err {
             details,
@@ -54,7 +57,10 @@ impl Err {
         }
     }
 
-    pub fn print_line<T>(ast: &Ast<T>, parts: &[ErrPart]) -> String {
+    pub fn print_line<T>(ast: &Ast<T>, parts: &[ErrPart]) -> String
+    where
+        T: Debug,
+    {
         if parts.is_empty() {
             return "".into();
         }

@@ -5,24 +5,51 @@ A bit more fun than cleaning the house this exam period.
 Should probably not be used in production but that might not stop some very brave people.
 
 ## Examples
-```
+```rust
 // This is a comment
-name :: "Staticly Declared string with infered type"
 
-curry :: fn(f: Fn(string, string), v1: string) -> Fn(string) {
-    return fn(v2: string) {
-        f(v1, v2);
-    }
+// We can declare custom types
+A -> type {
+   value: int
 }
 
-print_context :: fn(context: string, message: string) {
-    // Import function with side effect.
-    import log;
-    log(context, message);
+// We can declare nested types, but nesting B in A would result in an error.
+B -> type {
+   a: A
 }
 
-print(name);
+// Support for closures and higher order functions
+factory :: fn (new_a: Fn(int) -> A) -> Fn(int) -> B {
+    return fn(value: int) -> B {
+        b := B();
+        b.a = new_a(value);
+        return b;
+    };
+}
 
+// Type inference ensures that the type of new becomes
+//   new : Fn(int) -> B
+// and is a callable function.
+new :: factory(fn(v: int) -> A {
+    a := A();
+    a.value = v;
+    return a;
+});
+
+// Allow importing foreign functions. Currently all imports are hard coded in the runtime.
+import std.exit;
+
+// Allows defining mutable 
+mutable := 1;
+mutable = 2;
+
+// And non mutable variables 
+unmutable :: 1;
+// unmutable = 2; // Compilation error
+
+// This will compile and run as expected
+exit(new(42));
+// exit(new("")); // Compilation error  since new : Fn(int) -> B
 ```
 
 ## Roadmap
@@ -33,9 +60,9 @@ print(name);
 - [x] Closures
 - [x] External functions
 - [x] Side effect based tree shaker
-- [x] Bugs
 - [x] Custom types
 - [x] A few tests showcasing the functionality
+- [x] Bugs
 - [ ] Test to se if it actually works
 
 ## Benchmarks 

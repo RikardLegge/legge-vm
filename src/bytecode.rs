@@ -197,7 +197,10 @@ impl StackUsage {
     }
 }
 
-struct Generator<'a, T> {
+struct Generator<'a, T>
+where
+    T: Debug,
+{
     procedures: Vec<Instruction>,
     ast: &'a Ast<T>,
     scopes: Vec<Scope>,

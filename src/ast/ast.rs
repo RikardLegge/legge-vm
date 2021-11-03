@@ -70,7 +70,10 @@ impl ProcedureDeclarationNode {
 }
 
 #[derive(Debug, Clone)]
-pub struct Node<T = state::StateAny> {
+pub struct Node<T = state::StateAny>
+where
+    T: Debug,
+{
     id: NodeID,
     pub tokens: Vec<Token>,
     tp: Option<InferredType>,
@@ -79,7 +82,7 @@ pub struct Node<T = state::StateAny> {
     pub referenced_by: HashSet<NodeReference>,
     pub references: HashSet<NodeReference>,
     pub reference_types: Option<HashSet<SideEffect>>,
-    _tp: PhantomData<T>,
+    _tp: PhantomData<fn() -> T>,
 }
 
 impl<T> Node<T>
@@ -101,7 +104,10 @@ where
     }
 }
 
-impl<T> Node<T> {
+impl<T> Node<T>
+where
+    T: Debug,
+{
     pub fn id(&self) -> NodeID {
         self.id
     }
@@ -378,7 +384,7 @@ impl fmt::Display for NodeType {
 pub enum PartialNodeValue<T = StateAny> {
     Linked(NodeValue<T>),
     Unlinked(String),
-    _TP(PhantomData<T>),
+    _TP(PhantomData<fn() -> T>),
 }
 
 impl<T> Clone for PartialNodeValue<T> {
@@ -529,21 +535,33 @@ mod state {
 pub use state::{Any, Linked, TypesChecked, TypesInferred};
 pub use state::{StateAny, StateLinked, StateTypesChecked, StateTypesInferred};
 
-pub struct Ast<T = state::StateAny> {
-    nodes: Vec<Node<state::StateAny>>,
+pub struct Ast<T = state::StateAny>
+where
+    T: Debug,
+{
+    nodes: Vec<Node<T>>,
     root: NodeID,
-    _tp: PhantomData<T>,
+    _tp: PhantomData<fn() -> T>,
 }
 
-impl<T> fmt::Debug for Ast<T> {
+impl<T> fmt::Debug for Ast<T>
+where
+    T: Debug,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.fmt_debug_node(f, 0, self.root)?;
         write!(f, "\n")
     }
 }
 
-impl<T> Ast<T> {
-    pub fn guarantee_integrity<U>(self) -> Ast<U> {
+impl<T> Ast<T>
+where
+    T: Debug,
+{
+    pub fn guarantee_integrity<U>(self) -> Ast<U>
+    where
+        U: Debug,
+    {
         unsafe { mem::transmute::<Ast<T>, Ast<U>>(self) }
     }
 
@@ -587,7 +605,7 @@ impl<T> Ast<T> {
     }
 
     pub fn nodes(&self) -> &[Node<T>] {
-        unsafe { mem::transmute::<&[Node], &[Node<T>]>(&self.nodes) }
+        &self.nodes
     }
 
     pub fn add_ref(
@@ -720,7 +738,7 @@ impl<T> Ast<T> {
 
     pub fn get_node(&self, node_id: NodeID) -> &Node<T> {
         match self.nodes.get(node_id.0) {
-            Some(node) => unsafe { mem::transmute::<&Node, &Node<T>>(node) },
+            Some(node) => node,
             None => panic!("Could not find Node({}) in ast", node_id.0),
         }
     }
@@ -740,7 +758,7 @@ impl<T> Ast<T> {
 
     pub fn get_node_mut(&mut self, node_id: NodeID) -> &mut Node<T> {
         match self.nodes.get_mut(node_id.0) {
-            Some(node) => unsafe { mem::transmute::<&mut Node, &mut Node<T>>(node) },
+            Some(node) => node,
             None => panic!("Could not find Node({}) in ast", node_id.0),
         }
     }

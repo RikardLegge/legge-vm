@@ -6,12 +6,16 @@ use crate::ast::nodebody::{NBCall, NodeBody};
 use crate::ast::{Err, NodeType, NodeValue};
 use crate::runtime::Runtime;
 use std::collections::VecDeque;
+use std::fmt::Debug;
 use std::{mem, result};
 
 pub fn link<T>(
     mut ast: Ast<T>,
     runtime: &Runtime,
-) -> result::Result<Ast<StateLinked>, (Ast<T>, Err)> {
+) -> result::Result<Ast<StateLinked>, (Ast<T>, Err)>
+where
+    T: Debug,
+{
     let root_id = ast.root();
     let linker = Linker::new(&mut ast, runtime);
     match linker.link(root_id) {
@@ -20,12 +24,18 @@ pub fn link<T>(
     }
 }
 
-struct Linker<'a, 'b, T> {
+struct Linker<'a, 'b, T>
+where
+    T: Debug,
+{
     ast: &'a mut Ast<T>,
     runtime: &'b Runtime,
 }
 
-impl<'a, 'b, T> Linker<'a, 'b, T> {
+impl<'a, 'b, T> Linker<'a, 'b, T>
+where
+    T: Debug,
+{
     fn new(ast: &'a mut Ast<T>, runtime: &'b Runtime) -> Self {
         Self { ast, runtime }
     }
