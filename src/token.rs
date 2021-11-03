@@ -59,6 +59,38 @@ pub struct Token {
     pub tp: TokenType,
 }
 
+#[derive(PartialEq, Copy, Clone)]
+pub enum KeyName {
+    Import,
+    Type,
+    If,
+    True,
+    False,
+    Fn,
+    Return,
+    Loop,
+    Break,
+    Continue,
+}
+
+impl fmt::Debug for KeyName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use KeyName::*;
+        match self {
+            Import => write!(f, "import"),
+            Type => write!(f, "type"),
+            If => write!(f, "if"),
+            True => write!(f, "true"),
+            False => write!(f, "false"),
+            Fn => write!(f, "fn"),
+            Return => write!(f, "return"),
+            Loop => write!(f, "loop"),
+            Break => write!(f, "break"),
+            Continue => write!(f, "continue"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenType {
     Comment(String),
@@ -75,11 +107,38 @@ pub enum TokenType {
     Assignment,
     ReturnTypes,
     Name(String),
-    KeyName(String),
+    KeyName(KeyName),
     String(String),
     Int(isize, usize),
     Float(f64, usize, usize),
     Op(ArithmeticOP),
+}
+impl TokenType {
+    pub fn is(&self, other: &Self) -> bool {
+        use TokenType::*;
+        match (self, other) {
+            (Comment(..), Comment(..))
+            | (Name(..), Name(..))
+            | (KeyName(..), KeyName(..))
+            | (String(..), String(..))
+            | (Int(..), Int(..))
+            | (Float(..), Float(..))
+            | (Op(..), Op(..))
+            | (LeftCurlyBrace, LeftCurlyBrace)
+            | (ListSeparator, ListSeparator)
+            | (EndStatement, EndStatement)
+            | (Dot, Dot)
+            | (LeftBrace, LeftBrace)
+            | (RightBrace, RightBrace)
+            | (ConstDeclaration, ConstDeclaration)
+            | (VariableDeclaration, VariableDeclaration)
+            | (TypeDeclaration, TypeDeclaration)
+            | (Assignment, Assignment)
+            | (ReturnTypes, ReturnTypes)
+            | (RightCurlyBrace, RightCurlyBrace) => true,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for TokenType {
@@ -100,7 +159,7 @@ impl fmt::Display for TokenType {
             ReturnTypes => write!(f, "->"),
             Dot => write!(f, "."),
             Name(ident) => write!(f, "{}", ident),
-            KeyName(key) => write!(f, "{}", key),
+            KeyName(key) => write!(f, "{:?}", key),
             String(str) => write!(f, "\"{}\"", str),
             Op(op) => write!(f, "{:?}", op),
 
@@ -311,8 +370,16 @@ impl<'a> Tokenizer<'a> {
         }
 
         match name.as_ref() {
-            "fn" | "return" | "if" | "loop" | "break" | "continue" | "import" | "true" | "type"
-            | "false" => TokenType::KeyName(name),
+            "fn" => TokenType::KeyName(KeyName::Fn),
+            "return" => TokenType::KeyName(KeyName::Return),
+            "if" => TokenType::KeyName(KeyName::If),
+            "loop" => TokenType::KeyName(KeyName::Loop),
+            "break" => TokenType::KeyName(KeyName::Break),
+            "continue" => TokenType::KeyName(KeyName::Continue),
+            "import" => TokenType::KeyName(KeyName::Import),
+            "true" => TokenType::KeyName(KeyName::True),
+            "type" => TokenType::KeyName(KeyName::Type),
+            "false" => TokenType::KeyName(KeyName::False),
             _ => TokenType::Name(name),
         }
     }

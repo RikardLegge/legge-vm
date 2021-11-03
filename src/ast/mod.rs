@@ -64,11 +64,12 @@ impl Err {
                 let mut tokens = Vec::new();
                 let mut ids = HashSet::new();
                 for &node_id in &part.nodes {
+                    let mut root = ast.get_node(node_id);
                     let mut curr = ast.get_node(node_id);
-                    if let Some(token) = curr.tokens.first() {
-                        let line = token.line;
-                        loop {
-                            let own = curr.id() == node_id;
+                    loop {
+                        if let Some(t) = root.tokens.first() {
+                            let line = t.line;
+                            let own = curr.id() == root.id();
                             // Inefficient but it works since the parent node might not yet have a reference to it's children.
                             for token in curr.tokens.iter().chain(curr.child_tokens(ast).iter()) {
                                 if ids.contains(&token.id) {
@@ -93,9 +94,12 @@ impl Err {
                             } else {
                                 break;
                             }
+                        } else if let Some(parent_id) = root.parent_id {
+                            root = ast.get_node(parent_id);
+                            curr = ast.get_node(parent_id);
+                        } else {
+                            break;
                         }
-                    } else {
-                        continue;
                     }
                 }
                 if tokens.is_empty() {

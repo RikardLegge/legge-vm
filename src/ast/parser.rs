@@ -3,6 +3,7 @@ use crate::ast;
 use crate::ast::ast::{PartialNodeValue, PartialType, ProcedureDeclarationNode};
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody, UnlinkedNodeBody};
 use crate::ast::NodeType;
+use crate::token::KeyName;
 use crate::token::TokenType::EndStatement;
 use crate::token::{ArithmeticOP, Token, TokenType};
 use colored::Colorize;
@@ -28,6 +29,133 @@ struct Parser<I: Iterator<Item = Token>> {
     pending_expression: Option<NodeID>,
 }
 
+struct PendingToken<'a> {
+    ast: &'a Ast,
+    node: NodeID,
+    got: Option<&'a TokenType>,
+}
+
+fn expected_to_message(expected: &[&TokenType]) -> String {
+    match expected {
+        &[] => "something".to_string(),
+        &[one] => format!("{}", one),
+        many => [
+            "one of { ",
+            &many
+                .iter()
+                .map(|t| format!("{}", t))
+                .collect::<Vec<String>>()
+                .join(", "),
+            " }",
+        ]
+        .join(""),
+    }
+}
+
+fn missing_token_error(ast: &Ast, node: NodeID, expected: &[&TokenType]) -> ast::Err {
+    let expected_message = expected_to_message(expected);
+    ast.single_error(
+        &format!("Reached en of file while looking for {}", expected_message),
+        &format!("Consider adding {}", expected_message.to_string().red()),
+        ast.nodes_after(node),
+    )
+}
+
+fn invalid_keyword_error(ast: &Ast, node: NodeID, got: KeyName, expected: &[KeyName]) -> ast::Err {
+    let expected_message = match expected {
+        &[] => unreachable!(),
+        &[one] => format!("{:?}", one),
+        many => [
+            "one of { ",
+            &many
+                .iter()
+                .map(|t| format!("{:?}", t))
+                .collect::<Vec<String>>()
+                .join(", "),
+            " }",
+        ]
+        .join(""),
+    };
+
+    ast.single_error(
+        &format!("Found {:?} while expecting {}", got, expected_message),
+        &format!(
+            "Consider replacing with {}",
+            expected_message.to_string().red()
+        ),
+        ast.nodes_after(node),
+    )
+}
+
+fn wrong_token_error(
+    ast: &Ast,
+    node: NodeID,
+    got: &TokenType,
+    expected: &[&TokenType],
+) -> ast::Err {
+    let expected_message = expected_to_message(expected);
+    ast.single_error(
+        &format!("Found {} while expecting {}", got, expected_message),
+        &format!(
+            "Consider replacing with {}",
+            expected_message.to_string().red()
+        ),
+        ast.nodes_after(node),
+    )
+}
+
+impl<'a> PendingToken<'a> {
+    fn new(ast: &'a Ast, node: NodeID, got: Option<&'a TokenType>) -> Self {
+        PendingToken { ast, node, got }
+    }
+
+    fn missing_token_error(self, expected: &TokenType) -> ast::Err {
+        missing_token_error(self.ast, self.node, &[expected])
+    }
+
+    fn wrong_token_error(self, expected: &TokenType) -> ast::Err {
+        wrong_token_error(self.ast, self.node, self.got.unwrap(), &[expected])
+    }
+
+    fn expect(self, other: &TokenType) -> Result<&'a TokenType> {
+        match self.got {
+            Some(tp) => match tp.is(other) {
+                true => Ok(tp),
+                false => Err(self.wrong_token_error(other)),
+            },
+            None => Err(self.missing_token_error(other)),
+        }
+    }
+
+    fn expect_exact(self, other: &TokenType) -> Result<&'a TokenType> {
+        match self.got {
+            Some(tp) => match tp == other {
+                true => Ok(tp),
+                false => Err(self.wrong_token_error(other)),
+            },
+            None => Err(self.missing_token_error(other)),
+        }
+    }
+
+    fn any(self) -> Result<&'a TokenType> {
+        match self.got {
+            Some(tp) => Ok(tp),
+            None => Err(missing_token_error(self.ast, self.node, &[])),
+        }
+    }
+
+    fn is(self, other: &TokenType) -> Result<bool> {
+        match self.got {
+            Some(tp) => Ok(tp.is(other)),
+            None => Err(self.missing_token_error(other)),
+        }
+    }
+
+    fn not(self, other: &TokenType) -> Result<bool> {
+        self.is(other).map(|v| !v)
+    }
+}
+
 impl<I> Parser<I>
 where
     I: Iterator<Item = Token>,
@@ -45,10 +173,9 @@ where
 
     fn parse(mut self) -> Result<Ast> {
         let node = self.any_node(None);
-
         let mut static_statements = Vec::new();
         let mut dynamic_statements = Vec::new();
-        while self.peek_token().is_ok() {
+        while self.peek_token().any().is_ok() {
             let statement = self.do_statement(node.id)?;
             match self.ast.get_node(statement).body {
                 NodeBody::TypeDeclaration { .. }
@@ -81,144 +208,28 @@ where
         }
     }
 
-    fn ensure_next_token(&mut self, node: &PendingNode, tp: TokenType) -> Result<()> {
-        self.ensure_next_token_for_id(node.id, tp, "")
+    fn eat_token(&mut self, node: &PendingNode) {
+        self.next_token(node).any().unwrap();
     }
 
-    fn next_token(&mut self, node: &PendingNode) -> Result<TokenType> {
-        self.next_token_for_id(node.id)
+    fn peek_token(&mut self) -> PendingToken {
+        let tp = self.iter.peek().map(|t| &t.tp);
+        let node = self
+            .pending_expression
+            .unwrap_or_else(|| self.pending_statement.unwrap_or_else(|| NodeID::zero()));
+        PendingToken::new(&self.ast, node, tp)
     }
 
-    fn pending_nodes(ast: &Ast, node_id: Option<NodeID>) -> Vec<NodeID> {
-        match node_id {
-            Some(node_id) => ast.nodes_after(node_id),
-            None => vec![],
-        }
-    }
-
-    fn ensure_next_token_for_id(
-        &mut self,
-        node_id: NodeID,
-        tp: TokenType,
-        error_description: &str,
-    ) -> Result<()> {
-        let token = self.next_token_for_id(node_id);
-        let token = match token {
-            Ok(token) => token,
-            Err(_) => {
-                return Err(self.ast.single_error(
-                    &format!(
-                        "Expected {} but got to the end of the file",
-                        tp.to_string().red()
-                    ),
-                    &format!("Add {}", format!("{}", tp).red()),
-                    Self::pending_nodes(&self.ast, self.pending_expression),
-                ))
-            }
-        };
-        if token != tp {
-            let last = self.ast.get_node_mut(node_id).tokens.pop().unwrap();
-            let error_node = self.any_node(Some(node_id));
-            let error_node_id = self.add_node(error_node, NodeBody::Empty);
-            self.ast.get_node_mut(error_node_id).tokens.push(last);
-            return if tp == EndStatement {
-                Err(self.ast.single_error(
-                    &format!("The statement is never closed. Add ;"),
-                    error_description,
-                    self.ast
-                        .get_node_and_children(self.pending_statement.unwrap()),
-                ))
-            } else {
-                Err(self.ast.single_error(
-                    &format!("Expected token '{}', found '{}'", tp, token,),
-                    error_description,
-                    vec![error_node_id],
-                ))
-            };
-        }
-        Ok(())
-    }
-
-    fn next_token_for_id(&mut self, node_id: NodeID) -> Result<TokenType> {
-        match self.iter.next() {
+    fn next_token(&mut self, node: &PendingNode) -> PendingToken {
+        let tp = match self.iter.next() {
             Some(token) => {
-                let tp = token.tp.clone();
-                self.ast.get_node_mut(node_id).tokens.push(token);
-                Ok(tp)
+                self.ast.get_node_mut(node.id).tokens.push(token);
+                let tp = &self.ast.get_node(node.id).tokens.last().unwrap().tp;
+                Some(tp)
             }
-            None => Err(Self::no_more_tokens_error(
-                self.pending_statement,
-                &self.ast,
-            )),
-        }
-    }
-
-    fn no_more_tokens_error(node_id: Option<NodeID>, ast: &Ast) -> ast::Err {
-        let mut nodes = vec![];
-        if let Some(id) = node_id {
-            nodes.push(id);
-            let last_node_id = ast.nodes().last().unwrap().id();
-            if last_node_id != id {
-                nodes.push(last_node_id);
-            }
-        }
-        ast.single_error("No more tokens", "Incomplete statement", nodes)
-    }
-
-    fn peek_token(&mut self) -> Result<&TokenType> {
-        match self.iter.peek() {
-            Some(val) => Ok(&val.tp),
-            None => Err(Self::no_more_tokens_error(
-                self.pending_statement,
-                &self.ast,
-            )),
-        }
-    }
-
-    fn missing_token_error(ast: &Ast, tt: &TokenType, node_id: Option<NodeID>) -> ast::Err {
-        ast.single_error(
-            &format!(
-                "Reached en of file while looking for {}",
-                tt.to_string().red()
-            ),
-            &format!("Add {}", tt.to_string().red()),
-            Self::pending_nodes(&ast, node_id),
-        )
-    }
-
-    fn wrong_token_error(
-        ast: &Ast,
-        wanted: &TokenType,
-        got: &TokenType,
-        node_id: Option<NodeID>,
-    ) -> ast::Err {
-        ast.single_error(
-            &format!(
-                "Found an unexpected token, consider replacing {} with {}",
-                got.to_string().red(),
-                wanted.to_string().red(),
-            ),
-            &format!("Replace with {}", wanted.to_string().red()),
-            Self::pending_nodes(&ast, node_id),
-        )
-    }
-
-    fn peek_token_not(&mut self, tt: &TokenType) -> Result<Option<&TokenType>> {
-        match self.iter.peek() {
-            Some(token) if tt != &token.tp => Ok(Some(&token.tp)),
-            Some(_) => Ok(None),
-            None => {
-                let node_id = self.pending_expression;
-                Err(Self::missing_token_error(&self.ast, tt, node_id))
-            }
-        }
-    }
-
-    fn peek_token_or_none(&mut self) -> Option<&TokenType> {
-        match self.iter.peek() {
-            Some(val) => Some(&val.tp),
             None => None,
-        }
+        };
+        PendingToken::new(&self.ast, node.id, tp)
     }
 
     fn node(&mut self, parent_id: NodeID) -> PendingNode {
@@ -268,7 +279,7 @@ where
     fn do_block(&mut self, node: PendingNode) -> Result {
         let mut static_statements = Vec::new();
         let mut dynamic_statements = Vec::new();
-        while *self.peek_token()? != TokenType::RightCurlyBrace {
+        while self.peek_token().not(&TokenType::RightCurlyBrace)? {
             let statement = self.do_statement(node.id)?;
             match self.ast.get_node(statement).body {
                 NodeBody::TypeDeclaration { .. }
@@ -281,127 +292,189 @@ where
             static_statements.append(&mut dynamic_statements);
             static_statements
         };
-        self.ensure_next_token(&node, TokenType::RightCurlyBrace)?;
+        self.next_token(&node).expect(&TokenType::RightCurlyBrace)?;
         Ok(self.add_node(node, NodeBody::Block { body: statements }))
     }
 
     fn do_statement(&mut self, parent_id: NodeID) -> Result {
+        use crate::token::KeyName::*;
         use crate::token::TokenType::*;
         let node = self.node(parent_id);
         self.pending_statement = Some(node.id);
         self.pending_expression = None;
 
-        let node = match self.next_token(&node)? {
-            Int(int, _) => Ok(self.add_node(
-                node,
-                NodeBody::ConstValue {
-                    tp: None,
-                    value: NodeValue::Int(int).into(),
-                },
-            )),
-            Float(float, _, _) => Ok(self.add_node(
-                node,
-                NodeBody::ConstValue {
-                    tp: None,
-                    value: NodeValue::Float(float).into(),
-                },
-            )),
-            Op(op) => self.do_operation(node, op, None),
-            Name(symbol) => self.do_statement_symbol(node, &symbol),
+        let node = match self.next_token(&node).any()? {
+            Int(int, _) => {
+                let int = *int;
+                Ok(self.add_node(
+                    node,
+                    NodeBody::ConstValue {
+                        tp: None,
+                        value: NodeValue::Int(int).into(),
+                    },
+                ))
+            }
+            Float(float, _, _) => {
+                let float = *float;
+                Ok(self.add_node(
+                    node,
+                    NodeBody::ConstValue {
+                        tp: None,
+                        value: NodeValue::Float(float).into(),
+                    },
+                ))
+            }
+            Op(op) => {
+                let op = *op;
+                self.do_operation(node, op, None)
+            }
+            Name(symbol) => {
+                let symbol = symbol.to_string();
+                self.do_statement_symbol(node, symbol)
+            }
             LeftCurlyBrace => self.do_block(node),
             EndStatement => Ok(self.add_node(node, NodeBody::Empty)),
-            KeyName(keyword) => match keyword.as_ref() {
-                "return" => self.do_return(node),
-                "if" => self.do_if(node),
-                "loop" => self.do_loop(node),
-                "break" => self.do_break(node),
-                "import" => self.do_import(node),
-                "continue" => unimplemented!(),
-                keyword => Err(self.ast.single_error(
-                    &format!("Invalid keyword here '{:?}'", keyword),
-                    "",
-                    vec![node.id],
-                )),
-            },
-            Comment(comment) => Ok(self.add_node(node, NodeBody::Comment(comment))),
-            other => {
-                Err(self
-                    .ast
-                    .single_error(&format!("Unknown token {:?}", other), "", vec![node.id]))
+            KeyName(Return) => self.do_return(node),
+            KeyName(If) => self.do_if(node),
+            KeyName(Loop) => self.do_loop(node),
+            KeyName(Break) => self.do_break(node),
+            KeyName(Import) => self.do_import(node),
+            KeyName(Continue) => unimplemented!(),
+            KeyName(keyword) => {
+                let keyword = *keyword;
+                Err(invalid_keyword_error(
+                    &self.ast,
+                    node.id,
+                    keyword,
+                    &[Return, If, Loop, Break, Import, Continue],
+                ))?
+            }
+            Comment(comment) => {
+                let comment = comment.clone();
+                Ok(self.add_node(node, NodeBody::Comment(comment)))
+            }
+            token => {
+                let token = token.clone();
+                Err(wrong_token_error(
+                    &self.ast,
+                    node.id,
+                    &token,
+                    &[
+                        &Int(1, 0),
+                        &Float(1.0, 0, 0),
+                        &Op(ArithmeticOP::Add),
+                        &Name("variable".to_string()),
+                        &LeftCurlyBrace,
+                        &EndStatement,
+                        &KeyName(If),
+                        &Comment("comment".to_string()),
+                    ],
+                ))
             }
         }?;
         if self.should_terminate_statement(node) {
-            self.ensure_next_token_for_id(node, EndStatement, "")?;
+            let node = PendingNode { id: node };
+            self.next_token(&node).expect(&EndStatement)?;
         }
         Ok(node)
     }
 
     fn do_expression(&mut self, parent_id: NodeID) -> Result {
+        use crate::token::KeyName::*;
         use crate::token::TokenType::*;
         let node = self.node(parent_id);
         self.pending_expression = Some(node.id);
 
-        let node = match self.next_token(&node)? {
-            Int(int, _) => self.add_node(
-                node,
-                NodeBody::ConstValue {
-                    tp: None,
-                    value: NodeValue::Int(int).into(),
-                },
-            ),
-            Float(float, _, _) => self.add_node(
-                node,
-                NodeBody::ConstValue {
-                    tp: None,
-                    value: NodeValue::Float(float).into(),
-                },
-            ),
-            String(value) => self.add_node(
-                node,
-                NodeBody::ConstValue {
-                    tp: None,
-                    value: NodeValue::String(value).into(),
-                },
-            ),
-            Op(op) => self.do_operation(node, op, None)?,
-            Name(symbol) => self.do_expression_symbol(node, &symbol, None)?,
+        let node = match self.next_token(&node).any()? {
+            Int(int, _) => {
+                let int = *int;
+                self.add_node(
+                    node,
+                    NodeBody::ConstValue {
+                        tp: None,
+                        value: NodeValue::Int(int).into(),
+                    },
+                )
+            }
+            Float(float, _, _) => {
+                let float = *float;
+                self.add_node(
+                    node,
+                    NodeBody::ConstValue {
+                        tp: None,
+                        value: NodeValue::Float(float).into(),
+                    },
+                )
+            }
+            String(value) => {
+                let value = value.clone();
+                self.add_node(
+                    node,
+                    NodeBody::ConstValue {
+                        tp: None,
+                        value: NodeValue::String(value).into(),
+                    },
+                )
+            }
+            Op(op) => {
+                let op = *op;
+                self.do_operation(node, op, None)?
+            }
+            Name(symbol) => {
+                let symbol = symbol.to_string();
+                self.do_expression_symbol(node, symbol, None)?
+            }
             LeftCurlyBrace => self.do_block(node)?,
-            KeyName(key) => match key.as_ref() {
-                "fn" => self.do_procedure(node)?,
-                "true" => self.do_bool(node, true)?,
-                "false" => self.do_bool(node, false)?,
-                keyword => Err(self.ast.single_error(
-                    &format!("Invalid keyword here '{:?}'", keyword),
-                    "",
-                    vec![node.id],
-                ))?,
-            },
-            LeftBrace => match self.peek_token()? {
-                RightBrace => {
+            KeyName(Fn) => self.do_procedure(node)?,
+            KeyName(True) => self.do_bool(node, true)?,
+            KeyName(False) => self.do_bool(node, false)?,
+            KeyName(keyword) => {
+                let keyword = *keyword;
+                Err(invalid_keyword_error(
+                    &self.ast,
+                    node.id,
+                    keyword,
+                    &[Fn, True, False],
+                ))?
+            }
+            LeftBrace => {
+                if self.peek_token().not(&RightBrace)? {
+                    let expr_node = self.do_expression(node.id)?;
+                    self.next_token(&node).expect(&RightBrace)?;
+                    self.add_node(node, NodeBody::Expression(expr_node))
+                } else {
                     let left = node;
                     let right = self.node(left.id);
-                    self.next_token(&right)?;
+                    self.eat_token(&right);
                     Err(self.ast.single_error(
                         &format!("Empty parenthesis are not allowed as expressions"),
                         "Invalid expression",
                         vec![left.id, right.id],
                     ))?
                 }
-                _ => {
-                    let expr_node = self.do_expression(node.id)?;
-                    self.ensure_next_token(&node, RightBrace)?;
-                    self.add_node(node, NodeBody::Expression(expr_node))
-                }
-            },
-            other => {
-                Err(self
-                    .ast
-                    .single_error(&format!("Unkown token {:?}", other), "", vec![node.id]))?
+            }
+            token => {
+                let token = token.clone();
+                Err(wrong_token_error(
+                    &self.ast,
+                    node.id,
+                    &token,
+                    &[
+                        &Int(1, 0),
+                        &Float(1.0, 0, 0),
+                        &String("".to_string()),
+                        &Op(ArithmeticOP::Add),
+                        &Name("variable".to_string()),
+                        &LeftCurlyBrace,
+                        &KeyName(If),
+                        &LeftBrace,
+                    ],
+                ))?
             }
         };
 
-        match self.peek_token_or_none() {
-            Some(TokenType::Op(op)) => {
+        match self.peek_token().any() {
+            Ok(TokenType::Op(op)) => {
                 let lhs = node;
                 let op = *op;
                 let op_node = self.node(parent_id);
@@ -409,7 +482,7 @@ where
                 // lhs parent id to lie under the operation.
                 self.ast.get_node_mut(lhs).parent_id = Some(op_node.id);
 
-                self.next_token(&op_node)?;
+                self.eat_token(&op_node);
                 self.do_operation(op_node, op, Some(lhs))
             }
             _ => Ok(node),
@@ -417,22 +490,29 @@ where
     }
 
     fn do_if(&mut self, node: PendingNode) -> Result {
-        self.ensure_next_token(&node, TokenType::LeftBrace)?;
+        self.next_token(&node).expect(&TokenType::LeftBrace)?;
         let condition = self.do_expression(node.id)?;
-        self.ensure_next_token(&node, TokenType::RightBrace)?;
+        self.next_token(&node).expect(&TokenType::RightBrace)?;
 
         let body_node = self.node(node.id);
-        self.ensure_next_token(&body_node, TokenType::LeftCurlyBrace)?;
+        self.next_token(&body_node)
+            .expect(&TokenType::LeftCurlyBrace)?;
         let body = self.do_block(body_node)?;
         Ok(self.add_node(node, NodeBody::If { condition, body }))
     }
 
     fn do_import(&mut self, node: PendingNode) -> Result {
-        match self.next_token(&node)? {
+        // TODO: this can be constant
+        let default_namespace = TokenType::Name("std".to_string());
+        let default_variable = TokenType::Name("function".to_string());
+
+        match self.next_token(&node).expect(&default_namespace)? {
             TokenType::Name(namespace) => {
-                self.ensure_next_token(&node, TokenType::Dot)?;
-                match self.next_token(&node)? {
+                let namespace = namespace.clone();
+                self.next_token(&node).expect(&TokenType::Dot)?;
+                match self.next_token(&node).expect(&default_variable)? {
                     TokenType::Name(ident) => {
+                        let ident = ident.clone();
                         let body_node = self.node(node.id);
                         let expr = self.add_node(
                             body_node,
@@ -469,7 +549,8 @@ where
 
     fn do_loop(&mut self, node: PendingNode) -> Result {
         let body_node = self.node(node.id);
-        self.ensure_next_token(&body_node, TokenType::LeftCurlyBrace)?;
+        self.next_token(&body_node)
+            .expect(&TokenType::LeftCurlyBrace)?;
         let body = self.do_block(body_node)?;
         Ok(self.add_node(node, NodeBody::Loop { body }))
     }
@@ -499,7 +580,7 @@ where
             if let Some(lhs) = pending_node {
                 // Operation between two nodes
                 let rhs = self.do_expression(node.id)?;
-                let next_token = self.peek_token()?;
+                let next_token = self.peek_token().any()?;
 
                 let lhs_precedence = Self::op_precedence(op);
                 let rhs_precedence = Self::token_precedence(next_token);
@@ -508,13 +589,15 @@ where
                 } else {
                     let node = self.node(parent_id);
                     let id = node.id;
-                    let rhs = match self.next_token(&node)? {
-                        TokenType::Op(op) => self.do_sub_operation(node, id, op, Some(rhs))?,
-                        _ => Err(self.ast.single_error(
-                            &format!("Expecting operation, found something else"),
-                            "",
-                            vec![node.id],
-                        ))?,
+                    let rhs = match self
+                        .next_token(&node)
+                        .expect(&TokenType::Op(ArithmeticOP::Add))?
+                    {
+                        TokenType::Op(op) => {
+                            let op = *op;
+                            self.do_sub_operation(node, id, op, Some(rhs))?
+                        }
+                        _ => unreachable!(),
                     };
                     NodeBody::Op { op, lhs, rhs }
                 }
@@ -537,25 +620,27 @@ where
     }
 
     fn do_type(&mut self, parent: &PendingNode) -> Result<(NodeID, &PartialType)> {
+        // TODO: this can be constant
+        let default_type = TokenType::Name("int".to_string());
+
         use PartialType::*;
         use TokenType::*;
 
         let node = self.node(parent.id);
-        let token = self.next_token(&node)?;
-        let (tp, parts) = match token {
+        let (tp, parts) = match self.next_token(&node).expect(&default_type)? {
             Name(ident) => match ident.as_ref() {
                 "int" => (Complete(NodeType::Int), vec![]),
                 "float" => (Complete(NodeType::Float), vec![]),
                 "string" => (Complete(NodeType::String), vec![]),
                 "bool" => (Complete(NodeType::Bool), vec![]),
                 "Fn" => {
-                    self.ensure_next_token(&node, LeftBrace)?;
+                    self.next_token(&node).expect(&LeftBrace)?;
 
                     let mut complete = true;
                     let mut parts = Vec::new();
-                    let args = match self.peek_token()? {
+                    let args = match self.peek_token().any()? {
                         RightBrace => {
-                            self.next_token(&node)?;
+                            self.eat_token(&node);
                             vec![]
                         }
                         _ => {
@@ -567,20 +652,24 @@ where
                                 }
                                 parts.push(arg_id);
                                 args.push(tp_ref.tp().clone());
-                                match self.next_token(&node)? {
+                                match self.next_token(&node).any()? {
                                     ListSeparator => (),
                                     RightBrace => break args,
-                                    _ => Err(self.ast.single_error(
-                                        &format!("Invalid token found in place of ')' or ','"),
-                                        "",
-                                        vec![node.id],
-                                    ))?,
+                                    token => {
+                                        let token = token.clone();
+                                        Err(wrong_token_error(
+                                            &self.ast,
+                                            node.id,
+                                            &token,
+                                            &[&ListSeparator, &RightBrace],
+                                        ))?
+                                    }
                                 }
                             }
                         }
                     };
-                    let ret = if self.peek_token()? == &ReturnTypes {
-                        self.next_token(&node)?;
+                    let ret = if self.peek_token().is(&ReturnTypes)? {
+                        self.eat_token(&node);
                         let (ret_id, tp_ref) = self.do_type(&node)?;
                         if !tp_ref.is_complete() {
                             complete = false;
@@ -610,17 +699,14 @@ where
                     };
                     (PartialType::new(complete, tp), parts)
                 }
-                _ => (PartialType::Uncomplete(NodeType::Unknown { ident }), vec![]),
-            },
-            _ => Err(self.ast.single_error(
-                &format!("Invalid token found when expecting type"),
-                &format!(
-                    "Add a type identifier like for example {} or {}",
-                    "string".red(),
-                    "int".red()
+                _ => (
+                    PartialType::Uncomplete(NodeType::Unknown {
+                        ident: ident.clone(),
+                    }),
+                    vec![],
                 ),
-                vec![node.id],
-            ))?,
+            },
+            _ => unreachable!(),
         };
         let node_id = self.add_node(node, NodeBody::PartialType { parts, tp });
         let tp_ref = match &self.ast.get_node(node_id).body {
@@ -636,7 +722,7 @@ where
             NodeType::Int => NodeValue::Int(0).into(),
             NodeType::Bool => NodeValue::Bool(false).into(),
             NodeType::Float => NodeValue::Float(0.0).into(),
-            NodeType::String => NodeValue::String("".into()).into(),
+            NodeType::String => NodeValue::String("".to_string()).into(),
             NodeType::Struct { fields } => NodeValue::Struct(
                 fields
                     .iter()
@@ -659,16 +745,17 @@ where
         (value, linked)
     }
 
-    fn do_type_definition(&mut self, node: PendingNode, ident: &str) -> Result {
-        self.ensure_next_token(&node, TokenType::LeftCurlyBrace)?;
+    fn do_type_definition(&mut self, node: PendingNode, ident: String) -> Result {
+        self.next_token(&node).expect(&TokenType::LeftCurlyBrace)?;
 
         let mut parts = Vec::new();
         let mut fields = Vec::new();
         let mut complete = true;
         loop {
-            match self.next_token(&node)? {
+            match self.next_token(&node).any()? {
                 TokenType::Name(key) => {
-                    self.ensure_next_token(&node, TokenType::TypeDeclaration)?;
+                    let key = key.clone();
+                    self.next_token(&node).expect(&TokenType::TypeDeclaration)?;
                     let (id, tp_ref) = self.do_type(&node)?;
                     if !tp_ref.is_complete() {
                         complete = false;
@@ -677,14 +764,21 @@ where
                     fields.push((key, tp_ref.tp().clone()));
                 }
                 TokenType::RightCurlyBrace => break,
-                _ => Err(self.ast.single_error(
-                    &format!("Invalid token found in place of '}}' or field"),
-                    "",
-                    vec![node.id],
-                ))?,
+                token => {
+                    let token = token.clone();
+                    Err(wrong_token_error(
+                        &self.ast,
+                        node.id,
+                        &token,
+                        &[
+                            &TokenType::Name("field".to_string()),
+                            &TokenType::RightCurlyBrace,
+                        ],
+                    ))?
+                }
             }
-            if self.peek_token()? == &TokenType::ListSeparator {
-                self.next_token(&node)?;
+            if self.peek_token().is(&TokenType::ListSeparator)? {
+                self.eat_token(&node);
             }
         }
 
@@ -693,7 +787,7 @@ where
             complete,
             NodeType::NewType {
                 tp: Box::new(NodeType::Type {
-                    ident: ident.into(),
+                    ident: ident.clone(),
                     content: Box::new(self_tp.clone()),
                 }),
             },
@@ -759,7 +853,7 @@ where
         };
 
         let body = NodeBody::TypeDeclaration {
-            ident: ident.into(),
+            ident,
             tp,
             constructor,
             default_value,
@@ -769,99 +863,55 @@ where
     }
 
     fn do_procedure(&mut self, node: PendingNode) -> Result {
-        self.ensure_next_token(&node, TokenType::LeftBrace)?;
+        self.next_token(&node).expect(&TokenType::LeftBrace)?;
         let mut args = Vec::new();
 
-        while let Some(_) = self.peek_token_not(&TokenType::RightBrace)? {
+        while self.peek_token().not(&TokenType::RightBrace)? {
             let arg_node = self.node(node.id);
-            match self.next_token(&arg_node)? {
+            args.push(arg_node.id);
+            match self
+                .next_token(&arg_node)
+                .expect(&TokenType::Name(String::new()))?
+            {
                 TokenType::Name(ident) => {
-                    args.push(arg_node.id);
-                    let (id, _) = match self.peek_token() {
-                        Ok(TokenType::TypeDeclaration) => {
-                            self.next_token(&arg_node)?;
-                            match self.do_type(&arg_node) {
-                                Ok(v) => v,
-                                Err(_) => {
-                                    return Err(self.ast.single_error(
-                                        "Reached en of file.",
-                                        &format!("Expecting a type parameter like {}", "int".red()),
-                                        self.ast.nodes_after(node.id),
-                                    ))?;
-                                }
-                            }
-                        }
-                        Ok(_) => {
-                            let token = self.next_token(&arg_node)?;
-                            Err(self.ast.single_error(
-                                &format!(
-                                    "Expecting type declaration {}, found {}",
-                                    TokenType::TypeDeclaration,
-                                    token
-                                ),
-                                &format!("Add {} before {}", TokenType::TypeDeclaration, token),
-                                self.ast.nodes_after(node.id),
-                            ))?
-                        }
-                        Err(_) => Err(self.ast.single_error(
-                            &format!("Reached en of file."),
-                            &format!("Expecting type declaration {}", ":".red()),
-                            self.ast.nodes_after(node.id),
-                        ))?,
+                    let ident = ident.clone();
+                    let tp = match self
+                        .next_token(&arg_node)
+                        .expect(&TokenType::TypeDeclaration)?
+                    {
+                        TokenType::TypeDeclaration => Some(self.do_type(&arg_node)?.0),
+                        _ => unreachable!(),
                     };
-                    self.add_node(
-                        arg_node,
-                        NodeBody::VariableDeclaration {
-                            ident,
-                            tp: Some(id),
-                            expr: None,
-                        },
-                    );
+                    let expr = None;
+                    let body = NodeBody::VariableDeclaration { ident, tp, expr };
+                    self.add_node(arg_node, body);
                 }
-                _ => Err(self.ast.single_error(
-                    &format!("Invalid token found when expecting argument"),
-                    "",
-                    vec![arg_node.id],
-                ))?,
+                _ => unreachable!(),
             }
 
-            match self.peek_token() {
-                Ok(&TokenType::ListSeparator) => {
-                    self.next_token(&node)?;
-                }
-                Ok(_) => break,
-                Err(_) =>
-                    Err(self.ast.single_error(
-                        &format!("Reached en of file."),
-                        &format!(
-                            "Either add another argument, separated with {} or close the expression with {}",
-                            ",".red(),
-                            ")".red()
-                        ),
-                        self.ast.nodes_after(node.id),
-                    ))?
+            if self.peek_token().not(&TokenType::ListSeparator)? {
+                break;
             }
+            self.eat_token(&node);
         }
 
-        if self.peek_token().is_err() {
-            Err(self.ast.single_error(
-                &format!("Reached en of file."),
-                &format!("Add {}", ")".red()),
-                self.ast.nodes_after(node.id),
-            ))?
-        }
-        self.ensure_next_token(&node, TokenType::RightBrace)?;
-        let returns = match self.peek_token() {
-            Ok(TokenType::ReturnTypes) => {
-                self.next_token(&node)?;
-                let (id, _) = self.do_type(&node)?;
-                Some(id)
+        self.next_token(&node).expect(&TokenType::RightBrace)?;
+
+        // This is a NoOp for all cases except when we hit the end of the file.
+        // The { is a better hint than a type declaration
+        self.peek_token().is(&TokenType::LeftCurlyBrace)?;
+
+        let returns = match self.peek_token().is(&TokenType::ReturnTypes)? {
+            true => {
+                self.eat_token(&node);
+                Some(self.do_type(&node)?.0)
             }
-            _ => None,
+            false => None,
         };
 
-        let mut block_node = self.node(node.id);
-        self.ensure_next_token(&mut block_node, TokenType::LeftCurlyBrace)?;
+        let block_node = self.node(node.id);
+        self.next_token(&block_node)
+            .expect(&TokenType::LeftCurlyBrace)?;
         let body = self.do_block(block_node)?;
 
         let children = self.ast.get_node(body).body.children();
@@ -910,20 +960,19 @@ where
         ))
     }
 
-    fn do_statement_symbol(&mut self, node: PendingNode, ident: &str) -> Result {
+    fn do_statement_symbol(&mut self, node: PendingNode, ident: String) -> Result {
         use crate::token::TokenType::*;
 
-        match self.peek_token()? {
+        match self.peek_token().any()? {
             LeftBrace => self.do_function_call(node, ident),
             TypeDeclaration => {
-                self.next_token(&node)?;
-                let next = self.peek_token()?;
-                if let Assignment = next {
+                self.eat_token(&node);
+                if self.peek_token().is(&Assignment)? {
                     // TypeDeclaration + Assignment = VariableDeclaration
                     return self.do_variable_declaration(node, ident, None);
                 }
                 let (tp, _) = self.do_type(&node)?;
-                match self.peek_token()? {
+                match self.peek_token().any()? {
                     ConstDeclaration | VariableDeclaration => {
                         self.do_variable_or_assignment(node, ident, Some(tp))
                     }
@@ -931,7 +980,7 @@ where
                         let node = self.add_node(
                             node,
                             NodeBody::VariableDeclaration {
-                                ident: ident.into(),
+                                ident,
                                 tp: Some(tp),
                                 expr: None,
                             },
@@ -940,10 +989,12 @@ where
                     }
                     token => {
                         let token = token.clone();
-                        Err(self.ast.single_error(&format!(
-                            "Unexpected token {:?} after parsing variable type '{:?}' for '{:?}'. '::', ':=', or ';' expected",
-                            token, tp, ident
-                        ), "", vec![node.id]))
+                        Err(wrong_token_error(
+                            &self.ast,
+                            node.id,
+                            &token,
+                            &[&ConstDeclaration, &VariableDeclaration, &EndStatement],
+                        ))
                     }
                 }
             }
@@ -952,27 +1003,20 @@ where
     }
 
     fn find_traverse_path(&mut self, node: &PendingNode) -> Result<Vec<String>> {
-        use crate::token::TokenType::*;
+        use crate::token::TokenType::{Dot, Name};
         let mut path = Vec::new();
 
         loop {
-            match self.peek_token()? {
-                Dot => {
-                    self.next_token(node)?;
-                    match self.next_token(node)? {
-                        Name(field) => {
-                            path.push(field);
-                        }
-                        _ => {
-                            return Err(self.ast.single_error(
-                                "A name is require after a '.' operator",
-                                "",
-                                vec![node.id],
-                            ));
-                        }
+            if self.peek_token().is(&Dot)? {
+                self.eat_token(node);
+                match self.next_token(node).expect(&Name(String::new()))? {
+                    Name(field) => {
+                        path.push(field.clone());
                     }
+                    _ => unreachable!(),
                 }
-                _ => break,
+            } else {
+                break;
             }
         }
         Ok(path)
@@ -981,81 +1025,70 @@ where
     fn do_variable_or_assignment(
         &mut self,
         node: PendingNode,
-        ident: &str,
+        ident: String,
         tp: Option<NodeID>,
     ) -> Result {
+        use crate::token::KeyName::Type;
         use crate::token::TokenType::*;
 
-        let token = self.peek_token()?;
-        match token {
+        match self.peek_token().any()? {
             ReturnTypes => {
-                self.next_token(&node)?;
-                self.ensure_next_token(&node, TokenType::KeyName("type".into()))?;
+                self.eat_token(&node);
+                self.next_token(&node).expect_exact(&KeyName(Type))?;
                 self.do_type_definition(node, ident)
             }
             ConstDeclaration => {
-                self.next_token(&node)?;
+                self.eat_token(&node);
                 let expr = self.do_expression(node.id)?;
                 let node = match self.ast.get_node(expr).body {
                     NodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. })
-                    | NodeBody::ConstValue { .. } => self.add_node(
-                        node,
-                        NodeBody::StaticDeclaration {
-                            ident: ident.into(),
-                            tp,
-                            expr,
-                        },
-                    ),
-                    _ => self.add_node(
-                        node,
-                        NodeBody::ConstDeclaration {
-                            ident: ident.into(),
-                            tp,
-                            expr,
-                        },
-                    ),
+                    | NodeBody::ConstValue { .. } => {
+                        self.add_node(node, NodeBody::StaticDeclaration { ident, tp, expr })
+                    }
+                    _ => self.add_node(node, NodeBody::ConstDeclaration { ident, tp, expr }),
                 };
                 Ok(node)
             }
             VariableDeclaration => self.do_variable_declaration(node, ident, tp),
             Assignment => {
-                self.next_token(&node)?;
+                self.eat_token(&node);
                 let expr = self.do_expression(node.id)?;
+                let path = None;
                 let node = self.add_uncomplete_node(
                     node,
-                    UnlinkedNodeBody::VariableAssignment {
-                        ident: ident.into(),
-                        path: None,
-                        expr,
-                    },
+                    UnlinkedNodeBody::VariableAssignment { ident, path, expr },
                 );
                 Ok(node)
             }
             Dot => {
-                let path = self.find_traverse_path(&node)?;
-                match self.peek_token()? {
+                let path = Some(self.find_traverse_path(&node)?);
+                match self.peek_token().expect(&Assignment)? {
                     Assignment => {
-                        self.next_token(&node)?;
+                        self.eat_token(&node);
                         let expr = self.do_expression(node.id)?;
                         let node = self.add_uncomplete_node(
                             node,
-                            UnlinkedNodeBody::VariableAssignment {
-                                ident: ident.into(),
-                                path: Some(path),
-                                expr,
-                            },
+                            UnlinkedNodeBody::VariableAssignment { ident, path, expr },
                         );
                         Ok(node)
                     }
                     _ => unimplemented!(),
                 }
             }
-            _ => {
-                let details = &format!(
-                    "Unexpected token: {:?} when parsing identifier with name {:?}",
-                    token, ident
-                );
-                Err(self.ast.single_error(details, "", vec![node.id]))
+            token => {
+                let token = token.clone();
+                Err(wrong_token_error(
+                    &self.ast,
+                    node.id,
+                    &token,
+                    &[
+                        &ReturnTypes,
+                        &ConstDeclaration,
+                        &VariableDeclaration,
+                        &Assignment,
+                        &Dot,
+                    ],
+                ))
             }
         }
     }
@@ -1063,82 +1096,71 @@ where
     fn do_variable_declaration(
         &mut self,
         node: PendingNode,
-        ident: &str,
+        ident: String,
         tp: Option<NodeID>,
     ) -> Result {
-        self.next_token(&node)?;
-        let expr = self.do_expression(node.id)?;
-        let node = self.add_node(
-            node,
-            NodeBody::VariableDeclaration {
-                ident: ident.into(),
-                tp,
-                expr: Some(expr),
-            },
-        );
+        self.eat_token(&node);
+        let expr = Some(self.do_expression(node.id)?);
+        let node = self.add_node(node, NodeBody::VariableDeclaration { ident, tp, expr });
         Ok(node)
     }
 
     fn do_expression_symbol(
         &mut self,
         node: PendingNode,
-        ident: &str,
+        ident: String,
         path: Option<Vec<String>>,
     ) -> Result {
         use crate::token::TokenType::*;
 
-        let token = self.peek_token()?;
-        match token {
+        match self.peek_token().any()? {
             LeftBrace => self.do_function_call(node, ident),
-            Op(_) | RightBrace | EndStatement | ListSeparator => Ok(self.add_uncomplete_node(
-                node,
-                UnlinkedNodeBody::VariableValue {
-                    ident: ident.into(),
-                    path,
-                },
-            )),
+            Op(_) | RightBrace | EndStatement | ListSeparator => {
+                Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::VariableValue { ident, path }))
+            }
             Dot => {
                 let path = self.find_traverse_path(&node)?;
                 self.do_expression_symbol(node, ident, Some(path))
             }
-            _ => {
-                let details = &format!(
-                    "Unkown token: {:?} when parsing symbol with name {:?}",
-                    token, ident
-                );
-                Err(self.ast.single_error(details, "", vec![node.id]))
+            token => {
+                let token = token.clone();
+                Err(wrong_token_error(
+                    &self.ast,
+                    node.id,
+                    &token,
+                    &[
+                        &LeftBrace,
+                        &RightBrace,
+                        &EndStatement,
+                        &ListSeparator,
+                        &Dot,
+                        &Op(ArithmeticOP::Add),
+                    ],
+                ))
             }
         }
     }
 
-    fn do_function_call(&mut self, node: PendingNode, ident: &str) -> Result {
+    fn do_function_call(&mut self, node: PendingNode, ident: String) -> Result {
         use crate::token::TokenType::*;
 
-        self.ensure_next_token(&node, LeftBrace)?;
+        self.next_token(&node).expect(&LeftBrace)?;
         let mut args = Vec::new();
-        while self.peek_token()? != &RightBrace {
+        while self.peek_token().not(&RightBrace)? {
             let arg = self.do_expression(node.id)?;
             args.push(arg);
-            if self.peek_token()? == &ListSeparator {
-                self.next_token(&node)?;
+            if self.peek_token().is(&ListSeparator)? {
+                self.eat_token(&node);
             }
         }
-        self.ensure_next_token(&node, RightBrace)?;
-        Ok(self.add_uncomplete_node(
-            node,
-            UnlinkedNodeBody::Call {
-                ident: ident.into(),
-                args,
-            },
-        ))
+        self.next_token(&node).expect(&RightBrace)?;
+        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Call { ident, args }))
     }
 
     fn do_return(&mut self, node: PendingNode) -> Result {
-        let expr = if self.peek_token()? != &EndStatement {
-            let ret_id = self.do_expression(node.id)?;
-            Some(ret_id)
-        } else {
-            None
+        let expr = match self.peek_token().is(&EndStatement)? {
+            true => Some(self.do_expression(node.id)?),
+            false => None,
         };
         Ok(self.add_uncomplete_node(
             node,
