@@ -5,7 +5,7 @@ use std::io::prelude::*;
 use std::process::exit;
 
 fn main() {
-    let filename = "perf.bc";
+    let filename = "main.bc";
     let mut f = File::open(filename).expect("file not found");
 
     let mut contents = String::new();

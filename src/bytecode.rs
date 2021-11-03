@@ -146,10 +146,6 @@ impl Context {
         self.allocations(false)
     }
 
-    fn closure_allocations(&self) -> usize {
-        self.allocations(true)
-    }
-
     fn allocations(&self, has_closure_reference: bool) -> usize {
         let mut allocations = 0;
         for var in &self.variables {

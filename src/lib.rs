@@ -1,4 +1,5 @@
 #![feature(trait_alias)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod ast;
 pub mod bytecode;
@@ -27,14 +28,14 @@ pub fn compile(
     code: String,
 ) -> Option<(bytecode::Bytecode, ValidAst)> {
     let start = debug::start_timer();
-    let tokens = token::from_chars(code.chars());
+    let tokens = token::from_chars(code.chars(), Some(code.len()));
     timing.token = debug::stop_timer(start);
 
     let result = ast::from_tokens(tokens.into_iter(), &runtime);
     let (ast, ast_timing) = match result {
         Ok((ast, ast_timing)) => (ast, ast_timing),
         Err(e) => {
-            println!("Ast Error: {}\n{}\n", e.details, e.node_info.join("\n\n"));
+            println!("Ast Error: {}\n{}\n", e.details, e.node_info);
             return None;
         }
     };

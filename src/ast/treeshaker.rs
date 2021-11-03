@@ -1,6 +1,6 @@
 use super::{Ast, NodeID, Result};
 use crate::ast::ast::{Linked, NodeReference, PartialNodeValue, SideEffect};
-use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
+use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody, NodeBodyIterator};
 use crate::ast::{Err, Node, NodeType, NodeValue};
 use std::collections::{HashSet, VecDeque};
 use std::result;
@@ -44,6 +44,27 @@ where
         }
     }
 
+    // Safety: the referenced_by field is not allowed to be modified during the lifetime 'b.
+    unsafe fn node_referenced_by<'b>(&'a self, node_id: &'b NodeID) -> &'b HashSet<NodeReference> {
+        let r = &self.ast.get_node(*node_id).referenced_by;
+        let raw = r as *const HashSet<NodeReference>;
+        unsafe { &*raw }
+    }
+
+    // Safety: the references field is not allowed to be modified during the lifetime 'b.
+    unsafe fn node_references<'b>(&'a self, node_id: &'b NodeID) -> &'b HashSet<NodeReference> {
+        let r = &self.ast.get_node(*node_id).references;
+        let raw = r as *const HashSet<NodeReference>;
+        unsafe { &*raw }
+    }
+
+    // Safety: the list of node children is not allowed to be modified during the lifetime 'b.
+    unsafe fn node_children<'b>(&'a self, node_id: &'b NodeID) -> NodeBodyIterator<'b, T> {
+        let body = &self.ast.get_node(*node_id).body;
+        let raw = body as *const NodeBody<T>;
+        unsafe { (&*raw).children() }
+    }
+
     fn child_dependent_on_parent(&self, node: &Node<T>) -> Option<NodeID> {
         if let Some(parent_id) = node.parent_id {
             let parent = self.ast.get_node(parent_id);
@@ -74,7 +95,9 @@ where
             match node.body {
                 NodeBody::Block { .. } => {}
                 _ => {
-                    for child_id in node.body.children().cloned().collect::<Vec<NodeID>>() {
+                    // Safety: the child ids of the node is not updated in mark_dependencies_as_active.
+                    let children = unsafe { self.node_children(&node_id) };
+                    for &child_id in children {
                         self.mark_dependencies_as_active(child_id, effect)
                     }
                 }
@@ -141,13 +164,8 @@ where
                 self.mark_dependencies_as_active(parent_id, effect)
             }
 
-            let node = self.ast.get_node(node_id);
-            let references = node
-                .references
-                .iter()
-                .cloned()
-                .collect::<Vec<NodeReference>>();
-            for reference in references {
+            // Safety: the nodes references table is not updated in mark_dependencies_as_active.
+            for reference in unsafe { self.node_references(&node_id) } {
                 self.mark_dependencies_as_active(reference.id, effect)
             }
             self.stack.remove(&node_id);
@@ -199,13 +217,8 @@ where
                 self.find_mark_alive_triggers(parent_id, effect);
             }
 
-            let node = self.ast.get_node(node_id);
-            let references = node
-                .referenced_by
-                .iter()
-                .cloned()
-                .collect::<Vec<NodeReference>>();
-            for reference in references {
+            // Safety: the nodes referenced_by table is not updated in mark_dependencies_as_active.
+            for reference in unsafe { self.node_referenced_by(&node_id) } {
                 self.find_mark_alive_triggers(reference.id, effect);
             }
 

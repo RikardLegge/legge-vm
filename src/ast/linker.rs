@@ -41,7 +41,7 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
     fn closest_fn(&mut self, node_id: NodeID) -> Result<(NodeID, NodeReferenceLocation)> {
         match self.ast.closest_fn(node_id) {
             Some(id) => Ok(id),
-            _ => Err(self.ast.error(
+            _ => Err(self.ast.single_error(
                 "No function ancestor found starting at",
                 "statement outside of function",
                 vec![node_id],
@@ -52,7 +52,7 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
     fn closest_loop(&mut self, node_id: NodeID) -> Result<(NodeID, NodeReferenceLocation)> {
         match self.ast.closest_loop(node_id) {
             Some(id) => Ok(id),
-            _ => Err(self.ast.error(
+            _ => Err(self.ast.single_error(
                 "No loop ancestor found starting at",
                 "statement outside of loop",
                 vec![node_id],
@@ -84,7 +84,7 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
             PartialNodeValue::Unlinked(ident) => {
                 let (target_id, _) = match self.closest_variable(node_id, &ident)? {
                     Some(target) => target,
-                    None => Err(self.ast.error(
+                    None => Err(self.ast.single_error(
                         "Failed to find type",
                         "value not found",
                         vec![node_id],
@@ -180,7 +180,7 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
                 PartialType::Uncomplete(NodeType::Unknown { ident }) => {
                     let (target_id, _) = match self.closest_variable(node_id, &ident)? {
                         Some(target) => target,
-                        None => Err(self.ast.error(
+                        None => Err(self.ast.single_error(
                             "Failed to find type",
                             "unknown type",
                             vec![node_id],
@@ -224,19 +224,27 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
             for &child in node.body.children() {
                 queue.push_back(child);
             }
-            if let NodeBody::Unlinked(body) = &node.body {
+            let unlinked_body = if let NodeBody::Unlinked(_) = node.body {
+                let node = self.ast.get_node_mut(node_id);
+                let body = mem::replace(&mut node.body, NodeBody::Empty);
+                match body {
+                    NodeBody::Unlinked(unlinked_body) => Some(unlinked_body),
+                    _ => unreachable!(),
+                }
+            } else {
+                None
+            };
+            if let Some(body) = unlinked_body {
                 let linked_body = match body {
                     VariableAssignment { ident, path, expr } => {
-                        let expr = *expr;
                         let (variable, location) = match self.closest_variable(node_id, &ident)? {
                             Some(node_id) => node_id,
-                            None => Err(self.ast.error(
+                            None => Err(self.ast.single_error(
                                 "Failed to find variable to assign to",
                                 "variable not found",
                                 vec![node_id],
                             ))?,
                         };
-                        let path = path.clone();
                         self.ast
                             .add_ref((variable, WriteValue), (expr, ReadValue), location);
                         NodeBody::VariableAssignment {
@@ -246,43 +254,30 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
                         }
                     }
                     Value { value, tp } => {
-                        let tp = tp.clone();
-                        let value = value.clone();
-                        let new_value = self.resolve_value(node_id, value)?;
-                        NodeBody::ConstValue {
-                            tp,
-                            value: new_value,
-                        }
+                        let value = self.resolve_value(node_id, value)?;
+                        NodeBody::ConstValue { tp, value }
                     }
                     VariableValue { ident, path } => {
                         let (variable, location) = match self.closest_variable(node_id, &ident)? {
                             Some(target) => target,
-                            None => Err(self.ast.error(
+                            None => Err(self.ast.single_error(
                                 "Failed to find variable",
                                 "variable not found",
                                 vec![node_id],
                             ))?,
                         };
-                        let path = path.clone();
                         self.ast
                             .add_ref((variable, ReadValue), (node_id, WriteValue), location);
                         NodeBody::VariableValue { variable, path }
                     }
-                    Call { ident, .. } => {
+                    Call { ident, args } => {
                         let (func, location) = match self.closest_variable(node_id, &ident)? {
                             Some(node_id) => node_id,
-                            None => Err(self.ast.error(
+                            None => Err(self.ast.single_error(
                                 "Failed to find variable to call",
                                 "function not found",
                                 vec![node_id],
                             ))?,
-                        };
-                        // We move the args out the old NodeBody so that we do not have to copy
-                        // the argument vec while replacing the node body.
-                        let node = self.ast.get_node_mut(node_id);
-                        let args = match &mut node.body {
-                            NodeBody::Unlinked(Call { args, .. }) => mem::replace(args, Vec::new()),
-                            _ => unreachable!(),
                         };
                         self.ast
                             .add_ref((func, GoTo), (node_id, ExecuteValue), location);
@@ -291,7 +286,7 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
                     ImportValue { ident, namespace } => {
                         let mut body = None;
                         for (i, func) in self.runtime.functions.iter().enumerate() {
-                            if &func.name == ident && &func.namespace == namespace {
+                            if func.name == ident && func.namespace == namespace {
                                 body = Some(NodeBody::ConstValue {
                                     tp: None,
                                     value: NodeValue::RuntimeFn(i).into(),
@@ -302,24 +297,17 @@ impl<'a, 'b, T> Linker<'a, 'b, T> {
                         if let Some(body) = body {
                             body
                         } else {
-                            Err(self.ast.error(
+                            Err(self.ast.single_error(
                                 "Failed to find import",
                                 "import value not found",
                                 vec![node_id],
                             ))?
                         }
                     }
-                    Return { .. } => {
+                    Return { expr, automatic } => {
                         let (func, location) = self.closest_fn(node_id)?;
                         self.ast
                             .add_ref((func, GoTo), (node_id, ControlFlow), location);
-                        let node = self.ast.get_node_mut(node_id);
-                        let (expr, automatic) = match &mut node.body {
-                            NodeBody::Unlinked(Return { expr, automatic }) => {
-                                (mem::replace(expr, None), *automatic)
-                            }
-                            _ => unreachable!(),
-                        };
                         NodeBody::Return {
                             func,
                             expr,

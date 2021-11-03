@@ -1,6 +1,6 @@
 use super::Result;
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody};
-use crate::ast::Err;
+use crate::ast::{Err, ErrPart};
 use crate::token::Token;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
@@ -18,6 +18,10 @@ impl NodeID {
 
     pub fn zero() -> Self {
         NodeID(0)
+    }
+
+    pub fn index(&self) -> usize {
+        self.0
     }
 }
 
@@ -498,12 +502,35 @@ impl<T> Ast<T> {
         unsafe { mem::transmute::<Ast<T>, Ast<U>>(self) }
     }
 
-    pub fn unimplemented(&self, id: NodeID) -> Result {
-        Err(Err::new(self, "Unimplemented", "", vec![id]))
+    pub fn nodes_after(&self, node_id: NodeID) -> Vec<NodeID> {
+        match self.nodes().last() {
+            Some(last) => {
+                let start = node_id.index();
+                let end = last.id().index();
+                (start..=end).into_iter().map(|i| NodeID::new(i)).collect()
+            }
+            None => vec![node_id],
+        }
     }
 
-    pub fn error(&self, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Err {
-        Err::new(self, details, row_details, nodes)
+    pub fn unimplemented(&self, id: NodeID) -> Result {
+        Err(Err::from_parts(
+            self,
+            "Unimplemented".into(),
+            vec![ErrPart::new("".into(), vec![id])],
+        ))
+    }
+
+    pub fn error(&self, details: String, parts: Vec<ErrPart>) -> Err {
+        Err::from_parts(self, details, parts)
+    }
+
+    pub fn single_error(&self, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Err {
+        Err::from_parts(
+            self,
+            details.into(),
+            vec![ErrPart::new(row_details.into(), nodes)],
+        )
     }
 
     pub fn new() -> Self {
@@ -653,6 +680,15 @@ impl<T> Ast<T> {
         }
     }
 
+    pub fn get_node_and_children(&self, node_id: NodeID) -> Vec<NodeID> {
+        let mut nodes = vec![node_id];
+        for &child_id in self.get_node(node_id).body.children() {
+            let mut children = self.get_node_and_children(child_id);
+            nodes.append(&mut children);
+        }
+        nodes
+    }
+
     pub fn get_node_type(&self, node_id: NodeID) -> Option<NodeType> {
         self.get_node(node_id).tp.clone().map(|t| t.tp)
     }
@@ -667,7 +703,7 @@ impl<T> Ast<T> {
     pub fn closest_fn(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
-                NodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. }) => Some(node.id),
+                NodeBody::ProcedureDeclaration(_) => Some(node.id),
                 _ => None,
             })
         })
@@ -702,7 +738,7 @@ impl<T> Ast<T> {
                     | Import { ident, .. } => {
                         if ident == target_ident {
                             if let Some(closest_id) = closest_id {
-                                return Err(self.error(
+                                return Err(self.single_error(
                                     "Multiple variable declarations with same name encountered",
                                     "Variable declaration",
                                     vec![closest_id, child_id],

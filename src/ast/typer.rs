@@ -64,7 +64,7 @@ where
     fn not_void(&self, node_id: &NodeID) -> Result<()> {
         let tp = self.get_type(node_id);
         match tp {
-            Some(NodeType::Void) => Err(self.ast.error(
+            Some(NodeType::Void) => Err(self.ast.single_error(
                 "Did not expect void value here",
                 "value is void",
                 vec![*node_id],
@@ -74,9 +74,13 @@ where
     }
 
     fn get_type(&self, node_id: &NodeID) -> Option<NodeType> {
-        match self.ast.get_node(*node_id).maybe_tp() {
-            Some(tp) => Some(tp.clone()),
-            None => self.ast.partial_type(*node_id).map(|(_, tp)| tp.clone()),
+        let node_id = *node_id;
+        if let Some(tp) = self.ast.get_node(node_id).maybe_tp() {
+            Some(tp.clone())
+        } else if let Some((_, tp)) = self.ast.partial_type(node_id) {
+            Some(tp.clone())
+        } else {
+            None
         }
     }
 
@@ -180,7 +184,7 @@ where
                                 value_tp = self.get_type(expr).unwrap();
                             }
                             NodeBody::TypeDeclaration{ ident, ..} => {
-                                Err(self.ast.error(
+                                Err(self.ast.single_error(
                                     "When instantiating a type, use the default instantiation function by adding ()",
                                     &format!("Replace with {}()", ident),
                                     vec![node.id()],
@@ -269,7 +273,7 @@ where
                         NewType {tp: returns, .. }=> {
                             InferredType::maybe(Some((**returns).clone()), Value)
                         }
-                        _ => Err(self.ast.error(
+                        _ => Err(self.ast.single_error(
                             &format!(
                                 "It's currently only possible to call functions, tried to call {:?}",
                                 var
@@ -317,7 +321,7 @@ where
             self.since_last_changed += 1;
             self.queue.push_back(node_id);
             if self.since_last_changed > 2 * self.queue.len() {
-                return Err(self.ast.error(
+                return Err(self.ast.single_error(
                     "Failed to complete type check, unable to infer the type of the following expressions",
                     "unable to infer type"
                     , self.queue.into()));

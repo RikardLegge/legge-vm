@@ -29,7 +29,6 @@ pub struct Interpreter<'a> {
     pending_frame: Option<StackFrame>,
     frame: StackFrame,
     stack: Vec<Value>,
-    id_counter: usize,
     pub runtime: &'a Runtime,
     pub log_level: LogLevel,
     pub stack_max: usize,
@@ -48,7 +47,6 @@ impl<'a> Interpreter<'a> {
                 closure: None,
             },
             get_line: &|_| 0,
-            id_counter: 0,
             pc: Some(0),
             stack: Vec::with_capacity(stack_size),
             runtime,
@@ -100,7 +98,7 @@ impl<'a> Interpreter<'a> {
                 if let Some(cmd) = code.code.get(pc) {
                     self.pc = Some(pc + 1);
                     if let Err(err) = self.execute(&cmd.op, cmd.node_id) {
-                        panic!("{:?}", err);
+                        panic!("{:?}", err.details);
                     }
                 } else {
                     panic!("Invalid PC");
@@ -339,9 +337,7 @@ impl<'a> Interpreter<'a> {
                 self.frame = frame.unwrap();
 
                 assert!(self.frame.closure.is_none());
-                self.id_counter += 1;
                 let closure = Closure {
-                    id: self.id_counter,
                     parent: None,
                     stack: Vec::new(),
                 };
@@ -408,7 +404,6 @@ impl<'a> Interpreter<'a> {
 
 #[derive(Debug, Clone)]
 struct Closure {
-    pub id: usize,
     pub parent: Option<Rc<RefCell<Closure>>>,
     pub stack: Vec<Value>,
 }
@@ -571,8 +566,8 @@ impl Value {
             bytecode::Value::RuntimeFn(val) => Value::RuntimeFn(val),
             bytecode::Value::Struct(bc_vals) => {
                 let val = bc_vals
-                    .iter()
-                    .map(|val| Value::from(val.clone(), closure))
+                    .into_iter()
+                    .map(|val| Value::from(val, closure))
                     .collect();
                 Value::Struct(val)
             }

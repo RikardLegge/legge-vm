@@ -3,15 +3,15 @@ use std::fmt::Formatter;
 use std::iter::Peekable;
 use std::str::Chars;
 
-pub fn from_chars(iter: Chars) -> Vec<Token> {
+pub fn from_chars(iter: Chars, size_prediction: Option<usize>) -> Vec<Token> {
     let mut iter = iter.peekable();
     let mut parser = Tokenizer::new(&mut iter);
-    let mut tokens = Vec::new();
-
-    while parser.peek().is_some() {
-        if let Some(token) = parser.parse_global() {
-            tokens.push(token);
-        }
+    let mut tokens = match size_prediction {
+        Some(size) => Vec::with_capacity(size / 2),
+        None => Vec::new(),
+    };
+    while let Some(ch) = parser.peek_ignore_whitespace() {
+        tokens.push(parser.parse_global(ch));
     }
     tokens
 }
@@ -171,133 +171,137 @@ impl<'a> Tokenizer<'a> {
         Some(self.iter.next()?)
     }
 
-    fn parse_global(&mut self) -> Option<Token> {
-        let ch = self.peek_ignore_whitespace()?;
+    fn parse_global(&mut self, ch: char) -> Token {
         let start = self.index;
         let tp = match ch {
-            '0'..='9' => self.parse_number()?,
-            '+' | '*' => self.parse_arithmetic_op()?,
-            '-' => self.parse_return_type_or_subtract()?,
-            '/' => self.parse_comment_or_div()?,
-            'a'..='z' | 'A'..='Z' => self.parse_name()?,
-            ':' => self.parse_declaration_or_type()?,
-            '=' => self.parse_assignment_or_eq()?,
-            '>' => self.parse_greater()?,
-            '<' => self.parse_lesser()?,
+            '0'..='9' => self.parse_number(),
+            '+' | '*' => self.parse_arithmetic_op(),
+            '-' => self.parse_return_type_or_subtract(),
+            '/' => self.parse_comment_or_div(),
+            'a'..='z' | 'A'..='Z' => self.parse_name(),
+            ':' => self.parse_declaration_or_type(),
+            '=' => self.parse_assignment_or_eq(),
+            '>' => self.parse_greater(),
+            '<' => self.parse_lesser(),
             '(' => {
-                self.next()?;
+                self.next().unwrap();
                 TokenType::LeftBrace
             }
             ')' => {
-                self.next()?;
+                self.next().unwrap();
                 TokenType::RightBrace
             }
             '{' => {
-                self.next()?;
+                self.next().unwrap();
                 TokenType::LeftCurlyBrace
             }
             '}' => {
-                self.next()?;
+                self.next().unwrap();
                 TokenType::RightCurlyBrace
             }
             ',' => {
-                self.next()?;
+                self.next().unwrap();
                 TokenType::ListSeparator
             }
             ';' => {
-                self.next()?;
+                self.next().unwrap();
                 TokenType::EndStatement
             }
             '.' => {
-                self.next()?;
+                self.next().unwrap();
                 TokenType::Dot
             }
-            '"' => self.parse_string()?,
+            '"' => self.parse_string(),
             _ => panic!("Encountered invalid character in global scope '{}'", ch),
         };
         let end = self.index;
+        let line = self.line_number;
         self.last_id += 1;
         let id = TokenID::new(self.last_id);
-        Some(Token {
+        Token {
             id,
-            line: self.line_number,
+            line,
             start,
             end,
             tp,
-        })
+        }
     }
 
-    fn parse_return_type_or_subtract(&mut self) -> Option<TokenType> {
-        assert_eq!(self.next()?, '-');
-        let token = match self.peek()? {
-            '>' => {
-                self.next()?;
+    fn parse_return_type_or_subtract(&mut self) -> TokenType {
+        assert_eq!(self.next().unwrap(), '-');
+        match self.peek() {
+            Some('>') => {
+                self.next().unwrap();
                 TokenType::ReturnTypes
             }
             _ => TokenType::Op(ArithmeticOP::Sub),
-        };
-        Some(token)
+        }
     }
 
-    fn parse_string(&mut self) -> Option<TokenType> {
+    fn parse_string(&mut self) -> TokenType {
+        assert_eq!(self.next().unwrap(), '"');
         let mut string = String::new();
-        assert_eq!(self.next()?, '"');
-        while self.peek()? != '"' {
-            string.push(self.next()?);
-        }
-        assert_eq!(self.next()?, '"');
-        Some(TokenType::String(string))
-    }
-
-    fn parse_assignment_or_eq(&mut self) -> Option<TokenType> {
-        assert_eq!(self.next()?, '=');
-        match self.peek()? {
-            '=' => {
-                self.next()?;
-                Some(TokenType::Op(ArithmeticOP::Eq))
+        loop {
+            match self.peek() {
+                None => break,
+                Some(_) => match self.next().unwrap() {
+                    '"' => break,
+                    char => string.push(char),
+                },
             }
-            _ => Some(TokenType::Assignment),
         }
+        TokenType::String(string)
     }
 
-    fn parse_greater(&mut self) -> Option<TokenType> {
-        assert_eq!(self.next()?, '>');
-        match self.peek()? {
-            '=' => {
-                self.next()?;
-                Some(TokenType::Op(ArithmeticOP::GEq))
+    fn parse_assignment_or_eq(&mut self) -> TokenType {
+        assert_eq!(self.next().unwrap(), '=');
+        match self.peek() {
+            Some('=') => {
+                self.next().unwrap();
+                TokenType::Op(ArithmeticOP::Eq)
             }
-            _ => unimplemented!(),
+            _ => TokenType::Assignment,
         }
     }
 
-    fn parse_lesser(&mut self) -> Option<TokenType> {
-        assert_eq!(self.next()?, '<');
-        match self.peek()? {
-            '=' => {
-                self.next()?;
-                Some(TokenType::Op(ArithmeticOP::LEq))
+    fn parse_greater(&mut self) -> TokenType {
+        assert_eq!(self.next().unwrap(), '>');
+        match self.peek() {
+            Some('=') => {
+                self.next().unwrap();
+                TokenType::Op(ArithmeticOP::GEq)
             }
             _ => unimplemented!(),
         }
     }
 
-    fn parse_declaration_or_type(&mut self) -> Option<TokenType> {
-        assert_eq!(self.next()?, ':');
-        match self.peek()? {
-            ':' => {
-                self.next()?;
-                Some(TokenType::ConstDeclaration)
+    fn parse_lesser(&mut self) -> TokenType {
+        assert_eq!(self.next().unwrap(), '<');
+        match self.peek() {
+            Some('=') => {
+                self.next().unwrap();
+                TokenType::Op(ArithmeticOP::LEq)
             }
-            '=' => {
-                self.next()?;
-                Some(TokenType::VariableDeclaration)
-            }
-            _ => Some(TokenType::TypeDeclaration),
+            _ => unimplemented!(),
         }
     }
 
-    fn parse_name(&mut self) -> Option<TokenType> {
+    fn parse_declaration_or_type(&mut self) -> TokenType {
+        assert_eq!(self.next().unwrap(), ':');
+        match self.peek() {
+            Some(':') => {
+                self.next().unwrap();
+                TokenType::ConstDeclaration
+            }
+            Some('=') => {
+                self.next().unwrap();
+                TokenType::VariableDeclaration
+            }
+            _ => TokenType::TypeDeclaration,
+        }
+    }
+
+    fn parse_name(&mut self) -> TokenType {
         let mut name = String::new();
         while let Some(ch) = self.peek() {
             match ch {
@@ -308,56 +312,60 @@ impl<'a> Tokenizer<'a> {
 
         match name.as_ref() {
             "fn" | "return" | "if" | "loop" | "break" | "continue" | "import" | "true" | "type"
-            | "false" => Some(TokenType::KeyName(name)),
-            _ => Some(TokenType::Name(name)),
+            | "false" => TokenType::KeyName(name),
+            _ => TokenType::Name(name),
         }
     }
 
-    fn parse_comment_or_div(&mut self) -> Option<TokenType> {
-        assert_eq!(self.next()?, '/');
-        match self.peek()? {
-            '/' => {
-                self.next()?;
+    fn parse_comment_or_div(&mut self) -> TokenType {
+        assert_eq!(self.next().unwrap(), '/');
+        match self.peek() {
+            Some('/') => {
+                self.next().unwrap();
                 let mut comment = String::new();
-                while self.peek()? != '\n' {
+                while let Some(char) = self.peek() {
+                    if char == '\n' {
+                        break;
+                    }
                     comment.push(self.next().unwrap())
                 }
-                Some(TokenType::Comment(comment))
+                TokenType::Comment(comment)
             }
-            _ => Some(TokenType::Op(ArithmeticOP::Div)),
+            _ => TokenType::Op(ArithmeticOP::Div),
         }
     }
 
-    fn parse_arithmetic_op(&mut self) -> Option<TokenType> {
-        let op = match self.next()? {
+    fn parse_arithmetic_op(&mut self) -> TokenType {
+        let op = match self.next().unwrap() {
             '+' => ArithmeticOP::Add,
             '-' => ArithmeticOP::Sub,
             '*' => ArithmeticOP::Mul,
             '/' => ArithmeticOP::Div,
             ch => panic!("Encountered invalid character in number scope '{}'", ch),
         };
-        Some(TokenType::Op(op))
+        TokenType::Op(op)
     }
 
-    fn parse_number(&mut self) -> Option<TokenType> {
+    fn parse_number(&mut self) -> TokenType {
         let mut int = 0 as isize;
         let mut count = 0;
         while let Some(ch) = self.peek() {
             match ch {
                 '0'..='9' => {
                     int *= 10;
-                    int += self.next().unwrap().to_digit(10)? as isize
+                    let digit = self.next().unwrap().to_digit(10).unwrap() as isize;
+                    int += digit;
                 }
                 _ => break,
             };
             count += 1;
         }
-        match self.peek()? {
-            '.' => {
-                self.next();
-                let number = match self.peek()? {
-                    '0'..='9' => match self.parse_number() {
-                        Some(TokenType::Int(decimal, decimal_count)) => {
+        match self.peek() {
+            Some('.') => {
+                self.next().unwrap();
+                match self.peek() {
+                    Some('0'..='9') => match self.parse_number() {
+                        TokenType::Int(decimal, decimal_count) => {
                             let decimal = decimal as f64;
                             let pow = (decimal + 1.0).log10().ceil() as u32;
                             let divisor = (10 as usize).pow(pow);
@@ -367,10 +375,9 @@ impl<'a> Tokenizer<'a> {
                         _ => unimplemented!(),
                     },
                     _ => TokenType::Float(int as f64, count, 0),
-                };
-                Some(number)
+                }
             }
-            _ => Some(TokenType::Int(int, count)),
+            _ => TokenType::Int(int, count),
         }
     }
 }

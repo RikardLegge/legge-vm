@@ -7,6 +7,7 @@ mod treeshaker;
 mod typer;
 
 use colored::*;
+use std::cmp::{max, min};
 
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -24,122 +25,125 @@ pub type ValidAst = Ast<StateTypesChecked>;
 
 pub type Result<N = NodeID> = result::Result<N, Err>;
 
+#[derive(Debug, Clone)]
+pub struct ErrPart {
+    pub details: String,
+    pub nodes: Vec<NodeID>,
+}
+
+impl ErrPart {
+    pub fn new(details: String, nodes: Vec<NodeID>) -> Self {
+        ErrPart { details, nodes }
+    }
+}
+
 #[derive(Debug)]
 pub struct Err {
     pub details: String,
-    pub node_info: Vec<String>,
+    pub node_info: String,
+    pub parts: Vec<ErrPart>,
 }
 
 impl Err {
-    pub fn new<T>(ast: &Ast<T>, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Self {
-        let node_info = Self::print_line(nodes, ast, row_details);
-        // panic!("\nAst Error: {}\n{}\n", details, node_info.join("\n\n"));
+    pub fn from_parts<T>(ast: &Ast<T>, details: String, parts: Vec<ErrPart>) -> Self {
+        let node_info = Self::print_line(ast, &parts);
         Err {
-            details: details.into(),
-            node_info: vec![node_info],
+            details,
+            node_info,
+            parts,
         }
     }
 
-    pub fn print_line<T>(nodes: Vec<NodeID>, ast: &Ast<T>, msg: &str) -> String {
-        if nodes.is_empty() {
+    pub fn print_line<T>(ast: &Ast<T>, parts: &[ErrPart]) -> String {
+        if parts.is_empty() {
             return "".into();
         }
-        let all_tokens = {
-            let mut tokens = Vec::new();
-            let mut ids = HashSet::new();
-            for node_id in nodes.iter() {
-                let mut curr = ast.get_node(*node_id);
-                if let Some(token) = curr.tokens.first() {
-                    let line = token.line;
-                    loop {
-                        // Inefficient but it works since the parent node might not yet have a reference to it's children.
-                        for token in curr.tokens.iter().chain(curr.child_tokens(ast).iter()) {
-                            if ids.contains(&token.id) {
-                                continue;
+        let mut token_parts = parts
+            .iter()
+            .filter_map(|part| {
+                let mut tokens = Vec::new();
+                let mut ids = HashSet::new();
+                for &node_id in &part.nodes {
+                    let mut curr = ast.get_node(node_id);
+                    if let Some(token) = curr.tokens.first() {
+                        let line = token.line;
+                        loop {
+                            let own = curr.id() == node_id;
+                            // Inefficient but it works since the parent node might not yet have a reference to it's children.
+                            for token in curr.tokens.iter().chain(curr.child_tokens(ast).iter()) {
+                                if ids.contains(&token.id) {
+                                    continue;
+                                }
+                                let line_diff = token.line as isize - line as isize;
+                                if line_diff.abs() > 3 || token.line > line {
+                                    continue;
+                                }
+                                ids.insert(token.id);
+                                tokens.push((own, token.clone()));
                             }
-                            if (token.line as isize - line as isize).abs() > 1 {
-                                continue;
+                            let first_token = curr.tokens.first();
+                            let last_token = curr.tokens.last();
+                            if let (Some(first), Some(last)) = (first_token, last_token) {
+                                if first.line != line && last.line != line {
+                                    break;
+                                }
                             }
-                            ids.insert(token.id);
-                            tokens.push(token.clone());
-                        }
-                        if curr.parent_id.is_none() {
-                            break;
-                        }
-                        let first_token = curr.tokens.first();
-                        let last_token = curr.tokens.last();
-                        if !first_token.is_none() {
-                            if first_token.unwrap().line != line && last_token.unwrap().line != line
-                            {
+                            if let Some(parent_id) = curr.parent_id {
+                                curr = ast.get_node(parent_id);
+                            } else {
                                 break;
                             }
                         }
-                        curr = ast.get_node(curr.parent_id.unwrap());
+                    } else {
+                        continue;
                     }
-                } else {
-                    continue;
                 }
-            }
-            tokens.sort_by(|t1, t2| t1.start.cmp(&t2.start));
-            tokens.sort_by(|t1, t2| t1.line.cmp(&t2.line));
-            tokens
-        };
+                if tokens.is_empty() {
+                    None
+                } else {
+                    tokens.sort_by(|(_, t1), (_, t2)| t1.start.cmp(&t2.start));
+                    tokens.sort_by(|(_, t1), (_, t2)| t1.line.cmp(&t2.line));
+                    Some((tokens, part))
+                }
+            })
+            .collect::<Vec<(Vec<(bool, Token)>, &ErrPart)>>();
+        token_parts.sort_by(|(l, _), (r, _)| l[0].1.line.cmp(&r[0].1.line));
 
         let mut builder = vec![];
-        if all_tokens.len() > 0 {
-            let mut line = all_tokens[0].line;
+        for (tokens, part) in token_parts {
+            let mut line = tokens[0].1.line;
             let mut end = 0;
             builder.push(format!("{:>4} | ", line));
 
-            let mut underline = Vec::new();
-            let mut do_underline = false;
-            for t in all_tokens.iter() {
+            let mut underline_start = usize::MAX;
+            let mut underline_end = usize::MIN;
+            for (own, t) in tokens {
                 let mut line_offset = t.line as isize - line as isize;
                 while line_offset > 0 {
-                    if do_underline {
-                        builder.push(format!(
-                            "\n       {} {}",
-                            underline.join(""),
-                            msg.to_string()
-                        ));
-                    }
-
                     end = 0;
                     line_offset -= 1;
-                    underline.clear();
-                    do_underline = false;
-
                     builder.push(format!("\n{:>4} | ", t.line as isize - line_offset));
                 }
                 let char_offset = t.start - end;
                 if char_offset > 0 {
                     builder.push(" ".repeat(char_offset));
-                    underline.push(" ".repeat(char_offset));
                 }
                 let mut token_str = format!("{}", t.tp);
-                let contains_token = nodes
-                    .iter()
-                    .filter(|n| ast.get_node(**n).tokens.contains(t))
-                    .next()
-                    .is_some();
-                if contains_token {
-                    underline.push("^".repeat(token_str.len()));
-                    do_underline = true;
+                if own {
+                    underline_start = min(underline_start, t.start);
+                    underline_end = max(underline_end, t.end);
                     token_str = token_str.red().to_string()
-                } else {
-                    underline.push(" ".repeat(token_str.len()));
                 }
                 builder.push(token_str);
                 line = t.line;
                 end = t.end;
             }
-            if do_underline {
-                builder.push(format!(
-                    "\n       {} {}",
-                    underline.join(""),
-                    msg.to_string()
-                ));
-            }
+            let prefix = " ".repeat(underline_start);
+            let underline = "^".repeat(underline_end - underline_start);
+            builder.push(format!(
+                "\n       {}{} {}\n\n",
+                prefix, underline, part.details
+            ));
         }
         builder.join("")
     }
