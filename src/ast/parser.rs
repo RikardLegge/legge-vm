@@ -1158,7 +1158,7 @@ where
     }
 
     fn do_return(&mut self, node: PendingNode) -> Result {
-        let expr = match self.peek_token().is(&EndStatement)? {
+        let expr = match self.peek_token().not(&EndStatement)? {
             true => Some(self.do_expression(node.id)?),
             false => None,
         };
