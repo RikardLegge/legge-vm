@@ -407,21 +407,23 @@ where
 
                 for func_id in trace_ids {
                     match &self.ast.get_node(func_id).body {
-                        NodeBody::Call(_) => error_parts
-                            .push(ErrPart::new("Created through...".into(), vec![func_id])),
+                        NodeBody::Call(_) => error_parts.push(ErrPart::new(
+                            "From return value of function".into(),
+                            vec![func_id],
+                        )),
 
                         NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                             args,
                             returns,
                             ..
                         }) => error_parts.push(match arg_i {
-                            Some(i) => ErrPart::new("Expected argument".into(), vec![args[i]]),
+                            Some(i) => ErrPart::new("Expected argument type".into(), vec![args[i]]),
                             None => match returns {
                                 None => {
                                     ErrPart::new("Expected void return value".into(), vec![func_id])
                                 }
                                 Some(return_id) => {
-                                    ErrPart::new("Expected return".into(), vec![*return_id])
+                                    ErrPart::new("Expected return type".into(), vec![*return_id])
                                 }
                             },
                         }),
@@ -430,7 +432,9 @@ where
                             tp: Complete(Fn { returns, .. }),
                             parts,
                         } => error_parts.push(match arg_i {
-                            Some(i) => ErrPart::new("Expected argument".into(), vec![parts[i]]),
+                            Some(i) => {
+                                ErrPart::new("Expected argument type".into(), vec![parts[i]])
+                            }
                             None => match &**returns {
                                 Void => {
                                     ErrPart::new("Expected void return value".into(), vec![func_id])

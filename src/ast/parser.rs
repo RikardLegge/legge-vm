@@ -137,10 +137,17 @@ impl<'a> PendingToken<'a> {
         }
     }
 
-    fn any(self) -> Result<&'a TokenType> {
+    fn any(self, recommendation: Option<&TokenType>) -> Result<&'a TokenType> {
         match self.got {
             Some(tp) => Ok(tp),
-            None => Err(missing_token_error(self.ast, self.node, &[])),
+            None => {
+                let expected = if let Some(tp) = recommendation {
+                    vec![tp]
+                } else {
+                    vec![]
+                };
+                Err(missing_token_error(self.ast, self.node, &expected))
+            }
         }
     }
 
@@ -175,7 +182,7 @@ where
         let node = self.any_node(None);
         let mut static_statements = Vec::new();
         let mut dynamic_statements = Vec::new();
-        while self.peek_token().any().is_ok() {
+        while self.peek_token().any(None).is_ok() {
             let statement = self.do_statement(node.id)?;
             match self.ast.get_node(statement).body {
                 NodeBody::TypeDeclaration { .. }
@@ -209,7 +216,7 @@ where
     }
 
     fn eat_token(&mut self, node: &PendingNode) {
-        self.next_token(node).any().unwrap();
+        self.next_token(node).any(None).unwrap();
     }
 
     fn peek_token(&mut self) -> PendingToken {
@@ -303,7 +310,7 @@ where
         self.pending_statement = Some(node.id);
         self.pending_expression = None;
 
-        let node = match self.next_token(&node).any()? {
+        let node = match self.next_token(&node).any(None)? {
             Int(int, _) => {
                 let int = *int;
                 Ok(self.add_node(
@@ -385,7 +392,7 @@ where
         let node = self.node(parent_id);
         self.pending_expression = Some(node.id);
 
-        let node = match self.next_token(&node).any()? {
+        let node = match self.next_token(&node).any(Some(&Int(1, 0)))? {
             Int(int, _) => {
                 let int = *int;
                 self.add_node(
@@ -473,7 +480,7 @@ where
             }
         };
 
-        match self.peek_token().any() {
+        match self.peek_token().any(None) {
             Ok(TokenType::Op(op)) => {
                 let lhs = node;
                 let op = *op;
@@ -580,7 +587,7 @@ where
             if let Some(lhs) = pending_node {
                 // Operation between two nodes
                 let rhs = self.do_expression(node.id)?;
-                let next_token = self.peek_token().any()?;
+                let next_token = self.peek_token().any(None)?;
 
                 let lhs_precedence = Self::op_precedence(op);
                 let rhs_precedence = Self::token_precedence(next_token);
@@ -638,7 +645,7 @@ where
 
                     let mut complete = true;
                     let mut parts = Vec::new();
-                    let args = match self.peek_token().any()? {
+                    let args = match self.peek_token().any(Some(&RightBrace))? {
                         RightBrace => {
                             self.eat_token(&node);
                             vec![]
@@ -652,7 +659,7 @@ where
                                 }
                                 parts.push(arg_id);
                                 args.push(tp_ref.tp().clone());
-                                match self.next_token(&node).any()? {
+                                match self.next_token(&node).any(Some(&RightBrace))? {
                                     ListSeparator => (),
                                     RightBrace => break args,
                                     token => {
@@ -752,7 +759,10 @@ where
         let mut fields = Vec::new();
         let mut complete = true;
         loop {
-            match self.next_token(&node).any()? {
+            match self
+                .next_token(&node)
+                .any(Some(&TokenType::RightCurlyBrace))?
+            {
                 TokenType::Name(key) => {
                     let key = key.clone();
                     self.next_token(&node).expect(&TokenType::TypeDeclaration)?;
@@ -963,7 +973,7 @@ where
     fn do_statement_symbol(&mut self, node: PendingNode, ident: String) -> Result {
         use crate::token::TokenType::*;
 
-        match self.peek_token().any()? {
+        match self.peek_token().any(Some(&ConstDeclaration))? {
             LeftBrace => self.do_function_call(node, ident),
             TypeDeclaration => {
                 self.eat_token(&node);
@@ -972,7 +982,7 @@ where
                     return self.do_variable_declaration(node, ident, None);
                 }
                 let (tp, _) = self.do_type(&node)?;
-                match self.peek_token().any()? {
+                match self.peek_token().any(Some(&EndStatement))? {
                     ConstDeclaration | VariableDeclaration => {
                         self.do_variable_or_assignment(node, ident, Some(tp))
                     }
@@ -1031,7 +1041,7 @@ where
         use crate::token::KeyName::Type;
         use crate::token::TokenType::*;
 
-        match self.peek_token().any()? {
+        match self.peek_token().any(Some(&ConstDeclaration))? {
             ReturnTypes => {
                 self.eat_token(&node);
                 self.next_token(&node).expect_exact(&KeyName(Type))?;
@@ -1113,7 +1123,7 @@ where
     ) -> Result {
         use crate::token::TokenType::*;
 
-        match self.peek_token().any()? {
+        match self.peek_token().any(Some(&EndStatement))? {
             LeftBrace => self.do_function_call(node, ident),
             Op(_) | RightBrace | EndStatement | ListSeparator => {
                 Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::VariableValue { ident, path }))
