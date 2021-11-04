@@ -1,8 +1,10 @@
-# Legge Virtual Machine, attempt nr. ~8
-Compiler, type-checker and stack-based virtual machine.
-A bit more fun than cleaning the house this exam period.
+# Legge Virtual Machine
+Compiler, type-checker and stack-based virtual machine which was born during an exam period as a way 
+to procrastinate, but has later grown into an project used to implement fun ideas in a compiler.
 
-Should probably not be used in production but that might not stop some very brave people.
+You should probably not be used in production but that might not stop some very brave people.
+No guarantees are given and there are many known bugs which might cause subtle errors or crasher
+for arbitrary code.
 
 ## Goals
 The goals of this project is to learn more about the difficulties when implementing compilers, type checkers and tree-shaking with 
@@ -10,7 +12,7 @@ strong focus on good error messages and with the goal of reasonable performance.
 100K lines of code per second on an 2.6 GHz Intel Core i7 9750H for compilation, type checking and tree shaking. 
 
 ## Experiments
-Since this is a project for leaning and testing out ideas, here are a few esoteric functions of the compiler.
+Since this is a project for leaning and testing out ideas, here are a few exotic functions of the compiler.
 
 ### Side effect based tree shaker
 Currently all external function are marked as having a side effect and only code which will result in a side effect
