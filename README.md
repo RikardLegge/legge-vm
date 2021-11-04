@@ -24,9 +24,10 @@ A less trivial case is for example one using closures. In the following example 
 if written since it is read in `exit`, resulting in `inc` being marked as having a side effect since it writes to `value`.
 Many known bugs still exist, a trivial way to break the tree shaker is using conditional expressions. 
 ```rust
+import std.exit;
 value := 1;
 hang :: fn() {loop {}}
-inc :: fn() {value = value + 1}
+inc :: fn() {value = value + 1;}
 end :: fn() {exit(value);}
 
 inc();
