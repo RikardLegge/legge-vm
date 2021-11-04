@@ -12,7 +12,7 @@ strong focus on good error messages and with the goal of reasonable performance.
 100K lines of code per second on an 2.6 GHz Intel Core i7 9750H for compilation, type checking and tree shaking. 
 
 ## Experiments
-Since this is a project for leaning and testing out ideas, here are a few exotic functions of the compiler.
+Since this is a project for learning and testing out ideas, here are a few exotic functions of the compiler.
 
 ### Side effect based tree shaker
 Currently all external function are marked as having a side effect and only code which will result in a side effect
