@@ -2,7 +2,7 @@
 Compiler, type-checker and stack-based virtual machine which was born during an exam period as a way 
 to procrastinate, but has later grown into an project used to implement fun ideas in a compiler.
 
-You should probably not be used in production but that might not stop some very brave people.
+The compiler and VM should probably not be used in production but that might not stop some very brave people.
 No guarantees are given and there are many known bugs which might cause subtle errors or crasher
 for arbitrary code.
 
