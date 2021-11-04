@@ -1,21 +1,27 @@
 use super::{Ast, NodeID, Result};
-use crate::ast::ast::{Linked, NodeReference, PartialNodeValue, SideEffect};
+use crate::ast::ast::{AstCollection, Linked, NodeReference, PartialNodeValue, SideEffect};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody, NodeBodyIterator};
 use crate::ast::{Err, Node, NodeType, NodeValue};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::{mem, result};
+use std::collections::{HashSet, VecDeque};
+use std::result;
 
 pub fn treeshake<T: Linked>(
-    mut asts: HashMap<Vec<String>, Ast<T>>,
-) -> result::Result<HashMap<Vec<String>, Ast<T>>, (HashMap<Vec<String>, Ast<T>>, Err)> {
-    for mut ast in asts.values_mut() {
+    mut asts: AstCollection<T>,
+) -> result::Result<AstCollection<T>, (AstCollection<T>, Err)> {
+    let mut err = None;
+    for mut ast in asts.iter_mut() {
         let root_id = ast.root();
         let shaker = TreeShaker::new(&mut ast);
-        if let Err(err) = shaker.shake(root_id) {
-            return Err((asts, err));
+        if let Err(e) = shaker.shake(root_id) {
+            err = Some(e);
+            break;
         }
     }
-    Ok(unsafe { mem::transmute(asts) })
+
+    match err {
+        Some(err) => Err((asts, err)),
+        None => Ok(asts.guarantee_state()),
+    }
 }
 
 struct TreeShaker<'a, T>

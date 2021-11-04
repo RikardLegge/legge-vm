@@ -1,33 +1,41 @@
 use super::NodeReferenceType::*;
 use super::{Ast, NodeID, Result};
-use crate::ast::ast::{NodeReferenceLocation, PartialNodeValue, PartialType, StateLinked};
+use crate::ast::ast::{
+    AstCollection, NodeReferenceLocation, PartialNodeValue, PartialType, StateLinked,
+};
 use crate::ast::nodebody::UnlinkedNodeBody::*;
 use crate::ast::nodebody::{NBCall, NodeBody};
-use crate::ast::{Err, NodeType, NodeValue};
+use crate::ast::{Err, NodeType, NodeValue, Path};
 use crate::runtime::Runtime;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 use std::{mem, result};
 
 pub fn link<T>(
-    mut asts: HashMap<Vec<String>, Ast<T>>,
+    mut asts: AstCollection<T>,
     runtime: &Runtime,
-) -> result::Result<HashMap<Vec<String>, Ast<StateLinked>>, (HashMap<Vec<String>, Ast<T>>, Err)>
+) -> result::Result<AstCollection<StateLinked>, (AstCollection<T>, Err)>
 where
     T: Debug,
 {
+    let mut err = None;
     let exports = asts
-        .iter()
+        .named()
         .map(|(path, ast)| (path.clone(), ast.exports()))
         .collect::<HashMap<_, _>>();
-    for mut ast in asts.values_mut() {
+    for mut ast in asts.iter_mut() {
         let root_id = ast.root();
         let linker = Linker::new(&mut ast, runtime, &exports);
-        if let Err(err) = linker.link(root_id) {
-            return Err((asts, err));
+        if let Err(e) = linker.link(root_id) {
+            err = Some(e);
+            break;
         }
     }
-    Ok(unsafe { mem::transmute(asts) })
+
+    match err {
+        Some(err) => Err((asts, err)),
+        None => Ok(asts.guarantee_state()),
+    }
 }
 
 struct Linker<'a, 'b, T>
@@ -36,6 +44,7 @@ where
 {
     ast: &'a mut Ast<T>,
     runtime: &'b Runtime,
+    exports: &'b HashMap<Path, HashMap<String, NodeID>>,
 }
 
 impl<'a, 'b, T> Linker<'a, 'b, T>
@@ -45,9 +54,13 @@ where
     fn new(
         ast: &'a mut Ast<T>,
         runtime: &'b Runtime,
-        exports: &'b HashMap<Vec<String>, HashMap<String, NodeID>>,
+        exports: &'b HashMap<Path, HashMap<String, NodeID>>,
     ) -> Self {
-        Self { ast, runtime }
+        Self {
+            ast,
+            runtime,
+            exports,
+        }
     }
 
     fn closest_variable(

@@ -9,7 +9,7 @@ pub mod runtime;
 pub mod testing;
 pub mod token;
 
-use crate::ast::ValidAst;
+use crate::ast::{NodeID, Path, ValidAstCollection};
 use crate::token::Token;
 pub use debug::Timing;
 use std::collections::HashMap;
@@ -25,20 +25,20 @@ pub enum LogLevel {
     LogEval = 3,
 }
 
-fn tokenize_recurse(code: String) -> HashMap<Vec<String>, Vec<Token>> {
+fn tokenize_recurse(code: String) -> HashMap<Path, Vec<Token>> {
     let mut queue = Vec::new();
     let mut all_tokens = HashMap::new();
 
-    let path = Vec::new();
     let (tokens, mut imports) = token::from_chars(code.chars(), Some(code.len() / 5));
     queue.append(&mut imports);
-    all_tokens.insert(path, tokens);
+    all_tokens.insert(Path::empty(), tokens);
 
     while let Some(path) = queue.pop() {
         if path.len() >= 2 {
             if path[0] == "local" {
+                let path = Path::new(path);
                 if !all_tokens.contains_key(&path) {
-                    let filename = [&path[1], "bc"].join(".");
+                    let filename = [&path.inner()[1], "bc"].join(".");
                     if let Ok(mut file) = File::open(filename) {
                         let mut code = String::new();
                         file.read_to_string(&mut code)
@@ -61,7 +61,7 @@ pub fn compile(
     runtime: &runtime::Runtime,
     log_level: LogLevel,
     code: String,
-) -> Option<(bytecode::Bytecode, ValidAst)> {
+) -> Option<(bytecode::Bytecode, ValidAstCollection)> {
     let start = debug::start_timer();
     let tokens = tokenize_recurse(code);
     timing.token = debug::stop_timer(start);
@@ -79,18 +79,14 @@ pub fn compile(
     }
     timing.ast = ast_timing;
 
-    let ast = asts
-        .into_iter()
-        .find(|(k, _)| k == &Vec::<String>::new())
-        .unwrap()
-        .1;
+    let ast = asts.iter().next().unwrap();
     let start = debug::start_timer();
-    let bytecode = bytecode::from_ast(&ast);
+    let bytecode = bytecode::from_ast(ast);
     timing.bytecode = debug::stop_timer(start);
     if log_level >= LogLevel::LogEval {
         println!("{:?}", bytecode);
     }
-    return Some((bytecode, ast));
+    return Some((bytecode, asts));
 }
 
 pub fn run_code<F>(code: String, log_level: LogLevel, interrupt: F) -> Option<()>
@@ -103,13 +99,19 @@ where
     if compiled.is_none() {
         return None;
     }
-    let (bytecode, ast) = compiled.unwrap();
+    let (bytecode, asts) = compiled.unwrap();
 
     let mut interpreter = interpreter::Interpreter::new(&runtime);
     interpreter.log_level = log_level;
     interpreter.interrupt = &interrupt;
 
-    let get_line = |node_id| match ast.get_node(node_id).tokens.first() {
+    let get_line = |node_id: NodeID| match asts
+        .get(node_id.ast())
+        .unwrap()
+        .get_node(node_id)
+        .tokens
+        .first()
+    {
         Some(token) => token.line,
         None => 0,
     };

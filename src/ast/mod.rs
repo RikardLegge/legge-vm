@@ -17,13 +17,31 @@ use crate::debug;
 use crate::runtime::Runtime;
 use crate::token::Token;
 
+use crate::ast::ast::{AstCollection, AstID};
 use ast::StateTypesChecked;
 pub use ast::{Any, Linked, TypesChecked, TypesInferred};
 pub use ast::{Ast, Node, NodeID, NodeReferenceType, NodeType, NodeTypeSource, NodeValue};
 
-pub type ValidAst = Ast<StateTypesChecked>;
+pub type ValidAstCollection = AstCollection<StateTypesChecked>;
 
 pub type Result<N = NodeID> = result::Result<N, Err>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Path(Vec<String>);
+
+impl Path {
+    pub fn new(path: Vec<String>) -> Self {
+        Self(path)
+    }
+
+    pub fn empty() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn inner(&self) -> &[String] {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ErrPart {
@@ -160,19 +178,17 @@ impl Err {
 }
 
 pub fn from_tokens(
-    tokens: HashMap<Vec<String>, Vec<Token>>,
+    tokens: HashMap<Path, Vec<Token>>,
     runtime: &Runtime,
-) -> Result<(
-    HashMap<Vec<String>, Ast<StateTypesChecked>>,
-    debug::AstTiming,
-)> {
+) -> Result<(AstCollection<StateTypesChecked>, debug::AstTiming)> {
     let mut timing = debug::AstTiming::default();
     let start = debug::start_timer();
     let asts = {
-        let mut asts = HashMap::new();
-        for (path, tokens) in tokens.into_iter() {
-            let ast = parser::ast_from_tokens(tokens.into_iter())?;
-            asts.insert(path, ast);
+        let mut asts = AstCollection::new();
+        for (i, (path, tokens)) in tokens.into_iter().enumerate() {
+            let ast_id = AstID::new(i);
+            let ast = parser::ast_from_tokens(ast_id, tokens.into_iter())?;
+            asts.add(path, ast);
         }
         asts
     };

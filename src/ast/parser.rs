@@ -1,6 +1,6 @@
 use super::{Ast, NodeID, NodeValue, Result};
 use crate::ast;
-use crate::ast::ast::{PartialNodeValue, PartialType, ProcedureDeclarationNode};
+use crate::ast::ast::{AstID, PartialNodeValue, PartialType, ProcedureDeclarationNode};
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody, UnlinkedNodeBody};
 use crate::ast::NodeType;
 use crate::token::KeyName;
@@ -9,11 +9,11 @@ use crate::token::{ArithmeticOP, Token, TokenType};
 use colored::Colorize;
 use std::iter::Peekable;
 
-pub fn ast_from_tokens<I>(iter: I) -> Result<Ast>
+pub fn ast_from_tokens<I>(ast_id: AstID, iter: I) -> Result<Ast>
 where
     I: Iterator<Item = Token>,
 {
-    Parser::new(iter).parse()
+    Parser::new(ast_id, iter).parse()
 }
 
 #[derive(Debug)]
@@ -167,8 +167,8 @@ impl<I> Parser<I>
 where
     I: Iterator<Item = Token>,
 {
-    fn new(iter: I) -> Self {
-        let ast = Ast::new();
+    fn new(ast_id: AstID, iter: I) -> Self {
+        let ast = Ast::new(ast_id);
 
         Self {
             ast,
@@ -223,7 +223,7 @@ where
         let tp = self.iter.peek().map(|t| &t.tp);
         let node = self
             .pending_expression
-            .unwrap_or_else(|| self.pending_statement.unwrap_or_else(|| NodeID::zero()));
+            .unwrap_or_else(|| self.pending_statement.unwrap_or_else(|| self.ast.root()));
         PendingToken::new(&self.ast, node, tp)
     }
 

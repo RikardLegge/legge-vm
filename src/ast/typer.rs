@@ -1,28 +1,31 @@
-use crate::ast::ast::{InferredType, Linked, StateTypesInferred};
+use crate::ast::ast::{AstCollection, InferredType, Linked, StateTypesInferred};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{Ast, Err, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
-use std::collections::{HashMap, VecDeque};
-use std::{mem, result};
+use std::collections::VecDeque;
+use std::result;
 
 pub fn infer_types<T>(
-    mut asts: HashMap<Vec<String>, Ast<T>>,
+    mut asts: AstCollection<T>,
     runtime: &Runtime,
-) -> result::Result<
-    HashMap<Vec<String>, Ast<StateTypesInferred>>,
-    (HashMap<Vec<String>, Ast<T>>, Err),
->
+) -> result::Result<AstCollection<StateTypesInferred>, (AstCollection<T>, Err)>
 where
     T: Linked,
 {
-    for mut ast in asts.values_mut() {
+    let mut err = None;
+    for mut ast in asts.iter_mut() {
         let typer = Typer::new(&mut ast, runtime);
-        if let Err(err) = typer.infer_all_types() {
-            return Err((asts, err));
+        if let Err(e) = typer.infer_all_types() {
+            err = Some(e);
+            break;
         }
     }
-    Ok(unsafe { mem::transmute(asts) })
+
+    match err {
+        Some(err) => Err((asts, err)),
+        None => Ok(asts.guarantee_state()),
+    }
 }
 
 pub struct Typer<'a, T>

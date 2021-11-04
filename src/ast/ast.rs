@@ -1,26 +1,86 @@
 use super::Result;
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody};
-use crate::ast::{Err, ErrPart};
+use crate::ast::{Err, ErrPart, Path};
 use crate::token::Token;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::{fmt, mem};
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct NodeID(usize);
+pub struct AstID(usize);
+
+impl AstID {
+    pub fn new(id: usize) -> Self {
+        Self(id)
+    }
+}
+
+#[derive(Debug)]
+pub struct AstCollection<T = state::StateAny>
+where
+    T: Debug,
+{
+    asts: Vec<Ast<T>>,
+    names: HashMap<Path, AstID>,
+}
+
+impl<T> AstCollection<T>
+where
+    T: Debug,
+{
+    pub fn new() -> Self {
+        Self {
+            asts: vec![],
+            names: Default::default(),
+        }
+    }
+
+    pub fn get(&self, id: AstID) -> Option<&Ast<T>> {
+        self.asts.get(id.0)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Ast<T>> + '_ {
+        self.asts.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Ast<T>> + '_ {
+        self.asts.iter_mut()
+    }
+
+    pub fn named(&self) -> impl Iterator<Item = (&Path, &Ast<T>)> + '_ {
+        self.names.iter().map(|(name, i)| (name, &self.asts[i.0]))
+    }
+
+    pub fn guarantee_state<D: Debug>(self) -> AstCollection<D> {
+        unsafe { mem::transmute(self) }
+    }
+
+    pub fn add(&mut self, path: Path, ast: Ast<T>) {
+        let id = AstID::new(self.asts.len());
+        self.asts.push(ast);
+        self.names.insert(path, id);
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct NodeID(usize, AstID);
 
 impl NodeID {
-    pub fn new(id: usize) -> Self {
-        NodeID(id)
+    pub fn new(id: usize, ast_id: AstID) -> Self {
+        NodeID(id, ast_id)
     }
 
-    pub fn zero() -> Self {
-        NodeID(0)
+    pub fn zero(ast_id: AstID) -> Self {
+        NodeID(0, ast_id)
     }
 
-    pub fn index(&self) -> usize {
+    pub fn ast(&self) -> AstID {
+        self.1
+    }
+
+    fn index(&self) -> usize {
         self.0
     }
 }
@@ -539,6 +599,7 @@ pub struct Ast<T = state::StateAny>
 where
     T: Debug,
 {
+    ast_id: AstID,
     nodes: Vec<Node<T>>,
     root: NodeID,
     _tp: PhantomData<fn() -> T>,
@@ -561,9 +622,13 @@ where
     pub fn nodes_after(&self, node_id: NodeID) -> Vec<NodeID> {
         match self.nodes().last() {
             Some(last) => {
+                let ast_id = node_id.ast();
                 let start = node_id.index();
                 let end = last.id().index();
-                (start..=end).into_iter().map(|i| NodeID::new(i)).collect()
+                (start..=end)
+                    .into_iter()
+                    .map(|i| NodeID::new(i, ast_id))
+                    .collect()
             }
             None => vec![node_id],
         }
@@ -607,9 +672,10 @@ where
         )
     }
 
-    pub fn new() -> Self {
+    pub fn new(ast_id: AstID) -> Self {
         Self {
-            root: NodeID::zero(),
+            ast_id,
+            root: NodeID::zero(ast_id),
             nodes: Vec::new(),
             _tp: PhantomData::default(),
         }
@@ -679,7 +745,7 @@ where
 
     fn add_some_node(&mut self, parent_id: Option<NodeID>) -> NodeID {
         let node = Node {
-            id: NodeID::new(self.nodes.len()),
+            id: NodeID::new(self.nodes.len(), self.ast_id),
             parent_id,
             referenced_by: Default::default(),
             references: Default::default(),
