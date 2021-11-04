@@ -5,7 +5,7 @@ use crate::ast::ast::{
 };
 use crate::ast::nodebody::UnlinkedNodeBody::*;
 use crate::ast::nodebody::{NBCall, NodeBody};
-use crate::ast::{Err, NodeType, NodeValue, Path};
+use crate::ast::{Err, NodeType, NodeValue, PathKey};
 use crate::runtime::Runtime;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
@@ -44,7 +44,7 @@ where
 {
     ast: &'a mut Ast<T>,
     runtime: &'b Runtime,
-    exports: &'b HashMap<Path, HashMap<String, NodeID>>,
+    exports: &'b HashMap<PathKey, HashMap<String, NodeID>>,
 }
 
 impl<'a, 'b, T> Linker<'a, 'b, T>
@@ -54,7 +54,7 @@ where
     fn new(
         ast: &'a mut Ast<T>,
         runtime: &'b Runtime,
-        exports: &'b HashMap<Path, HashMap<String, NodeID>>,
+        exports: &'b HashMap<PathKey, HashMap<String, NodeID>>,
     ) -> Self {
         Self {
             ast,
@@ -330,7 +330,15 @@ where
                             }
                         }
                         if let None = body {
-                            if &module == "local" {}
+                            if &module == "local" {
+                                if let Some((ident, path)) = path.split_last() {
+                                    if let Some(export) = self.exports.get(path) {
+                                        if let Some(node_id) = export.get(ident.as_str()) {
+                                            body = Some(NodeBody::Reference { node_id: *node_id });
+                                        }
+                                    }
+                                }
+                            }
                         }
                         if let Some(body) = body {
                             body

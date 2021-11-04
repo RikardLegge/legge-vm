@@ -1,4 +1,4 @@
-import int;
-import float;
+import std.int;
+import std.float;
 
 a :: 1;

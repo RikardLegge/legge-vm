@@ -34,12 +34,13 @@ fn tokenize_recurse(code: String) -> HashMap<Path, Vec<Token>> {
     all_tokens.insert(Path::empty(), tokens);
 
     while let Some(path) = queue.pop() {
-        if path.len() >= 2 {
-            if path[0] == "local" {
-                let path = Path::new(path);
+        if let [module, path @ .., _] = &path[..] {
+            if module == "local" && path.len() >= 1 {
+                let filename = &path[0];
+                let path = Path::new(path.into());
                 if !all_tokens.contains_key(&path) {
-                    let filename = [&path.inner()[1], "bc"].join(".");
-                    if let Ok(mut file) = File::open(filename) {
+                    let filepath = [filename, "bc"].join(".");
+                    if let Ok(mut file) = File::open(filepath) {
                         let mut code = String::new();
                         file.read_to_string(&mut code)
                             .expect("something went wrong reading file");

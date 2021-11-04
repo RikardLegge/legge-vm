@@ -26,6 +26,8 @@ pub type ValidAstCollection = AstCollection<StateTypesChecked>;
 
 pub type Result<N = NodeID> = result::Result<N, Err>;
 
+pub type PathKey = Vec<String>;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Path(Vec<String>);
 
@@ -40,6 +42,10 @@ impl Path {
 
     pub fn inner(&self) -> &[String] {
         &self.0
+    }
+
+    pub fn key(self) -> PathKey {
+        self.0
     }
 }
 

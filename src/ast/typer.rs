@@ -15,7 +15,7 @@ where
 {
     let mut err = None;
     for mut ast in asts.iter_mut() {
-        let typer = Typer::new(&mut ast, runtime);
+        let typer = Typer::new(&mut ast, &asts, runtime);
         if let Err(e) = typer.infer_all_types() {
             err = Some(e);
             break;
@@ -34,6 +34,7 @@ where
 {
     queue: VecDeque<NodeID>,
     ast: &'a mut Ast<T>,
+    asts: &'a AstCollection<T>,
     runtime: &'a Runtime,
     since_last_changed: usize,
 }
@@ -42,12 +43,13 @@ impl<'a, T> Typer<'a, T>
 where
     T: Linked,
 {
-    pub fn new(ast: &'a mut Ast<T>, runtime: &'a Runtime) -> Self {
+    pub fn new(ast: &'a mut Ast<T>, asts: &'a AstCollection<T>, runtime: &'a Runtime) -> Self {
         let queue = VecDeque::from(vec![ast.root()]);
         let since_last_changed = 0;
         Self {
             queue,
             ast,
+            asts,
             runtime,
             since_last_changed,
         }
@@ -122,6 +124,11 @@ where
         use super::NodeTypeSource::*;
         use crate::ast::nodebody::NodeBody::*;
         let tp = match &node.body {
+            Reference { node_id } => {
+                let ast = self.asts.get(node_id.ast()).unwrap();
+                let node = ast.get_node(*node_id);
+                node.maybe_inferred_tp().cloned()
+            }
             TypeReference { tp } => self
                 .ast
                 .partial_type(*tp)

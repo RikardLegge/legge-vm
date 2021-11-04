@@ -6,15 +6,15 @@ use crate::ast::{Err, ErrPart, NodeID, NodeType};
 use std::result;
 
 pub fn check_types<T: TypesInferred>(
-    mut asts: AstCollection<T>,
+    asts: AstCollection<T>,
 ) -> result::Result<AstCollection<StateTypesChecked>, (AstCollection<T>, Err)>
 where
     T: TypesInferred,
 {
     let mut err = None;
-    for mut ast in asts.iter_mut() {
+    for ast in asts.iter() {
         let root_id = ast.root();
-        let checker = Checker::new(&mut ast);
+        let checker = Checker::new(&ast, &asts);
         if let Err(e) = checker.check_all_types(root_id) {
             err = Some(e);
             break;
@@ -31,21 +31,26 @@ pub struct Checker<'a, T>
 where
     T: TypesInferred,
 {
-    ast: &'a mut Ast<T>,
+    ast: &'a Ast<T>,
+    asts: &'a AstCollection<T>,
 }
 
 impl<'a, T> Checker<'a, T>
 where
     T: TypesInferred,
 {
-    pub fn new(ast: &'a mut Ast<T>) -> Self {
-        Self { ast }
+    pub fn new(ast: &'a Ast<T>, asts: &'a AstCollection<T>) -> Self {
+        Self { ast, asts }
     }
 
     pub fn check_type(&self, node: &Node<T>) -> Result<()> {
         use crate::ast::nodebody::NodeBody::*;
         use NodeType::*;
         match &node.body {
+            Reference { node_id } => {
+                let ast = self.asts.get(node_id.ast()).unwrap();
+                self.check_type(ast.get_node(*node_id))
+            }
             Empty
             | Break { .. }
             | Comment { .. }

@@ -1,6 +1,6 @@
 use super::Result;
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody};
-use crate::ast::{Err, ErrPart, Path};
+use crate::ast::{Err, ErrPart, Path, PathKey};
 use crate::token::Token;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
@@ -23,7 +23,7 @@ where
     T: Debug,
 {
     asts: Vec<Ast<T>>,
-    names: HashMap<Path, AstID>,
+    names: HashMap<PathKey, AstID>,
 }
 
 impl<T> AstCollection<T>
@@ -49,7 +49,7 @@ where
         self.asts.iter_mut()
     }
 
-    pub fn named(&self) -> impl Iterator<Item = (&Path, &Ast<T>)> + '_ {
+    pub fn named(&self) -> impl Iterator<Item = (&PathKey, &Ast<T>)> + '_ {
         self.names.iter().map(|(name, i)| (name, &self.asts[i.0]))
     }
 
@@ -60,7 +60,7 @@ where
     pub fn add(&mut self, path: Path, ast: Ast<T>) {
         let id = AstID::new(self.asts.len());
         self.asts.push(ast);
-        self.names.insert(path, id);
+        self.names.insert(path.key(), id);
     }
 }
 
@@ -170,6 +170,10 @@ where
 {
     pub fn id(&self) -> NodeID {
         self.id
+    }
+
+    pub fn maybe_inferred_tp(&self) -> Option<&InferredType> {
+        self.tp.as_ref()
     }
 
     pub fn maybe_tp(&self) -> Option<&NodeType> {

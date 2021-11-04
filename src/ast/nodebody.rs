@@ -72,6 +72,9 @@ pub enum NodeBody<T = StateAny> {
         tp: Option<NodeID>,
         expr: NodeID,
     },
+    Reference {
+        node_id: NodeID,
+    },
     TypeDeclaration {
         ident: String,
         tp: NodeID,
@@ -161,6 +164,7 @@ impl<'a, T> Iterator for NodeBodyIterator<'a, T> {
     fn next(&mut self) -> Option<&'a NodeID> {
         use NodeBody::*;
         let option = match self.body {
+            Reference { .. } => None,
             Op { lhs, rhs, .. } => match self.index {
                 0 => Some(lhs),
                 1 => Some(rhs),
