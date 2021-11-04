@@ -9,7 +9,7 @@ mod typer;
 use colored::*;
 use std::cmp::{max, min};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::result;
 
@@ -159,20 +159,27 @@ impl Err {
     }
 }
 
-pub fn from_tokens<I>(
-    iter: I,
+pub fn from_tokens(
+    tokens: HashMap<Vec<String>, Vec<Token>>,
     runtime: &Runtime,
-) -> Result<(Ast<StateTypesChecked>, debug::AstTiming)>
-where
-    I: Iterator<Item = Token>,
-{
+) -> Result<(
+    HashMap<Vec<String>, Ast<StateTypesChecked>>,
+    debug::AstTiming,
+)> {
     let mut timing = debug::AstTiming::default();
     let start = debug::start_timer();
-    let ast = parser::ast_from_tokens(iter)?;
+    let asts = {
+        let mut asts = HashMap::new();
+        for (path, tokens) in tokens.into_iter() {
+            let ast = parser::ast_from_tokens(tokens.into_iter())?;
+            asts.insert(path, ast);
+        }
+        asts
+    };
     timing.from_tokens = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let ast = match linker::link(ast, runtime) {
+    let asts = match linker::link(asts, runtime) {
         Ok(ast) => ast,
         Err((ast, err)) => {
             println!("{:?}", ast);
@@ -182,7 +189,7 @@ where
     timing.linker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let ast = match typer::infer_types(ast, runtime) {
+    let asts = match typer::infer_types(asts, runtime) {
         Ok(ast) => ast,
         Err((ast, err)) => {
             println!("{:?}", ast);
@@ -192,7 +199,7 @@ where
     timing.type_inference = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let ast = match checker::check_types(ast) {
+    let asts = match checker::check_types(asts) {
         Ok(ast) => ast,
         Err((ast, err)) => {
             println!("{:?}", ast);
@@ -202,7 +209,7 @@ where
     timing.type_checker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let ast = match treeshaker::treeshake(ast) {
+    let asts = match treeshaker::treeshake(asts) {
         Ok(ast) => ast,
         Err((ast, err)) => {
             println!("{:?}", ast);
@@ -211,5 +218,5 @@ where
     };
     timing.treeshaker = debug::stop_timer(start);
 
-    Ok((ast, timing))
+    Ok((asts, timing))
 }

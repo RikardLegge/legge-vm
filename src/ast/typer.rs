@@ -3,21 +3,26 @@ use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{Ast, Err, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
-use std::collections::VecDeque;
-use std::result;
+use std::collections::{HashMap, VecDeque};
+use std::{mem, result};
 
 pub fn infer_types<T>(
-    mut ast: Ast<T>,
+    mut asts: HashMap<Vec<String>, Ast<T>>,
     runtime: &Runtime,
-) -> result::Result<Ast<StateTypesInferred>, (Ast<T>, Err)>
+) -> result::Result<
+    HashMap<Vec<String>, Ast<StateTypesInferred>>,
+    (HashMap<Vec<String>, Ast<T>>, Err),
+>
 where
     T: Linked,
 {
-    let typer = Typer::new(&mut ast, runtime);
-    match typer.infer_all_types() {
-        Ok(()) => Ok(ast.guarantee_integrity::<StateTypesInferred>()),
-        Err(err) => Err((ast, err)),
+    for mut ast in asts.values_mut() {
+        let typer = Typer::new(&mut ast, runtime);
+        if let Err(err) = typer.infer_all_types() {
+            return Err((asts, err));
+        }
     }
+    Ok(unsafe { mem::transmute(asts) })
 }
 
 pub struct Typer<'a, T>

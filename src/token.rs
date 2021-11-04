@@ -3,17 +3,16 @@ use std::fmt::Formatter;
 use std::iter::Peekable;
 use std::str::Chars;
 
-pub fn from_chars(iter: Chars, size_prediction: Option<usize>) -> Vec<Token> {
+pub fn from_chars(iter: Chars, size_prediction: Option<usize>) -> (Vec<Token>, Vec<Vec<String>>) {
     let mut iter = iter.peekable();
-    let mut parser = Tokenizer::new(&mut iter);
-    let mut tokens = match size_prediction {
-        Some(size) => Vec::with_capacity(size / 2),
-        None => Vec::new(),
-    };
+    let mut parser = Tokenizer::new(&mut iter, size_prediction);
+
     while let Some(ch) = parser.peek_ignore_whitespace() {
-        tokens.push(parser.parse_global(ch));
+        parser.start_token();
+        let tp = parser.parse_global(ch);
+        parser.end_token(tp);
     }
-    tokens
+    (parser.tokens, parser.imports)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -187,14 +186,25 @@ fn format_number_leading_zeros(
 pub struct Tokenizer<'a> {
     iter: &'a mut Peekable<Chars<'a>>,
     last_id: usize,
+    tokens: Vec<Token>,
+    imports: Vec<Vec<String>>,
     index: usize,
+    start: usize,
     line_number: usize,
 }
 
 impl<'a> Tokenizer<'a> {
-    fn new<'b>(iter: &'b mut Peekable<Chars<'b>>) -> Tokenizer<'b> {
+    fn new<'b>(iter: &'b mut Peekable<Chars<'b>>, size_prediction: Option<usize>) -> Tokenizer<'b> {
+        let tokens = match size_prediction {
+            Some(size) => Vec::with_capacity(size),
+            None => Vec::new(),
+        };
+        let imports = Vec::new();
         Tokenizer {
             iter,
+            tokens,
+            imports,
+            start: 0,
             line_number: 1,
             last_id: 0,
             index: 0,
@@ -230,9 +240,36 @@ impl<'a> Tokenizer<'a> {
         Some(self.iter.next()?)
     }
 
-    fn parse_global(&mut self, ch: char) -> Token {
-        let start = self.index;
-        let tp = match ch {
+    fn start_token(&mut self) {
+        self.start = self.index;
+    }
+    fn end_token(&mut self, tp: TokenType) {
+        let start = self.start;
+        let end = self.index;
+        let line = self.line_number;
+        self.last_id += 1;
+        let id = TokenID::new(self.last_id);
+        let token = Token {
+            id,
+            line,
+            start,
+            end,
+            tp,
+        };
+        self.tokens.push(token);
+    }
+
+    fn undo_token(&mut self) -> TokenType {
+        let token = self.tokens.pop().unwrap();
+
+        self.start = token.start;
+        self.last_id -= 1;
+
+        token.tp
+    }
+
+    fn parse_global(&mut self, ch: char) -> TokenType {
+        match ch {
             '0'..='9' => self.parse_number(),
             '+' | '*' => self.parse_arithmetic_op(),
             '-' => self.parse_return_type_or_subtract(),
@@ -272,17 +309,6 @@ impl<'a> Tokenizer<'a> {
             }
             '"' => self.parse_string(),
             _ => panic!("Encountered invalid character in global scope '{}'", ch),
-        };
-        let end = self.index;
-        let line = self.line_number;
-        self.last_id += 1;
-        let id = TokenID::new(self.last_id);
-        Token {
-            id,
-            line,
-            start,
-            end,
-            tp,
         }
     }
 
@@ -360,6 +386,29 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
+    fn parse_import(&mut self) -> TokenType {
+        self.end_token(TokenType::KeyName(KeyName::Import));
+        let mut path = Vec::new();
+        let tp = loop {
+            if let Some(ch) = self.peek_ignore_whitespace() {
+                self.start_token();
+                let tp = self.parse_global(ch);
+                match &tp {
+                    TokenType::Name(part) => path.push(part.to_string()),
+                    TokenType::Dot => {}
+                    _ => break tp,
+                }
+                self.end_token(tp);
+            } else {
+                break self.undo_token();
+            }
+        };
+        if path.len() > 0 {
+            self.imports.push(path);
+        }
+        tp
+    }
+
     fn parse_name(&mut self) -> TokenType {
         let mut name = String::new();
         while let Some(ch) = self.peek() {
@@ -376,7 +425,7 @@ impl<'a> Tokenizer<'a> {
             "loop" => TokenType::KeyName(KeyName::Loop),
             "break" => TokenType::KeyName(KeyName::Break),
             "continue" => TokenType::KeyName(KeyName::Continue),
-            "import" => TokenType::KeyName(KeyName::Import),
+            "import" => self.parse_import(),
             "true" => TokenType::KeyName(KeyName::True),
             "type" => TokenType::KeyName(KeyName::Type),
             "false" => TokenType::KeyName(KeyName::False),

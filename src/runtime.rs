@@ -11,7 +11,7 @@ pub struct Runtime {
 }
 
 pub struct FunctionDefinition {
-    pub namespace: String,
+    pub module: String,
     pub name: String,
     pub arguments: Vec<NodeType>,
     pub returns: NodeType,
@@ -61,7 +61,7 @@ fn ff(
         returns: Box::new(returns.clone()),
     };
     FunctionDefinition {
-        namespace: namespace.into(),
+        module: namespace.into(),
         name: name.into(),
         arguments,
         returns,

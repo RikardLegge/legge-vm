@@ -1,20 +1,4 @@
-    A -> type {
-       value: int
-    }
-    B -> type {
-       a: A
-    }
-    factory :: fn (new_a: Fn(int) -> A) -> Fn(int) -> B {
-        return fn(value: int) -> B {
-            b := B();
-            b.a = new_a(value);
-            return b;
-        };
-    }
-    new :: factory(fn(v: int) -> A {
-        a := A();
-        a.value = v;
-        return a;
-    });
-    import std.exit;
-    exit(new(1));
+import local.prelude.a;
+import std.print;
+
+print(a);

@@ -1,2 +1,4 @@
 import int;
 import float;
+
+a :: 1;

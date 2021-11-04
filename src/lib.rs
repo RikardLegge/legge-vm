@@ -10,7 +10,11 @@ pub mod testing;
 pub mod token;
 
 use crate::ast::ValidAst;
+use crate::token::Token;
 pub use debug::Timing;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Read;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq, Copy, Clone)]
@@ -21,6 +25,37 @@ pub enum LogLevel {
     LogEval = 3,
 }
 
+fn tokenize_recurse(code: String) -> HashMap<Vec<String>, Vec<Token>> {
+    let mut queue = Vec::new();
+    let mut all_tokens = HashMap::new();
+
+    let path = Vec::new();
+    let (tokens, mut imports) = token::from_chars(code.chars(), Some(code.len() / 5));
+    queue.append(&mut imports);
+    all_tokens.insert(path, tokens);
+
+    while let Some(path) = queue.pop() {
+        if path.len() >= 2 {
+            if path[0] == "local" {
+                if !all_tokens.contains_key(&path) {
+                    let filename = [&path[1], "bc"].join(".");
+                    if let Ok(mut file) = File::open(filename) {
+                        let mut code = String::new();
+                        file.read_to_string(&mut code)
+                            .expect("something went wrong reading file");
+
+                        let (tokens, mut imports) =
+                            token::from_chars(code.chars(), Some(code.len() / 5));
+                        queue.append(&mut imports);
+                        all_tokens.insert(path, tokens);
+                    }
+                }
+            }
+        }
+    }
+    all_tokens
+}
+
 pub fn compile(
     timing: &mut Timing,
     runtime: &runtime::Runtime,
@@ -28,22 +63,27 @@ pub fn compile(
     code: String,
 ) -> Option<(bytecode::Bytecode, ValidAst)> {
     let start = debug::start_timer();
-    let tokens = token::from_chars(code.chars(), Some(code.len()));
+    let tokens = tokenize_recurse(code);
     timing.token = debug::stop_timer(start);
 
-    let result = ast::from_tokens(tokens.into_iter(), &runtime);
-    let (ast, ast_timing) = match result {
-        Ok((ast, ast_timing)) => (ast, ast_timing),
+    let result = ast::from_tokens(tokens, &runtime);
+    let (asts, ast_timing) = match result {
+        Ok((asts, ast_timing)) => (asts, ast_timing),
         Err(e) => {
             println!("Ast Error: {}\n{}\n", e.details, e.node_info);
             return None;
         }
     };
     if log_level >= LogLevel::LogEval {
-        println!("{:?}", ast);
+        println!("{:?}", asts);
     }
     timing.ast = ast_timing;
 
+    let ast = asts
+        .into_iter()
+        .find(|(k, _)| k == &Vec::<String>::new())
+        .unwrap()
+        .1;
     let start = debug::start_timer();
     let bytecode = bytecode::from_ast(&ast);
     timing.bytecode = debug::stop_timer(start);

@@ -5,23 +5,29 @@ use crate::ast::nodebody::UnlinkedNodeBody::*;
 use crate::ast::nodebody::{NBCall, NodeBody};
 use crate::ast::{Err, NodeType, NodeValue};
 use crate::runtime::Runtime;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 use std::{mem, result};
 
 pub fn link<T>(
-    mut ast: Ast<T>,
+    mut asts: HashMap<Vec<String>, Ast<T>>,
     runtime: &Runtime,
-) -> result::Result<Ast<StateLinked>, (Ast<T>, Err)>
+) -> result::Result<HashMap<Vec<String>, Ast<StateLinked>>, (HashMap<Vec<String>, Ast<T>>, Err)>
 where
     T: Debug,
 {
-    let root_id = ast.root();
-    let linker = Linker::new(&mut ast, runtime);
-    match linker.link(root_id) {
-        Ok(()) => Ok(ast.guarantee_integrity::<StateLinked>()),
-        Err(err) => Err((ast, err)),
+    let exports = asts
+        .iter()
+        .map(|(path, ast)| (path.clone(), ast.exports()))
+        .collect::<HashMap<_, _>>();
+    for mut ast in asts.values_mut() {
+        let root_id = ast.root();
+        let linker = Linker::new(&mut ast, runtime, &exports);
+        if let Err(err) = linker.link(root_id) {
+            return Err((asts, err));
+        }
     }
+    Ok(unsafe { mem::transmute(asts) })
 }
 
 struct Linker<'a, 'b, T>
@@ -36,7 +42,11 @@ impl<'a, 'b, T> Linker<'a, 'b, T>
 where
     T: Debug,
 {
-    fn new(ast: &'a mut Ast<T>, runtime: &'b Runtime) -> Self {
+    fn new(
+        ast: &'a mut Ast<T>,
+        runtime: &'b Runtime,
+        exports: &'b HashMap<Vec<String>, HashMap<String, NodeID>>,
+    ) -> Self {
         Self { ast, runtime }
     }
 
@@ -293,16 +303,21 @@ where
                             .add_ref((func, GoTo), (node_id, ExecuteValue), location);
                         NodeBody::Call(NBCall { func, args })
                     }
-                    ImportValue { ident, namespace } => {
+                    ImportValue { path, module } => {
                         let mut body = None;
-                        for (i, func) in self.runtime.functions.iter().enumerate() {
-                            if func.name == ident && func.namespace == namespace {
-                                body = Some(NodeBody::ConstValue {
-                                    tp: None,
-                                    value: NodeValue::RuntimeFn(i).into(),
-                                });
-                                break;
+                        if let [ident] = &path[..] {
+                            for (i, func) in self.runtime.functions.iter().enumerate() {
+                                if func.name == *ident && func.module == module {
+                                    body = Some(NodeBody::ConstValue {
+                                        tp: None,
+                                        value: NodeValue::RuntimeFn(i).into(),
+                                    });
+                                    break;
+                                }
                             }
+                        }
+                        if let None = body {
+                            if &module == "local" {}
                         }
                         if let Some(body) = body {
                             body

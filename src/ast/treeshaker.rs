@@ -2,16 +2,20 @@ use super::{Ast, NodeID, Result};
 use crate::ast::ast::{Linked, NodeReference, PartialNodeValue, SideEffect};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody, NodeBodyIterator};
 use crate::ast::{Err, Node, NodeType, NodeValue};
-use std::collections::{HashSet, VecDeque};
-use std::result;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::{mem, result};
 
-pub fn treeshake<T: Linked>(mut ast: Ast<T>) -> result::Result<Ast<T>, (Ast<T>, Err)> {
-    let root_id = ast.root();
-    let shaker = TreeShaker::new(&mut ast);
-    match shaker.shake(root_id) {
-        Ok(()) => Ok(ast),
-        Err(err) => Err((ast, err)),
+pub fn treeshake<T: Linked>(
+    mut asts: HashMap<Vec<String>, Ast<T>>,
+) -> result::Result<HashMap<Vec<String>, Ast<T>>, (HashMap<Vec<String>, Ast<T>>, Err)> {
+    for mut ast in asts.values_mut() {
+        let root_id = ast.root();
+        let shaker = TreeShaker::new(&mut ast);
+        if let Err(err) = shaker.shake(root_id) {
+            return Err((asts, err));
+        }
     }
+    Ok(unsafe { mem::transmute(asts) })
 }
 
 struct TreeShaker<'a, T>

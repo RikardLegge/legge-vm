@@ -3,20 +3,24 @@ use crate::ast::ast::PartialType::Complete;
 use crate::ast::ast::{StateTypesChecked, TypesInferred};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{Err, ErrPart, NodeID, NodeType};
-use std::result;
+use std::collections::HashMap;
+use std::{mem, result};
 
 pub fn check_types<T: TypesInferred>(
-    mut ast: Ast<T>,
-) -> result::Result<Ast<StateTypesChecked>, (Ast<T>, Err)>
+    mut asts: HashMap<Vec<String>, Ast<T>>,
+) -> result::Result<HashMap<Vec<String>, Ast<StateTypesChecked>>, (HashMap<Vec<String>, Ast<T>>, Err)>
 where
     T: TypesInferred,
 {
-    let root_id = ast.root();
-    let checker = Checker::new(&mut ast);
-    match checker.check_all_types(root_id) {
-        Ok(()) => Ok(ast.guarantee_integrity::<StateTypesChecked>()),
-        Err(err) => Err((ast, err)),
+    for mut ast in asts.values_mut() {
+        let root_id = ast.root();
+        let checker = Checker::new(&mut ast);
+        if let Err(err) = checker.check_all_types(root_id) {
+            return Err((asts, err));
+        }
     }
+
+    Ok(unsafe { mem::transmute(asts) })
 }
 
 pub struct Checker<'a, T>

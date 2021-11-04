@@ -2,11 +2,11 @@ use super::Result;
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody};
 use crate::ast::{Err, ErrPart};
 use crate::token::Token;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::{fmt, mem};
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct NodeID(usize);
@@ -558,13 +558,6 @@ impl<T> Ast<T>
 where
     T: Debug,
 {
-    pub fn guarantee_integrity<U>(self) -> Ast<U>
-    where
-        U: Debug,
-    {
-        unsafe { mem::transmute::<Ast<T>, Ast<U>>(self) }
-    }
-
     pub fn nodes_after(&self, node_id: NodeID) -> Vec<NodeID> {
         match self.nodes().last() {
             Some(last) => {
@@ -574,6 +567,24 @@ where
             }
             None => vec![node_id],
         }
+    }
+
+    pub fn exports(&self) -> HashMap<String, NodeID> {
+        let root_id = self.root();
+        let root = self.get_node(root_id);
+        root.body
+            .children()
+            .filter_map(|id| {
+                let child = self.get_node(*id);
+                match &child.body {
+                    NodeBody::VariableDeclaration { ident, .. }
+                    | NodeBody::ConstDeclaration { ident, .. }
+                    | NodeBody::StaticDeclaration { ident, .. }
+                    | NodeBody::TypeDeclaration { ident, .. } => Some((ident.to_string(), *id)),
+                    _ => None,
+                }
+            })
+            .collect()
     }
 
     pub fn unimplemented(&self, id: NodeID) -> Result {
@@ -793,24 +804,23 @@ where
             let mut closest_id = None;
             for &child_id in node.body.children() {
                 let child = self.get_node(child_id);
-                match &child.body {
+                let ident = match &child.body {
                     VariableDeclaration { ident, .. }
                     | ConstDeclaration { ident, .. }
                     | StaticDeclaration { ident, .. }
-                    | TypeDeclaration { ident, .. }
-                    | Import { ident, .. } => {
-                        if ident == target_ident {
-                            if let Some(closest_id) = closest_id {
-                                return Err(self.single_error(
-                                    "Multiple variable declarations with same name encountered",
-                                    "Variable declaration",
-                                    vec![closest_id, child_id],
-                                ));
-                            }
-                            closest_id = Some(child_id);
-                        }
+                    | TypeDeclaration { ident, .. } => ident,
+                    Import { module, path, .. } => path.last().unwrap_or(module),
+                    _ => continue,
+                };
+                if ident == target_ident {
+                    if let Some(closest_id) = closest_id {
+                        return Err(self.single_error(
+                            "Multiple variable declarations with same name encountered",
+                            "Variable declaration",
+                            vec![closest_id, child_id],
+                        ));
                     }
-                    _ => (),
+                    closest_id = Some(child_id);
                 }
             }
             Ok(closest_id)

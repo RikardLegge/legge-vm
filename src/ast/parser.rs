@@ -510,35 +510,21 @@ where
 
     fn do_import(&mut self, node: PendingNode) -> Result {
         // TODO: this can be constant
-        let default_namespace = TokenType::Name("std".to_string());
-        let default_variable = TokenType::Name("function".to_string());
+        let default_module = TokenType::Name("std".to_string());
 
-        match self.next_token(&node).expect(&default_namespace)? {
-            TokenType::Name(namespace) => {
-                let namespace = namespace.clone();
-                self.next_token(&node).expect(&TokenType::Dot)?;
-                match self.next_token(&node).expect(&default_variable)? {
-                    TokenType::Name(ident) => {
-                        let ident = ident.clone();
-                        let body_node = self.node(node.id);
-                        let expr = self.add_node(
-                            body_node,
-                            NodeBody::Unlinked(UnlinkedNodeBody::ImportValue {
-                                namespace: namespace.clone(),
-                                ident: ident.clone(),
-                            }),
-                        );
-                        Ok(self.add_node(
-                            node,
-                            NodeBody::Import {
-                                ident,
-                                namespace,
-                                expr,
-                            },
-                        ))
-                    }
-                    _ => unimplemented!(),
-                }
+        match self.next_token(&node).expect(&default_module)? {
+            TokenType::Name(module) => {
+                let module = module.clone();
+                let path = self.find_traverse_path(&node)?;
+                let body_node = self.node(node.id);
+                let expr = self.add_node(
+                    body_node,
+                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue {
+                        module: module.clone(),
+                        path: path.clone(),
+                    }),
+                );
+                Ok(self.add_node(node, NodeBody::Import { path, module, expr }))
             }
             _ => unimplemented!(),
         }
@@ -1014,12 +1000,14 @@ where
 
     fn find_traverse_path(&mut self, node: &PendingNode) -> Result<Vec<String>> {
         use crate::token::TokenType::{Dot, Name};
-        let mut path = Vec::new();
+        // TODO: this can be constant
+        let default_name = Name("part".to_string());
 
+        let mut path = Vec::new();
         loop {
             if self.peek_token().is(&Dot)? {
                 self.eat_token(node);
-                match self.next_token(node).expect(&Name(String::new()))? {
+                match self.next_token(node).expect(&default_name)? {
                     Name(field) => {
                         path.push(field.clone());
                     }
