@@ -72,7 +72,7 @@ pub fn compile(
     let (asts, ast_timing) = match result {
         Ok((asts, ast_timing)) => (asts, ast_timing),
         Err((asts, e)) => {
-            println!("Ast Error: {}\n{}\n", e.details, e.print_line(&asts));
+            println!("\nAst Error: {}\n{}\n", e.details, e.print_line(&asts));
             return None;
         }
     };

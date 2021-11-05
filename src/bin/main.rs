@@ -20,7 +20,7 @@ fn main() {
     let res = run_code(
         filename.trim_end_matches(".bc").to_string(),
         contents,
-        LogLevel::LogEval,
+        LogLevel::LogTiming,
         &|v| println!("{:?}", v),
     );
     if res.is_some() {

@@ -428,6 +428,10 @@ where
                             vec![func_id],
                         )),
 
+                        NodeBody::Reference { .. } => {
+                            error_parts.push(ErrPart::new("Imported here".into(), vec![func_id]))
+                        }
+
                         NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                             args,
                             returns,

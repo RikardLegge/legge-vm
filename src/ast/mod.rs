@@ -140,22 +140,24 @@ impl Err {
                 }
             })
             .collect::<Vec<(Vec<(bool, Token)>, &ErrPart)>>();
-        token_parts.sort_by(|(_, l), (_, r)| l.nodes[0].ast().cmp(&r.nodes[0].ast()));
         token_parts.sort_by(|(l, _), (r, _)| l[0].1.line.cmp(&r[0].1.line));
+        token_parts.sort_by(|(_, l), (_, r)| l.nodes[0].ast().cmp(&r.nodes[0].ast()));
 
         let mut builder = vec![];
 
         let mut curr_ast = token_parts[0].1.nodes[0].ast();
+        let file_name = &asts.get(curr_ast).borrow().file_name;
         builder.push(format!("\n"));
-        builder.push(format!("  {}\n", asts.get(curr_ast).borrow().file_name));
-        builder.push(format!("----------------------\n"));
+        builder.push(format!(" {} \n", file_name));
+        builder.push(format!("{}\n", "‾".repeat(file_name.len() + 2)));
 
         for (tokens, part) in token_parts {
             let i_ast = part.nodes[0].ast();
             if curr_ast != i_ast {
                 curr_ast = i_ast;
-                builder.push(format!("  {}\n", asts.get(i_ast).borrow().file_name));
-                builder.push(format!("----------------------\n"));
+                let file_name = &asts.get(curr_ast).borrow().file_name;
+                builder.push(format!(" {} \n", file_name));
+                builder.push(format!("{}\n", "‾".repeat(file_name.len() + 2)));
             }
             let mut line = tokens[0].1.line;
             let mut end = 0;

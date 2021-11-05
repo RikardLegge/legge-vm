@@ -3,3 +3,7 @@ import std.float;
 
 b :: 10;
 a :: 1 + b;
+
+import local.main.factory;
+
+factory(10);
