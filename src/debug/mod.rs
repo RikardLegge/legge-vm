@@ -2,7 +2,6 @@ use std::time::{Duration, SystemTime};
 
 #[derive(Default, Debug)]
 pub struct Timing {
-    pub token: Duration,
     pub ast: AstTiming,
     pub bytecode: Duration,
     pub interpreter: Duration,
@@ -11,7 +10,7 @@ pub struct Timing {
 }
 impl Timing {
     pub fn total(&self) -> Duration {
-        self.token + self.bytecode + self.interpreter + self.ast.total()
+        self.bytecode + self.interpreter + self.ast.total()
     }
 }
 
