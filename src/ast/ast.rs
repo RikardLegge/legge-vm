@@ -649,6 +649,10 @@ impl<T> Ast<T>
 where
     T: Debug,
 {
+    pub fn id(&self) -> AstID {
+        self.ast_id
+    }
+
     pub fn nodes_after(&self, node_id: NodeID) -> Vec<NodeID> {
         match self.nodes().last() {
             Some(last) => {

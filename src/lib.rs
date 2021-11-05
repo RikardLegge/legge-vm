@@ -12,9 +12,11 @@ pub mod token;
 use crate::ast::{NodeID, Path, ValidAstCollection};
 use crate::token::Token;
 pub use debug::Timing;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
+use std::rc::Rc;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq, Copy, Clone)]
@@ -26,14 +28,20 @@ pub enum LogLevel {
 }
 
 fn tokenize_recurse(path: String, code: String) -> HashMap<Path, Vec<Token>> {
-    let mut queue = Vec::new();
+    let mut queue = Rc::new(RefCell::new(Vec::new()));
     let mut all_tokens = HashMap::new();
 
-    let (tokens, mut imports) = token::from_chars(code.chars(), Some(code.len() / 5));
-    queue.append(&mut imports);
+    let new_imports = queue.clone();
+    let tokens = token::from_chars(code.chars(), Some(code.len() / 5), |import| {
+        new_imports.borrow_mut().push(import)
+    });
     all_tokens.insert(Path::new(vec![path]), tokens);
 
-    while let Some(path) = queue.pop() {
+    let new_imports = queue.clone();
+    while let Some(path) = {
+        let next = queue.borrow_mut().pop();
+        next
+    } {
         if let [module, path @ .., _] = &path[..] {
             if module == "local" && path.len() >= 1 {
                 let filename = &path[0];
@@ -45,9 +53,10 @@ fn tokenize_recurse(path: String, code: String) -> HashMap<Path, Vec<Token>> {
                         file.read_to_string(&mut code)
                             .expect("something went wrong reading file");
 
-                        let (tokens, mut imports) =
-                            token::from_chars(code.chars(), Some(code.len() / 5));
-                        queue.append(&mut imports);
+                        let tokens =
+                            token::from_chars(code.chars(), Some(code.len() / 5), |import| {
+                                new_imports.borrow_mut().push(import)
+                            });
                         all_tokens.insert(path, tokens);
                     }
                 }

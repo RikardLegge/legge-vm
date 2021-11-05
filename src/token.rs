@@ -3,16 +3,20 @@ use std::fmt::Formatter;
 use std::iter::Peekable;
 use std::str::Chars;
 
-pub fn from_chars(iter: Chars, size_prediction: Option<usize>) -> (Vec<Token>, Vec<Vec<String>>) {
+pub fn from_chars(
+    iter: Chars,
+    size_prediction: Option<usize>,
+    new_import: impl Fn(Vec<String>),
+) -> Vec<Token> {
     let mut iter = iter.peekable();
-    let mut parser = Tokenizer::new(&mut iter, size_prediction);
+    let mut parser = Tokenizer::new(&mut iter, new_import, size_prediction);
 
     while let Some(ch) = parser.peek_ignore_whitespace() {
         parser.start_token();
         let tp = parser.parse_global(ch);
         parser.end_token(tp);
     }
-    (parser.tokens, parser.imports)
+    parser.tokens
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -183,27 +187,36 @@ fn format_number_leading_zeros(
     write!(f, "{0:0<1$}{2:.3$}", "", left_pad, right_pad, decimal)
 }
 
-pub struct Tokenizer<'a> {
+pub struct Tokenizer<'a, F>
+where
+    F: Fn(Vec<String>),
+{
     iter: &'a mut Peekable<Chars<'a>>,
+    new_import: F,
     last_id: usize,
     tokens: Vec<Token>,
-    imports: Vec<Vec<String>>,
     index: usize,
     start: usize,
     line_number: usize,
 }
 
-impl<'a> Tokenizer<'a> {
-    fn new<'b>(iter: &'b mut Peekable<Chars<'b>>, size_prediction: Option<usize>) -> Tokenizer<'b> {
+impl<'a, F> Tokenizer<'a, F>
+where
+    F: Fn(Vec<String>),
+{
+    fn new<'b>(
+        iter: &'b mut Peekable<Chars<'b>>,
+        new_import: F,
+        size_prediction: Option<usize>,
+    ) -> Tokenizer<'b, F> {
         let tokens = match size_prediction {
             Some(size) => Vec::with_capacity(size),
             None => Vec::new(),
         };
-        let imports = Vec::new();
         Tokenizer {
             iter,
             tokens,
-            imports,
+            new_import,
             start: 0,
             line_number: 1,
             last_id: 0,
@@ -404,7 +417,7 @@ impl<'a> Tokenizer<'a> {
             }
         };
         if path.len() > 0 {
-            self.imports.push(path);
+            (self.new_import)(path);
         }
         tp
     }

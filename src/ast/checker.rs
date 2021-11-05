@@ -175,8 +175,13 @@ where
 
             ConstDeclaration { expr, .. } | StaticDeclaration { expr, .. } => {
                 let lhs = node.tp();
-                let node = self.asts.get_node(*expr);
-                let rhs = node.tp();
+                let rhs = if expr.ast() == self.ast.id() {
+                    let node = self.ast.get_node(*expr);
+                    node.tp()
+                } else {
+                    self.asts.get_node(*expr);
+                    node.tp()
+                };
                 if lhs != rhs {
                     Err(ast::Err::single(
                         &format!(
