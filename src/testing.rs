@@ -9,9 +9,14 @@ pub fn run_test(code: &str, expected_result: Option<Value>) {
     let code = format!("import std.exit;{}", code);
     let result = Rc::new(RefCell::new(None));
     let assign_result = result.clone();
-    run_code(code.into(), LogLevel::LogNone, move |v| {
-        *assign_result.borrow_mut() = Some(v);
-    })
+    run_code(
+        "test_generated.bc".to_string(),
+        code.into(),
+        LogLevel::LogNone,
+        move |v| {
+            *assign_result.borrow_mut() = Some(v);
+        },
+    )
     .expect("code should compile and run");
     let result = result.borrow();
     assert_eq!(*result, expected_result);

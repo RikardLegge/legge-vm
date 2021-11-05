@@ -6,14 +6,24 @@ use crate::ast::NodeType;
 use crate::token::KeyName;
 use crate::token::TokenType::EndStatement;
 use crate::token::{ArithmeticOP, Token, TokenType};
+use ast::Err;
 use colored::Colorize;
 use std::iter::Peekable;
+use std::result;
 
-pub fn ast_from_tokens<I>(ast_id: AstID, iter: I) -> Result<Ast>
+pub fn ast_from_tokens<I>(
+    file_name: String,
+    ast_id: AstID,
+    iter: I,
+) -> result::Result<Ast, (ast::Ast, ast::Err)>
 where
     I: Iterator<Item = Token>,
 {
-    Parser::new(ast_id, iter).parse()
+    let mut parser = Parser::new(file_name, ast_id, iter);
+    match parser.parse() {
+        Ok(()) => Ok(parser.ast),
+        Err(err) => Err((parser.ast, err)),
+    }
 }
 
 #[derive(Debug)]
@@ -54,7 +64,7 @@ fn expected_to_message(expected: &[&TokenType]) -> String {
 
 fn missing_token_error(ast: &Ast, node: NodeID, expected: &[&TokenType]) -> ast::Err {
     let expected_message = expected_to_message(expected);
-    ast.single_error(
+    Err::single(
         &format!("Reached en of file while looking for {}", expected_message),
         &format!("Consider adding {}", expected_message.to_string().red()),
         ast.nodes_after(node),
@@ -77,7 +87,7 @@ fn invalid_keyword_error(ast: &Ast, node: NodeID, got: KeyName, expected: &[KeyN
         .join(""),
     };
 
-    ast.single_error(
+    Err::single(
         &format!("Found {} while expecting {}", got, expected_message),
         &format!(
             "Consider replacing with {}",
@@ -94,7 +104,7 @@ fn wrong_token_error(
     expected: &[&TokenType],
 ) -> ast::Err {
     let expected_message = expected_to_message(expected);
-    ast.single_error(
+    Err::single(
         &format!("Found {} while expecting {}", got, expected_message),
         &format!(
             "Consider replacing with {}",
@@ -167,8 +177,8 @@ impl<I> Parser<I>
 where
     I: Iterator<Item = Token>,
 {
-    fn new(ast_id: AstID, iter: I) -> Self {
-        let ast = Ast::new(ast_id);
+    fn new(file_name: String, ast_id: AstID, iter: I) -> Self {
+        let ast = Ast::new(file_name, ast_id);
 
         Self {
             ast,
@@ -178,25 +188,27 @@ where
         }
     }
 
-    fn parse(mut self) -> Result<Ast> {
+    fn parse(&mut self) -> Result<()> {
         let node = self.any_node(None);
         let mut static_statements = Vec::new();
         let mut dynamic_statements = Vec::new();
         while self.peek_token().any(None).is_ok() {
             let statement = self.do_statement(node.id)?;
             match self.ast.get_node(statement).body {
-                NodeBody::TypeDeclaration { .. }
-                | NodeBody::StaticDeclaration { .. }
-                | NodeBody::Import { .. } => static_statements.push(statement),
+                NodeBody::TypeDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
+                    static_statements.push(statement)
+                }
                 _ => dynamic_statements.push(statement),
             }
         }
-        let statements = {
-            static_statements.append(&mut dynamic_statements);
-            static_statements
-        };
-        self.add_node(node, NodeBody::Block { body: statements });
-        Ok(self.ast)
+        self.add_node(
+            node,
+            NodeBody::Block {
+                static_body: static_statements,
+                dynamic_body: dynamic_statements,
+            },
+        );
+        Ok(())
     }
 
     fn token_precedence(token: &TokenType) -> usize {
@@ -289,18 +301,20 @@ where
         while self.peek_token().not(&TokenType::RightCurlyBrace)? {
             let statement = self.do_statement(node.id)?;
             match self.ast.get_node(statement).body {
-                NodeBody::TypeDeclaration { .. }
-                | NodeBody::StaticDeclaration { .. }
-                | NodeBody::Import { .. } => static_statements.push(statement),
+                NodeBody::TypeDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
+                    static_statements.push(statement)
+                }
                 _ => dynamic_statements.push(statement),
             }
         }
-        let statements = {
-            static_statements.append(&mut dynamic_statements);
-            static_statements
-        };
         self.next_token(&node).expect(&TokenType::RightCurlyBrace)?;
-        Ok(self.add_node(node, NodeBody::Block { body: statements }))
+        Ok(self.add_node(
+            node,
+            NodeBody::Block {
+                static_body: static_statements,
+                dynamic_body: dynamic_statements,
+            },
+        ))
     }
 
     fn do_statement(&mut self, parent_id: NodeID) -> Result {
@@ -453,7 +467,7 @@ where
                     let left = node;
                     let right = self.node(left.id);
                     self.eat_token(&right);
-                    Err(self.ast.single_error(
+                    Err(Err::single(
                         &format!("Empty parenthesis are not allowed as expressions"),
                         "Invalid expression",
                         vec![left.id, right.id],
@@ -601,7 +615,7 @@ where
                         let rhs = self.do_expression(node.id)?;
                         NodeBody::PrefixOp { op, rhs }
                     }
-                    _ => Err(self.ast.single_error(
+                    _ => Err(Err::single(
                         &format!("Can only use prefix operations for addition and subtraction"),
                         "",
                         vec![node.id],
@@ -832,7 +846,10 @@ where
                     self.add_node(node, ret)
                 };
 
-                let body = NodeBody::Block { body: vec![ret_id] };
+                let body = NodeBody::Block {
+                    static_body: vec![],
+                    dynamic_body: vec![ret_id],
+                };
                 self.add_node(node, body)
             };
 
@@ -940,8 +957,8 @@ where
                 },
             );
             match &mut self.ast.get_node_mut(body).body {
-                NodeBody::Block { body: children } => {
-                    children.push(ret_node);
+                NodeBody::Block { dynamic_body, .. } => {
+                    dynamic_body.push(ret_node);
                 }
                 _ => unreachable!(),
             }

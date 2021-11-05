@@ -25,13 +25,13 @@ pub enum LogLevel {
     LogEval = 3,
 }
 
-fn tokenize_recurse(code: String) -> HashMap<Path, Vec<Token>> {
+fn tokenize_recurse(path: String, code: String) -> HashMap<Path, Vec<Token>> {
     let mut queue = Vec::new();
     let mut all_tokens = HashMap::new();
 
     let (tokens, mut imports) = token::from_chars(code.chars(), Some(code.len() / 5));
     queue.append(&mut imports);
-    all_tokens.insert(Path::empty(), tokens);
+    all_tokens.insert(Path::new(vec![path]), tokens);
 
     while let Some(path) = queue.pop() {
         if let [module, path @ .., _] = &path[..] {
@@ -61,17 +61,18 @@ pub fn compile(
     timing: &mut Timing,
     runtime: &runtime::Runtime,
     log_level: LogLevel,
+    path: String,
     code: String,
 ) -> Option<(bytecode::Bytecode, ValidAstCollection)> {
     let start = debug::start_timer();
-    let tokens = tokenize_recurse(code);
+    let tokens = tokenize_recurse(path, code);
     timing.token = debug::stop_timer(start);
 
     let result = ast::from_tokens(tokens, &runtime);
     let (asts, ast_timing) = match result {
         Ok((asts, ast_timing)) => (asts, ast_timing),
-        Err(e) => {
-            println!("Ast Error: {}\n{}\n", e.details, e.node_info);
+        Err((asts, e)) => {
+            println!("Ast Error: {}\n{}\n", e.details, e.print_line(&asts));
             return None;
         }
     };
@@ -80,9 +81,8 @@ pub fn compile(
     }
     timing.ast = ast_timing;
 
-    let ast = asts.iter().next().unwrap();
     let start = debug::start_timer();
-    let bytecode = bytecode::from_ast(ast);
+    let bytecode = bytecode::from_ast(&asts);
     timing.bytecode = debug::stop_timer(start);
     if log_level >= LogLevel::LogEval {
         println!("{:?}", bytecode);
@@ -90,13 +90,13 @@ pub fn compile(
     return Some((bytecode, asts));
 }
 
-pub fn run_code<F>(code: String, log_level: LogLevel, interrupt: F) -> Option<()>
+pub fn run_code<F>(path: String, code: String, log_level: LogLevel, interrupt: F) -> Option<()>
 where
     F: Fn(bytecode::Value),
 {
     let runtime = runtime::std();
     let mut timing = debug::Timing::default();
-    let compiled = compile(&mut timing, &runtime, log_level, code);
+    let compiled = compile(&mut timing, &runtime, log_level, path, code);
     if compiled.is_none() {
         return None;
     }
@@ -108,7 +108,7 @@ where
 
     let get_line = |node_id: NodeID| match asts
         .get(node_id.ast())
-        .unwrap()
+        .borrow()
         .get_node(node_id)
         .tokens
         .first()

@@ -1,4 +1,5 @@
 use super::{Ast, Node, Result};
+use crate::ast;
 use crate::ast::ast::PartialType::Complete;
 use crate::ast::ast::{AstCollection, StateTypesChecked, TypesInferred};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
@@ -13,7 +14,8 @@ where
 {
     let mut err = None;
     for ast in asts.iter() {
-        let root_id = ast.root();
+        let root_id = ast.borrow().root();
+        let ast = ast.borrow();
         let checker = Checker::new(&ast, &asts);
         if let Err(e) = checker.check_all_types(root_id) {
             err = Some(e);
@@ -47,10 +49,7 @@ where
         use crate::ast::nodebody::NodeBody::*;
         use NodeType::*;
         match &node.body {
-            Reference { node_id } => {
-                let ast = self.asts.get(node_id.ast()).unwrap();
-                self.check_type(ast.get_node(*node_id))
-            }
+            Reference { node_id } => self.check_type(&*self.asts.get_node(*node_id)),
             Empty
             | Break { .. }
             | Comment { .. }
@@ -70,7 +69,7 @@ where
                 if lhs_tp == rhs_tp {
                     Ok(())
                 } else {
-                    Err(self.ast.single_error(
+                    Err(ast::Err::single(
                         &format!(
                             "Types for left and right hand side of op {} do not match ({} != {})",
                             op, lhs_tp, rhs_tp
@@ -88,7 +87,7 @@ where
                 let variable_node = self.ast.get_node(*variable);
                 match variable_node.body {
                     NodeBody::ConstDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
-                        Err(self.ast.single_error(
+                        Err(ast::Err::single(
                             "Not allowed to assign to constant value",
                             "Assignment to constant value",
                             vec![node.id()],
@@ -122,7 +121,7 @@ where
                                 variable_tp = tp;
                             }
                             None => {
-                                return Err(self.ast.single_error(
+                                return Err(ast::Err::single(
                                     &format!("Struct does not have the field '{}'", path_field),
                                     "",
                                     vec![node.id()],
@@ -135,7 +134,7 @@ where
                 if variable_tp == expr_tp {
                     Ok(())
                 } else {
-                    Err(self.ast.single_error(
+                    Err(ast::Err::single(
                             &format!("Types for left and right hand side of assignment do not match ({:?} != {:?})", variable_tp, expr_tp
                             ),
                             "Both sides of an assignment must have the same type",
@@ -145,7 +144,7 @@ where
             }
             If { condition, .. } => match self.ast.get_node(*condition).tp() {
                 Bool => Ok(()),
-                tp => Err(self.ast.single_error(
+                tp => Err(ast::Err::single(
                     &format!(
                         "The condition of an if statement must be of type Bool, ({:?}) was found",
                         tp
@@ -176,9 +175,10 @@ where
 
             ConstDeclaration { expr, .. } | StaticDeclaration { expr, .. } => {
                 let lhs = node.tp();
-                let rhs = self.ast.get_node(*expr).tp();
+                let node = self.asts.get_node(*expr);
+                let rhs = node.tp();
                 if lhs != rhs {
-                    Err(self.ast.single_error(
+                    Err(ast::Err::single(
                         &format!(
                             "Left and right hand side must have the same types, '{:?}' != '{:?}'",
                             lhs, rhs
@@ -199,7 +199,7 @@ where
                 if let Fn { returns, .. } = &func_tp {
                     match (&**returns, expr) {
                         (NodeType::Void, None) => Ok(()),
-                        (NodeType::Void, Some(ret_id)) => Err(self.ast.single_error(
+                        (NodeType::Void, Some(ret_id)) => Err(ast::Err::single(
                             "Return value should be of type void.",
                             "Not allowed to return a value from here",
                             vec![*ret_id],
@@ -228,13 +228,13 @@ where
                                     nodes.push(last_node_id);
                                 }
 
-                                Err(self.ast.single_error(
+                                Err(ast::Err::single(
                                         "Function missing return statement",
                                         &format!("A return of type {:?} must be provided as the final statement of the function", expected),
                                        nodes
                                     ))
                             } else {
-                                Err(self.ast.single_error(
+                                Err(ast::Err::single(
                                     "Return value can not be of type void",
                                     "A value must be provided when returning from here",
                                     vec![node.id()],
@@ -259,7 +259,7 @@ where
                                     ));
                                 };
                                 let details = format!("Return statement does not return the right type, {:?} expected, {:?} provided", func, ret);
-                                Err(self.ast.error(details, parts))?
+                                Err(ast::Err::new(details, parts))?
                             }
                             Ok(())
                         }
@@ -286,7 +286,7 @@ where
                 self.fits_function_call(func, caller, func_tp, &call)?;
                 Ok(())
             }
-            Unlinked { .. } => Err(self.ast.single_error(
+            Unlinked { .. } => Err(ast::Err::single(
                 "Encountered a node with unlinked type",
                 "expression with unlinked type",
                 vec![node.id()],
@@ -316,13 +316,13 @@ where
         if let Some(i) = invalid_varargs {
             let invalid_node = shape.body.children().skip(i).next();
             if let Some(invalid_node) = invalid_node {
-                Err(self.ast.single_error(
+                Err(ast::Err::single(
                     &format!("miss placed vararg",),
                     "Invalid vararg",
                     vec![*invalid_node],
                 ))
             } else {
-                Err(self.ast.single_error(
+                Err(ast::Err::single(
                     &format!("missplaced vararg",),
                     "Too many arguments",
                     vec![shape.id()],
@@ -343,7 +343,7 @@ where
                     nodes.push(shape.id());
                 }
                 nodes.push(hole.id());
-                Err(self.ast.single_error(
+                Err(ast::Err::single(
                     &format!(
                         "wrong number of arguments, {} expected, {} provided",
                         hole_args.len(),
@@ -358,7 +358,7 @@ where
             if nodes.len() == 0 {
                 nodes.push(shape.id());
             }
-            Err(self.ast.single_error(
+            Err(ast::Err::single(
                 &format!(
                     "wrong number of arguments, {} expected, {} provided",
                     hole_args.len(),
@@ -374,7 +374,7 @@ where
 
     fn get_function_trace(&self, referer: NodeID, depth: usize) -> Vec<NodeID> {
         let mut trace = vec![referer];
-        match &self.ast.get_node(referer).body {
+        match &self.asts.get_node(referer).body {
             NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                 returns: Some(id), ..
             }) => {
@@ -386,6 +386,9 @@ where
                 trace.append(&mut self.get_function_trace(*child, depth + 1))
             }
             NodeBody::StaticDeclaration { expr: child, .. } => {
+                trace.append(&mut self.get_function_trace(*child, depth))
+            }
+            NodeBody::Reference { node_id: child, .. } => {
                 trace.append(&mut self.get_function_trace(*child, depth))
             }
             NodeBody::PartialType { .. } => {}
@@ -406,7 +409,7 @@ where
         match (hole, shape) {
             // Flip shape and hole since we are comparing types now!
             (Fn { .. }, Fn { .. }) => self.fits_function_function(func, caller, shape, hole),
-            (Any, Void) if *shape != Void => Err(self.ast.single_error(
+            (Any, Void) if *shape != Void => Err(ast::Err::single(
                 "function expected Any type of value, nothing (Void) provided.",
                 "Argument required here",
                 vec![caller.id(), func.id()],
@@ -419,7 +422,7 @@ where
                     vec![ErrPart::new("Provided argument".into(), vec![caller.id()])];
 
                 for func_id in trace_ids {
-                    match &self.ast.get_node(func_id).body {
+                    match &self.asts.get_node(func_id).body {
                         NodeBody::Call(_) => error_parts.push(ErrPart::new(
                             "From return value of function".into(),
                             vec![func_id],
@@ -461,7 +464,7 @@ where
                         _ => {}
                     };
                 }
-                Err(self.ast.error(
+                Err(ast::Err::new(
                     format!(
                         "function arguments are of the wrong type, {} expected, {} provided",
                         hole, shape
@@ -551,13 +554,13 @@ where
             (NewType { tp: fields, .. }, Fn { args, returns }) => {
                 if args.len() > 0 {
                     let nodes = caller.body.children().map(|id| *id).collect();
-                    Err(self.ast.single_error(
+                    Err(ast::Err::single(
                         "Type constructor can not have arguments",
                         "Arguments not allowed here",
                         nodes,
                     ))
                 } else if fields != returns {
-                    Err(self.ast.single_error(
+                    Err(ast::Err::single(
                         "constructor does not return correct struct",
                         "",
                         vec![func.id()],
@@ -567,7 +570,7 @@ where
                 }
             }
             (Fn { .. }, Fn { .. }) => self.fits_function_function(func, caller, hole, shape),
-            (_, Fn { .. }) => Err(self.ast.single_error(
+            (_, Fn { .. }) => Err(ast::Err::single(
                 &format!("tried to call non-callable function"),
                 "Can not call",
                 vec![caller.id(), func.id()],

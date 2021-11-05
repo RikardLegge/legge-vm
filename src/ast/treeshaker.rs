@@ -1,16 +1,18 @@
 use super::{Ast, NodeID, Result};
+use crate::ast;
 use crate::ast::ast::{AstCollection, Linked, NodeReference, PartialNodeValue, SideEffect};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody, NodeBodyIterator};
-use crate::ast::{Err, Node, NodeType, NodeValue};
+use crate::ast::{Node, NodeType, NodeValue};
 use std::collections::{HashSet, VecDeque};
 use std::result;
 
 pub fn treeshake<T: Linked>(
     mut asts: AstCollection<T>,
-) -> result::Result<AstCollection<T>, (AstCollection<T>, Err)> {
+) -> result::Result<AstCollection<T>, (AstCollection<T>, ast::Err)> {
     let mut err = None;
-    for mut ast in asts.iter_mut() {
-        let root_id = ast.root();
+    for ast in asts.iter_mut() {
+        let root_id = ast.borrow().root();
+        let mut ast = ast.borrow_mut();
         let shaker = TreeShaker::new(&mut ast);
         if let Err(e) = shaker.shake(root_id) {
             err = Some(e);

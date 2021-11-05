@@ -40,7 +40,8 @@ pub enum NodeBody<T = StateAny> {
         rhs: NodeID,
     },
     Block {
-        body: Vec<NodeID>,
+        static_body: Vec<NodeID>,
+        dynamic_body: Vec<NodeID>,
     },
     If {
         condition: NodeID,
@@ -193,7 +194,16 @@ impl<'a, T> Iterator for NodeBodyIterator<'a, T> {
                     None
                 }
             }
-            Block { body } => body.get(self.index),
+            Block {
+                static_body,
+                dynamic_body,
+            } => {
+                if self.index < static_body.len() {
+                    static_body.get(self.index)
+                } else {
+                    dynamic_body.get(self.index - static_body.len())
+                }
+            }
             Call(NBCall { args, .. }) => args.get(self.index),
             PartialType { parts, .. } => parts.get(self.index),
 

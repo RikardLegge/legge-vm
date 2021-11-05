@@ -17,14 +17,34 @@ use crate::debug;
 use crate::runtime::Runtime;
 use crate::token::Token;
 
-use crate::ast::ast::{AstCollection, AstID};
 use ast::StateTypesChecked;
 pub use ast::{Any, Linked, TypesChecked, TypesInferred};
-pub use ast::{Ast, Node, NodeID, NodeReferenceType, NodeType, NodeTypeSource, NodeValue};
+pub use ast::{
+    Ast, AstCollection, AstID, Node, NodeID, NodeReferenceType, NodeType, NodeTypeSource, NodeValue,
+};
 
 pub type ValidAstCollection = AstCollection<StateTypesChecked>;
 
 pub type Result<N = NodeID> = result::Result<N, Err>;
+
+#[derive(Debug)]
+pub struct Err {
+    pub details: String,
+    pub parts: Vec<ErrPart>,
+}
+
+impl Err {
+    fn new(details: String, parts: Vec<ErrPart>) -> Self {
+        Self { details, parts }
+    }
+
+    pub fn single(details: &str, row_details: &str, nodes: Vec<NodeID>) -> Self {
+        Self::new(
+            details.into(),
+            vec![ErrPart::new(row_details.into(), nodes)],
+        )
+    }
+}
 
 pub type PathKey = Vec<String>;
 
@@ -36,12 +56,8 @@ impl Path {
         Self(path)
     }
 
-    pub fn empty() -> Self {
-        Self(Vec::new())
-    }
-
-    pub fn inner(&self) -> &[String] {
-        &self.0
+    pub fn file(&self) -> String {
+        format!("{}.bc", self.0[0])
     }
 
     pub fn key(self) -> PathKey {
@@ -61,30 +77,12 @@ impl ErrPart {
     }
 }
 
-#[derive(Debug)]
-pub struct Err {
-    pub details: String,
-    pub node_info: String,
-    pub parts: Vec<ErrPart>,
-}
-
 impl Err {
-    pub fn from_parts<T>(ast: &Ast<T>, details: String, parts: Vec<ErrPart>) -> Self
+    pub fn print_line<T>(&self, asts: &AstCollection<T>) -> String
     where
         T: Debug,
     {
-        let node_info = Self::print_line(ast, &parts);
-        Err {
-            details,
-            node_info,
-            parts,
-        }
-    }
-
-    pub fn print_line<T>(ast: &Ast<T>, parts: &[ErrPart]) -> String
-    where
-        T: Debug,
-    {
+        let parts = &self.parts;
         if parts.is_empty() {
             return "".into();
         }
@@ -94,6 +92,7 @@ impl Err {
                 let mut tokens = Vec::new();
                 let mut ids = HashSet::new();
                 for &node_id in &part.nodes {
+                    let ast = &asts.get(node_id.ast()).borrow();
                     let mut root = ast.get_node(node_id);
                     let mut curr = ast.get_node(node_id);
                     loop {
@@ -141,10 +140,23 @@ impl Err {
                 }
             })
             .collect::<Vec<(Vec<(bool, Token)>, &ErrPart)>>();
+        token_parts.sort_by(|(_, l), (_, r)| l.nodes[0].ast().cmp(&r.nodes[0].ast()));
         token_parts.sort_by(|(l, _), (r, _)| l[0].1.line.cmp(&r[0].1.line));
 
         let mut builder = vec![];
+
+        let mut curr_ast = token_parts[0].1.nodes[0].ast();
+        builder.push(format!("\n"));
+        builder.push(format!("  {}\n", asts.get(curr_ast).borrow().file_name));
+        builder.push(format!("----------------------\n"));
+
         for (tokens, part) in token_parts {
+            let i_ast = part.nodes[0].ast();
+            if curr_ast != i_ast {
+                curr_ast = i_ast;
+                builder.push(format!("  {}\n", asts.get(i_ast).borrow().file_name));
+                builder.push(format!("----------------------\n"));
+            }
             let mut line = tokens[0].1.line;
             let mut end = 0;
             builder.push(format!("{:>4} | ", line));
@@ -186,14 +198,20 @@ impl Err {
 pub fn from_tokens(
     tokens: HashMap<Path, Vec<Token>>,
     runtime: &Runtime,
-) -> Result<(AstCollection<StateTypesChecked>, debug::AstTiming)> {
+) -> result::Result<(AstCollection<StateTypesChecked>, debug::AstTiming), (AstCollection, Err)> {
     let mut timing = debug::AstTiming::default();
     let start = debug::start_timer();
     let asts = {
         let mut asts = AstCollection::new();
         for (i, (path, tokens)) in tokens.into_iter().enumerate() {
             let ast_id = AstID::new(i);
-            let ast = parser::ast_from_tokens(ast_id, tokens.into_iter())?;
+            let ast = match parser::ast_from_tokens(path.file(), ast_id, tokens.into_iter()) {
+                Ok(ast) => ast,
+                Err((ast, err)) => {
+                    asts.add(path, ast);
+                    return Err((asts, err));
+                }
+            };
             asts.add(path, ast);
         }
         asts
@@ -203,19 +221,19 @@ pub fn from_tokens(
     let start = debug::start_timer();
     let asts = match linker::link(asts, runtime) {
         Ok(ast) => ast,
-        Err((ast, err)) => {
-            println!("{:?}", ast);
-            Err(err)?
+        Err((asts, err)) => {
+            println!("{:?}", asts);
+            Err((asts.guarantee_state(), err))?
         }
     };
     timing.linker = debug::stop_timer(start);
 
     let start = debug::start_timer();
     let asts = match typer::infer_types(asts, runtime) {
-        Ok(ast) => ast,
-        Err((ast, err)) => {
-            println!("{:?}", ast);
-            Err(err)?
+        Ok(asts) => asts,
+        Err((asts, err)) => {
+            println!("{:?}", asts);
+            Err((asts.guarantee_state(), err))?
         }
     };
     timing.type_inference = debug::stop_timer(start);
@@ -223,21 +241,21 @@ pub fn from_tokens(
     let start = debug::start_timer();
     let asts = match checker::check_types(asts) {
         Ok(ast) => ast,
-        Err((ast, err)) => {
-            println!("{:?}", ast);
-            Err(err)?
+        Err((asts, err)) => {
+            println!("{:?}", asts);
+            Err((asts.guarantee_state(), err))?
         }
     };
     timing.type_checker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let asts = match treeshaker::treeshake(asts) {
-        Ok(ast) => ast,
-        Err((ast, err)) => {
-            println!("{:?}", ast);
-            Err(err)?
-        }
-    };
+    // let asts = match treeshaker::treeshake(asts) {
+    //     Ok(ast) => ast,
+    //     Err((ast, err)) => {
+    //         println!("{:?}", ast);
+    //         Err(err)?
+    //     }
+    // };
     timing.treeshaker = debug::stop_timer(start);
 
     Ok((asts, timing))

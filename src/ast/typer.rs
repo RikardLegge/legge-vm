@@ -1,31 +1,50 @@
+use crate::ast;
 use crate::ast::ast::{AstCollection, InferredType, Linked, StateTypesInferred};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
-use crate::ast::{Ast, Err, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
+use crate::ast::{Ast, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
+use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::result;
 
 pub fn infer_types<T>(
-    mut asts: AstCollection<T>,
+    asts: AstCollection<T>,
     runtime: &Runtime,
-) -> result::Result<AstCollection<StateTypesInferred>, (AstCollection<T>, Err)>
+) -> result::Result<AstCollection<StateTypesInferred>, (AstCollection<T>, ast::Err)>
 where
     T: Linked,
 {
-    let mut err = None;
-    for mut ast in asts.iter_mut() {
-        let typer = Typer::new(&mut ast, &asts, runtime);
-        if let Err(e) = typer.infer_all_types() {
-            err = Some(e);
-            break;
+    let mut typers = asts
+        .iter()
+        .map(|ast| Typer::new(&ast, &asts, runtime))
+        .collect::<VecDeque<Typer<T>>>();
+    let mut since_last_changed = 0;
+
+    while let Some(mut typer) = typers.pop_front() {
+        match typer.infer_all_types() {
+            Err(err) => {
+                return Err((asts, err));
+            }
+            Ok(Some(_)) => since_last_changed = 0,
+            Ok(None) => {
+                since_last_changed += 1;
+                if since_last_changed > typers.len() + 1 {
+                    let err = ast::Err::single(
+                        "Failed to complete type check, unable to infer the type of the following expressions",
+                        "unable to infer type",
+                        typer.queue.into(),
+                    );
+                    return Err((asts, err));
+                } else {
+                    typers.push_back(typer);
+                }
+            }
         }
     }
 
-    match err {
-        Some(err) => Err((asts, err)),
-        None => Ok(asts.guarantee_state()),
-    }
+    Ok(asts.guarantee_state())
 }
 
 pub struct Typer<'a, T>
@@ -33,7 +52,7 @@ where
     T: Linked,
 {
     queue: VecDeque<NodeID>,
-    ast: &'a mut Ast<T>,
+    ast: &'a RefCell<Ast<T>>,
     asts: &'a AstCollection<T>,
     runtime: &'a Runtime,
     since_last_changed: usize,
@@ -43,8 +62,8 @@ impl<'a, T> Typer<'a, T>
 where
     T: Linked,
 {
-    pub fn new(ast: &'a mut Ast<T>, asts: &'a AstCollection<T>, runtime: &'a Runtime) -> Self {
-        let queue = VecDeque::from(vec![ast.root()]);
+    pub fn new(ast: &'a RefCell<Ast<T>>, asts: &'a AstCollection<T>, runtime: &'a Runtime) -> Self {
+        let queue = VecDeque::from(vec![ast.borrow().root()]);
         let since_last_changed = 0;
         Self {
             queue,
@@ -74,7 +93,7 @@ where
     fn not_void(&self, node_id: &NodeID) -> Result<()> {
         let tp = self.get_type(node_id);
         match tp {
-            Some(NodeType::Void) => Err(self.ast.single_error(
+            Some(NodeType::Void) => Err(ast::Err::single(
                 "Did not expect void value here",
                 "value is void",
                 vec![*node_id],
@@ -85,9 +104,10 @@ where
 
     fn get_type(&self, node_id: &NodeID) -> Option<NodeType> {
         let node_id = *node_id;
-        if let Some(tp) = self.ast.get_node(node_id).maybe_tp() {
+        let ast = self.ast.borrow();
+        if let Some(tp) = ast.borrow().get_node(node_id).maybe_tp() {
             Some(tp.clone())
-        } else if let Some((_, tp)) = self.ast.partial_type(node_id) {
+        } else if let Some((_, tp)) = ast.borrow().partial_type(node_id) {
             Some(tp.clone())
         } else {
             None
@@ -123,14 +143,9 @@ where
         use super::NodeType::*;
         use super::NodeTypeSource::*;
         use crate::ast::nodebody::NodeBody::*;
+        let ast = self.ast.borrow();
         let tp = match &node.body {
-            Reference { node_id } => {
-                let ast = self.asts.get(node_id.ast()).unwrap();
-                let node = ast.get_node(*node_id);
-                node.maybe_inferred_tp().cloned()
-            }
-            TypeReference { tp } => self
-                .ast
+            TypeReference { tp } => ast
                 .partial_type(*tp)
                 .map(|(_, tp)| InferredType::new(tp.clone(), NodeTypeSource::Declared)),
             PartialType { tp, .. } => tp
@@ -138,7 +153,7 @@ where
                 .map(|tp| InferredType::new(tp.clone(), NodeTypeSource::Declared)),
             ConstValue { value, tp } => {
                 let tp = match tp {
-                    Some(tp_id) => match self.ast.partial_type(*tp_id) {
+                    Some(tp_id) => match ast.partial_type(*tp_id) {
                         Some((_, tp)) => Some(tp.clone()),
                         None => None,
                     },
@@ -169,7 +184,7 @@ where
                 if args_inferred {
                     let arg_types = arg_types.into_iter().map(|tp| tp.unwrap()).collect();
                     let return_type = match *returns {
-                        Some(returns) => self.ast.get_node(returns).maybe_tp().cloned(),
+                        Some(returns) => ast.get_node(returns).maybe_tp().cloned(),
                         None => Some(Void),
                     };
                     if let Some(return_type) = return_type {
@@ -188,18 +203,24 @@ where
                 }
             }
             PrefixOp { rhs, .. } => InferredType::maybe(self.get_type(rhs), Value),
+            Reference { node_id } => {
+                drop(ast);
+                let ast = self.asts.get(node_id.ast()).borrow();
+                let node = ast.get_node(*node_id);
+                node.maybe_inferred_tp().cloned()
+            }
             VariableValue { variable, path } => {
                 if let Some(value_tp) = self.get_type(variable) {
                     let mut value_tp = value_tp;
                     if let NodeType::NewType { .. } = value_tp {
-                        let body = &self.ast.get_node(*variable).body;
+                        let body = &ast.get_node(*variable).body;
                         match body {
                             NodeBody::ConstDeclaration{expr, ..}
                             | NodeBody::StaticDeclaration{expr, ..}=> {
                                 value_tp = self.get_type(expr).unwrap();
                             }
                             NodeBody::TypeDeclaration{ ident, ..} => {
-                                Err(self.ast.single_error(
+                                Err(ast::Err::single(
                                     "When instantiating a type, use the default instantiation function by adding ()",
                                     &format!("Replace with {}()", ident),
                                     vec![node.id()],
@@ -243,7 +264,7 @@ where
                 }
             }
             Expression(value) => {
-                let tp = self.infer_type(self.ast.get_node(*value))?;
+                let tp = self.infer_type(ast.get_node(*value))?;
                 match tp {
                     Some(tp) => Some(InferredType::new(tp.tp, Value)),
                     None => None,
@@ -251,7 +272,7 @@ where
             }
             VariableDeclaration { tp, expr, .. } => {
                 if let Some(tp) = tp {
-                    InferredType::maybe(self.ast.get_node_type(*tp), Declared)
+                    InferredType::maybe(ast.get_node_type(*tp), Declared)
                 } else if let Some(expr) = expr {
                     self.not_void(expr)?;
                     InferredType::maybe(self.get_type(expr), Value)
@@ -261,7 +282,7 @@ where
             }
             ConstDeclaration { tp, expr, .. } | StaticDeclaration { tp, expr, .. } => {
                 if let Some(tp) = tp {
-                    InferredType::maybe(self.ast.get_node_type(*tp), Declared)
+                    InferredType::maybe(ast.get_node_type(*tp), Declared)
                 } else if let Some(expr_tp) = self.get_type(expr) {
                     self.not_void(expr)?;
                     InferredType::maybe(Some(expr_tp), Value)
@@ -269,9 +290,7 @@ where
                     None
                 }
             }
-            TypeDeclaration { tp, .. } => {
-                InferredType::maybe(self.ast.get_node_type(*tp), Declared)
-            }
+            TypeDeclaration { tp, .. } => InferredType::maybe(ast.get_node_type(*tp), Declared),
             Import { expr, .. } => {
                 if let Some(tp) = self.get_type(expr) {
                     InferredType::maybe(Some(tp), Value)
@@ -281,14 +300,14 @@ where
             }
             VariableAssignment { .. } => InferredType::maybe(Some(Void), Declared),
             Call(NBCall { func, .. }) => {
-                let var = self.ast.get_node(*func);
+                let var = ast.get_node(*func);
                 if let Some(tp) = var.maybe_tp() {
                     match tp {
                         Fn{returns, ..} |
                         NewType {tp: returns, .. }=> {
                             InferredType::maybe(Some((**returns).clone()), Value)
                         }
-                        _ => Err(self.ast.single_error(
+                        _ => Err(ast::Err::single(
                             &format!(
                                 "It's currently only possible to call functions, tried to call {:?}",
                                 var
@@ -313,18 +332,21 @@ where
         Ok(tp)
     }
 
-    pub fn infer_all_types(mut self) -> Result<()> {
+    pub fn infer_all_types(&mut self) -> Result<Option<()>> {
         while let Some(node_id) = self.queue.pop_front() {
-            let node = self.ast.get_node(node_id);
+            let ast = self.ast.borrow();
+            let node = ast.get_node(node_id);
             for &child_id in node.body.children() {
-                if let None = self.ast.get_node(child_id).maybe_tp() {
+                if let None = ast.get_node(child_id).maybe_tp() {
                     self.queue.push_back(child_id)
                 }
             }
             let tp = self.infer_type(node)?;
             if let Some(tp) = tp {
                 let source = tp.source;
-                let node = self.ast.get_node_mut(node_id);
+                drop(ast);
+                let mut ast = self.ast.borrow_mut();
+                let node = ast.get_node_mut(node_id);
                 node.infer_type(tp);
                 // Do not mark values which are only used as type checked
                 if source != NodeTypeSource::Usage {
@@ -335,13 +357,10 @@ where
 
             self.since_last_changed += 1;
             self.queue.push_back(node_id);
-            if self.since_last_changed > 2 * self.queue.len() {
-                return Err(self.ast.single_error(
-                    "Failed to complete type check, unable to infer the type of the following expressions",
-                    "unable to infer type"
-                    , self.queue.into()));
+            if self.since_last_changed > self.queue.len() {
+                return Ok(None);
             }
         }
-        Ok(())
+        Ok(Some(()))
     }
 }

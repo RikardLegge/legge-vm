@@ -1,11 +1,11 @@
 use super::NodeReferenceType::*;
-use super::{Ast, NodeID, Result};
+use super::{Ast, NodeID};
 use crate::ast::ast::{
     AstCollection, NodeReferenceLocation, PartialNodeValue, PartialType, StateLinked,
 };
 use crate::ast::nodebody::UnlinkedNodeBody::*;
 use crate::ast::nodebody::{NBCall, NodeBody};
-use crate::ast::{Err, NodeType, NodeValue, PathKey};
+use crate::ast::{Err, ErrPart, NodeType, NodeValue, PathKey, Result};
 use crate::runtime::Runtime;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
@@ -18,20 +18,20 @@ pub fn link<T>(
 where
     T: Debug,
 {
-    let mut err = None;
     let exports = asts
         .named()
-        .map(|(path, ast)| (path.clone(), ast.exports()))
+        .map(|(path, ast)| (path.clone(), ast.borrow().exports()))
         .collect::<HashMap<_, _>>();
-    for mut ast in asts.iter_mut() {
-        let root_id = ast.root();
+    let mut err = None;
+    for ast in asts.iter_mut() {
+        let root_id = ast.borrow().root();
+        let mut ast = ast.borrow_mut();
         let linker = Linker::new(&mut ast, runtime, &exports);
         if let Err(e) = linker.link(root_id) {
             err = Some(e);
             break;
         }
     }
-
     match err {
         Some(err) => Err((asts, err)),
         None => Ok(asts.guarantee_state()),
@@ -44,7 +44,7 @@ where
 {
     ast: &'a mut Ast<T>,
     runtime: &'b Runtime,
-    exports: &'b HashMap<PathKey, HashMap<String, NodeID>>,
+    exports: &'b HashMap<PathKey, HashMap<String, (NodeID, bool)>>,
 }
 
 impl<'a, 'b, T> Linker<'a, 'b, T>
@@ -54,7 +54,7 @@ where
     fn new(
         ast: &'a mut Ast<T>,
         runtime: &'b Runtime,
-        exports: &'b HashMap<PathKey, HashMap<String, NodeID>>,
+        exports: &'b HashMap<PathKey, HashMap<String, (NodeID, bool)>>,
     ) -> Self {
         Self {
             ast,
@@ -68,13 +68,16 @@ where
         node_id: NodeID,
         ident: &str,
     ) -> Result<Option<(NodeID, NodeReferenceLocation)>> {
-        self.ast.closest_variable(node_id, ident)
+        match self.ast.closest_variable(node_id, ident) {
+            Ok(v) => Ok(v),
+            Err(err) => Err(Err::new(err.details, err.parts)),
+        }
     }
 
     fn closest_fn(&mut self, node_id: NodeID) -> Result<(NodeID, NodeReferenceLocation)> {
         match self.ast.closest_fn(node_id) {
             Some(id) => Ok(id),
-            _ => Err(self.ast.single_error(
+            _ => Err(Err::single(
                 "No function ancestor found starting at",
                 "statement outside of function",
                 vec![node_id],
@@ -85,7 +88,7 @@ where
     fn closest_loop(&mut self, node_id: NodeID) -> Result<(NodeID, NodeReferenceLocation)> {
         match self.ast.closest_loop(node_id) {
             Some(id) => Ok(id),
-            _ => Err(self.ast.single_error(
+            _ => Err(Err::single(
                 "No loop ancestor found starting at",
                 "statement outside of loop",
                 vec![node_id],
@@ -117,7 +120,7 @@ where
             PartialNodeValue::Unlinked(ident) => {
                 let (target_id, _) = match self.closest_variable(node_id, &ident)? {
                     Some(target) => target,
-                    None => Err(self.ast.single_error(
+                    None => Err(Err::single(
                         "Failed to find type",
                         "value not found",
                         vec![node_id],
@@ -213,7 +216,7 @@ where
                 PartialType::Uncomplete(NodeType::Unknown { ident }) => {
                     let (target_id, _) = match self.closest_variable(node_id, &ident)? {
                         Some(target) => target,
-                        None => Err(self.ast.single_error(
+                        None => Err(Err::single(
                             "Failed to find type",
                             "unknown type",
                             vec![node_id],
@@ -272,7 +275,7 @@ where
                     VariableAssignment { ident, path, expr } => {
                         let (variable, location) = match self.closest_variable(node_id, &ident)? {
                             Some(node_id) => node_id,
-                            None => Err(self.ast.single_error(
+                            None => Err(Err::single(
                                 "Failed to find variable to assign to",
                                 "variable not found",
                                 vec![node_id],
@@ -293,7 +296,7 @@ where
                     VariableValue { ident, path } => {
                         let (variable, location) = match self.closest_variable(node_id, &ident)? {
                             Some(target) => target,
-                            None => Err(self.ast.single_error(
+                            None => Err(Err::single(
                                 "Failed to find variable",
                                 "variable not found",
                                 vec![node_id],
@@ -306,7 +309,7 @@ where
                     Call { ident, args } => {
                         let (func, location) = match self.closest_variable(node_id, &ident)? {
                             Some(node_id) => node_id,
-                            None => Err(self.ast.single_error(
+                            None => Err(Err::single(
                                 "Failed to find variable to call",
                                 "function not found",
                                 vec![node_id],
@@ -333,8 +336,22 @@ where
                             if &module == "local" {
                                 if let Some((ident, path)) = path.split_last() {
                                     if let Some(export) = self.exports.get(path) {
-                                        if let Some(node_id) = export.get(ident.as_str()) {
-                                            body = Some(NodeBody::Reference { node_id: *node_id });
+                                        if let Some((reference_id, valid)) =
+                                            export.get(ident.as_str())
+                                        {
+                                            if *valid {
+                                                body = Some(NodeBody::Reference {
+                                                    node_id: *reference_id,
+                                                });
+                                            } else {
+                                                Err(Err::new(
+                                                    "Invalid import: Only allowed to import static declarations like types, constants or functions".to_string(),
+                                                    vec![
+                                                        ErrPart::new("Imported here".to_string(), vec![node_id]),
+                                                        ErrPart::new("This value is not static".to_string(), vec![*reference_id]),
+                                                    ]
+                                                ))?
+                                            }
                                         }
                                     }
                                 }
@@ -343,7 +360,7 @@ where
                         if let Some(body) = body {
                             body
                         } else {
-                            Err(self.ast.single_error(
+                            Err(Err::single(
                                 "Failed to find import",
                                 "import value not found",
                                 vec![node_id],

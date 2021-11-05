@@ -1,14 +1,15 @@
 use super::Result;
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody};
-use crate::ast::{Err, ErrPart, Path, PathKey};
+use crate::ast::{Err, Path, PathKey};
 use crate::token::Token;
+use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::{fmt, mem};
 
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct AstID(usize);
 
 impl AstID {
@@ -22,8 +23,23 @@ pub struct AstCollection<T = state::StateAny>
 where
     T: Debug,
 {
-    asts: Vec<Ast<T>>,
+    asts: Vec<RefCell<Ast<T>>>,
     names: HashMap<PathKey, AstID>,
+}
+
+pub struct AstGuard<'a, T>(NodeID, Ref<'a, Ast<T>>)
+where
+    T: Debug;
+
+impl<'a, T> Deref for AstGuard<'a, T>
+where
+    T: Debug,
+{
+    type Target = Node<T>;
+
+    fn deref(&self) -> &Node<T> {
+        &self.1.get_node(self.0)
+    }
 }
 
 impl<T> AstCollection<T>
@@ -37,19 +53,28 @@ where
         }
     }
 
-    pub fn get(&self, id: AstID) -> Option<&Ast<T>> {
-        self.asts.get(id.0)
+    pub fn root(&self) -> NodeID {
+        self.asts[0].borrow().root()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &Ast<T>> + '_ {
+    pub fn get_node(&self, id: NodeID) -> AstGuard<T> {
+        let ast = self.asts.get(id.ast().0).unwrap().borrow();
+        AstGuard(id, ast)
+    }
+
+    pub fn get(&self, id: AstID) -> &RefCell<Ast<T>> {
+        self.asts.get(id.0).unwrap()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &RefCell<Ast<T>>> + '_ {
         self.asts.iter()
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Ast<T>> + '_ {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut RefCell<Ast<T>>> + '_ {
         self.asts.iter_mut()
     }
 
-    pub fn named(&self) -> impl Iterator<Item = (&PathKey, &Ast<T>)> + '_ {
+    pub fn named(&self) -> impl Iterator<Item = (&PathKey, &RefCell<Ast<T>>)> + '_ {
         self.names.iter().map(|(name, i)| (name, &self.asts[i.0]))
     }
 
@@ -59,7 +84,7 @@ where
 
     pub fn add(&mut self, path: Path, ast: Ast<T>) {
         let id = AstID::new(self.asts.len());
-        self.asts.push(ast);
+        self.asts.push(RefCell::new(ast));
         self.names.insert(path.key(), id);
     }
 }
@@ -603,6 +628,7 @@ pub struct Ast<T = state::StateAny>
 where
     T: Debug,
 {
+    pub file_name: String,
     ast_id: AstID,
     nodes: Vec<Node<T>>,
     root: NodeID,
@@ -638,7 +664,7 @@ where
         }
     }
 
-    pub fn exports(&self) -> HashMap<String, NodeID> {
+    pub fn exports(&self) -> HashMap<String, (NodeID, bool)> {
         let root_id = self.root();
         let root = self.get_node(root_id);
         root.body
@@ -646,38 +672,28 @@ where
             .filter_map(|id| {
                 let child = self.get_node(*id);
                 match &child.body {
-                    NodeBody::VariableDeclaration { ident, .. }
-                    | NodeBody::ConstDeclaration { ident, .. }
-                    | NodeBody::StaticDeclaration { ident, .. }
-                    | NodeBody::TypeDeclaration { ident, .. } => Some((ident.to_string(), *id)),
+                    NodeBody::StaticDeclaration { ident, .. }
+                    | NodeBody::TypeDeclaration { ident, .. } => {
+                        Some((ident.to_string(), (*id, true)))
+                    }
+                    NodeBody::ConstDeclaration { ident, .. }
+                    | NodeBody::VariableDeclaration { ident, .. } => {
+                        Some((ident.to_string(), (*id, false)))
+                    }
                     _ => None,
                 }
             })
             .collect()
     }
 
-    pub fn unimplemented(&self, id: NodeID) -> Result {
-        Err(Err::from_parts(
-            self,
-            "Unimplemented".into(),
-            vec![ErrPart::new("".into(), vec![id])],
-        ))
-    }
-
-    pub fn error(&self, details: String, parts: Vec<ErrPart>) -> Err {
-        Err::from_parts(self, details, parts)
-    }
-
     pub fn single_error(&self, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Err {
-        Err::from_parts(
-            self,
-            details.into(),
-            vec![ErrPart::new(row_details.into(), nodes)],
-        )
+        // Ugly but it's an error so it's not the happy path!
+        Err::single(details, row_details, nodes)
     }
 
-    pub fn new(ast_id: AstID) -> Self {
+    pub fn new(file_name: String, ast_id: AstID) -> Self {
         Self {
+            file_name,
             ast_id,
             root: NodeID::zero(ast_id),
             nodes: Vec::new(),
@@ -785,7 +801,7 @@ where
         let pad_end = " ".repeat(pad_len);
         write!(f, "{}", pad_start)?;
 
-        write!(f, " Node({}):", node.id.0)?;
+        write!(f, " Node({},{}):", node.id.index(), node.id.ast().0)?;
         if node.has_closure_references() {
             write!(f, " closure ")?;
         }
@@ -818,6 +834,7 @@ where
     }
 
     pub fn get_node(&self, node_id: NodeID) -> &Node<T> {
+        assert_eq!(node_id.ast(), self.ast_id, "Accessing node from wrong ast");
         match self.nodes.get(node_id.0) {
             Some(node) => node,
             None => panic!("Could not find Node({}) in ast", node_id.0),
@@ -884,7 +901,7 @@ where
                 };
                 if ident == target_ident {
                     if let Some(closest_id) = closest_id {
-                        return Err(self.single_error(
+                        return Err(Err::single(
                             "Multiple variable declarations with same name encountered",
                             "Variable declaration",
                             vec![closest_id, child_id],
