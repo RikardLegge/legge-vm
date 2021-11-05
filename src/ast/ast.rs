@@ -53,6 +53,13 @@ where
         }
     }
 
+    pub fn reserve(&mut self) -> AstID {
+        let id = AstID::new(self.asts.len());
+        self.asts
+            .push(RefCell::new(Ast::new("...".to_string(), id)));
+        id
+    }
+
     pub fn root(&self) -> NodeID {
         self.asts[0].borrow().root()
     }
@@ -83,9 +90,9 @@ where
     }
 
     pub fn add(&mut self, path: Path, ast: Ast<T>) {
-        let id = AstID::new(self.asts.len());
-        self.asts.push(RefCell::new(ast));
+        let id = ast.id();
         self.names.insert(path.key(), id);
+        *self.asts[id.0].borrow_mut() = ast;
     }
 }
 

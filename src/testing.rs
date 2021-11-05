@@ -10,7 +10,7 @@ pub fn run_test(code: &str, expected_result: Option<Value>) {
     let result = Rc::new(RefCell::new(None));
     let assign_result = result.clone();
     run_code(
-        "test_generated.bc".to_string(),
+        ast::Path::new(vec!["test".to_string(), "generated".to_string()]),
         code.into(),
         LogLevel::LogNone,
         move |v| {
@@ -49,5 +49,6 @@ macro_rules! bc_test {
     };
 }
 
+use crate::ast;
 pub use bc_test;
 pub use bc_test_should_fail;

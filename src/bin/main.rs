@@ -1,5 +1,5 @@
-use leggevm::run_code;
 use leggevm::LogLevel;
+use leggevm::{ast, run_code};
 use std::env::args;
 use std::fs::File;
 use std::io::prelude::*;
@@ -17,12 +17,10 @@ fn main() {
     f.read_to_string(&mut contents)
         .expect("something went wrong reading the file");
 
-    let res = run_code(
-        filename.trim_end_matches(".bc").to_string(),
-        contents,
-        LogLevel::LogTiming,
-        &|v| println!("{:?}", v),
-    );
+    let path = ast::Path::new(vec![filename.trim_end_matches(".bc").to_string()]);
+    let res = run_code(path, contents, LogLevel::LogTiming, &|v| {
+        println!("{:?}", v)
+    });
     if res.is_some() {
         exit(0);
     } else {

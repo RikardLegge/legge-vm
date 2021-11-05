@@ -25,7 +25,7 @@ pub fn stop_timer(start: SystemTime) -> Duration {
 
 #[derive(Default, Debug)]
 pub struct AstTiming {
-    pub from_tokens: Duration,
+    pub build_ast: Duration,
     pub linker: Duration,
     pub treeshaker: Duration,
     pub type_inference: Duration,
@@ -34,6 +34,6 @@ pub struct AstTiming {
 
 impl AstTiming {
     pub fn total(&self) -> Duration {
-        self.from_tokens + self.linker + self.treeshaker + self.type_inference + self.type_checker
+        self.build_ast + self.linker + self.treeshaker + self.type_inference + self.type_checker
     }
 }

@@ -10,13 +10,7 @@ pub mod testing;
 pub mod token;
 
 use crate::ast::{NodeID, Path, ValidAstCollection};
-use crate::token::Token;
 pub use debug::Timing;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::Read;
-use std::rc::Rc;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq, Copy, Clone)]
@@ -27,57 +21,14 @@ pub enum LogLevel {
     LogEval = 3,
 }
 
-fn tokenize_recurse(path: String, code: String) -> HashMap<Path, Vec<Token>> {
-    let mut queue = Rc::new(RefCell::new(Vec::new()));
-    let mut all_tokens = HashMap::new();
-
-    let new_imports = queue.clone();
-    let tokens = token::from_chars(code.chars(), Some(code.len() / 5), |import| {
-        new_imports.borrow_mut().push(import)
-    });
-    all_tokens.insert(Path::new(vec![path]), tokens);
-
-    let new_imports = queue.clone();
-    while let Some(path) = {
-        let next = queue.borrow_mut().pop();
-        next
-    } {
-        if let [module, path @ .., _] = &path[..] {
-            if module == "local" && path.len() >= 1 {
-                let filename = &path[0];
-                let path = Path::new(path.into());
-                if !all_tokens.contains_key(&path) {
-                    let filepath = [filename, "bc"].join(".");
-                    if let Ok(mut file) = File::open(filepath) {
-                        let mut code = String::new();
-                        file.read_to_string(&mut code)
-                            .expect("something went wrong reading file");
-
-                        let tokens =
-                            token::from_chars(code.chars(), Some(code.len() / 5), |import| {
-                                new_imports.borrow_mut().push(import)
-                            });
-                        all_tokens.insert(path, tokens);
-                    }
-                }
-            }
-        }
-    }
-    all_tokens
-}
-
 pub fn compile(
     timing: &mut Timing,
     runtime: &runtime::Runtime,
     log_level: LogLevel,
-    path: String,
+    path: Path,
     code: String,
 ) -> Option<(bytecode::Bytecode, ValidAstCollection)> {
-    let start = debug::start_timer();
-    let tokens = tokenize_recurse(path, code);
-    timing.token = debug::stop_timer(start);
-
-    let result = ast::from_tokens(tokens, &runtime);
+    let result = ast::from_entrypoint(path, code, &runtime);
     let (asts, ast_timing) = match result {
         Ok((asts, ast_timing)) => (asts, ast_timing),
         Err((asts, e)) => {
@@ -99,7 +50,7 @@ pub fn compile(
     return Some((bytecode, asts));
 }
 
-pub fn run_code<F>(path: String, code: String, log_level: LogLevel, interrupt: F) -> Option<()>
+pub fn run_code<F>(path: Path, code: String, log_level: LogLevel, interrupt: F) -> Option<()>
 where
     F: Fn(bytecode::Value),
 {

@@ -9,13 +9,16 @@ mod typer;
 use colored::*;
 use std::cmp::{max, min};
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::result;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use tokio::io::AsyncReadExt;
 
-use crate::debug;
 use crate::runtime::Runtime;
 use crate::token::Token;
+use crate::{debug, token};
 
 use ast::StateTypesChecked;
 pub use ast::{Any, Linked, TypesChecked, TypesInferred};
@@ -197,28 +200,116 @@ impl Err {
     }
 }
 
-pub fn from_tokens(
-    tokens: HashMap<Path, Vec<Token>>,
+#[derive(Debug)]
+enum TaskState {
+    New(Path),
+    ToTokens(Path, String),
+    ToAst(Path, Vec<Token>),
+    Done(Option<(Path, result::Result<Ast, (Ast, Err)>)>),
+}
+
+fn to_asts(
+    path: Path,
+    file: String,
+    runtime: tokio::runtime::Runtime,
+) -> result::Result<AstCollection, (AstCollection, Err)> {
+    runtime.block_on(async {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut processed_paths = HashSet::new();
+
+        tx.send(TaskState::ToTokens(path.clone(), file)).unwrap();
+        processed_paths.insert(path);
+        let active_tasks = Arc::new(AtomicUsize::new(1));
+
+        let mut asts = AstCollection::new();
+        while let Some(task) = rx.recv().await {
+            match task {
+                TaskState::New(path) => {
+                    if !processed_paths.contains(&path) {
+                        processed_paths.insert(path.clone());
+                        let tx = tx.clone();
+                        tokio::task::spawn(async move {
+                            if let Ok(mut file) = tokio::fs::File::open(path.file()).await {
+                                let mut code = String::new();
+                                file.read_to_string(&mut code)
+                                    .await
+                                    .expect("something went wrong reading file");
+
+                                tx.send(TaskState::ToTokens(path, code)).unwrap();
+                            } else {
+                                tx.send(TaskState::Done(None)).unwrap();
+                            }
+                        });
+                    } else {
+                        tx.send(TaskState::Done(None)).unwrap();
+                    }
+                }
+                TaskState::ToTokens(path, code) => {
+                    let tx = tx.clone();
+                    let active_tasks = active_tasks.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let import_tx = tx.clone();
+                        let size = Some(code.len() / 5);
+                        let tokens =
+                            token::from_chars(code.chars(), size, move |import: Vec<String>| {
+                                if let [module, rest @ .., _] = &import[..] {
+                                    if module == "local" && rest.len() >= 1 {
+                                        let path = Path::new(rest.into());
+                                        active_tasks.fetch_add(1, Ordering::AcqRel);
+                                        import_tx.send(TaskState::New(path)).unwrap();
+                                    }
+                                }
+                            });
+                        tx.send(TaskState::ToAst(path, tokens)).unwrap();
+                    });
+                }
+                TaskState::ToAst(path, tokens) => {
+                    let ast_id = asts.reserve();
+
+                    let tx = tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let res = parser::ast_from_tokens(path.file(), ast_id, tokens.into_iter());
+                        tx.send(TaskState::Done(Some((path, res)))).unwrap();
+                    });
+                }
+                TaskState::Done(result) => {
+                    active_tasks.fetch_sub(1, Ordering::AcqRel);
+                    if let Some((path, res)) = result {
+                        match res {
+                            Ok(ast) => asts.add(path, ast),
+                            Err((ast, err)) => {
+                                asts.add(path, ast);
+                                return Err((asts, err));
+                            }
+                        }
+                    }
+                }
+            }
+            let active_tasks = active_tasks.load(Ordering::SeqCst);
+            if active_tasks == 0 {
+                break;
+            }
+        }
+        Ok(asts)
+    })
+}
+
+pub fn from_entrypoint(
+    path: Path,
+    code: String,
     runtime: &Runtime,
 ) -> result::Result<(AstCollection<StateTypesChecked>, debug::AstTiming), (AstCollection, Err)> {
     let mut timing = debug::AstTiming::default();
     let start = debug::start_timer();
-    let asts = {
-        let mut asts = AstCollection::new();
-        for (i, (path, tokens)) in tokens.into_iter().enumerate() {
-            let ast_id = AstID::new(i);
-            let ast = match parser::ast_from_tokens(path.file(), ast_id, tokens.into_iter()) {
-                Ok(ast) => ast,
-                Err((ast, err)) => {
-                    asts.add(path, ast);
-                    return Err((asts, err));
-                }
-            };
-            asts.add(path, ast);
-        }
-        asts
+    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let asts = match to_asts(path, code, tokio_runtime) {
+        Ok(asts) => asts,
+        Err((asts, err)) => return Err((asts, err)),
     };
-    timing.from_tokens = debug::stop_timer(start);
+    timing.build_ast = debug::stop_timer(start);
 
     let start = debug::start_timer();
     let asts = match linker::link(asts, runtime) {
