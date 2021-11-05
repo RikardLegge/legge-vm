@@ -59,6 +59,7 @@ and run any sequence of valid characters which can be good from an educational p
 - [x] Bugs
 - [x] Side effect based tree shaker
 - [x] Custom types
+- [x] Importing constants and functions from other files
 - [x] A few tests showcasing the functionality
 - [ ] Multi thread compilation
 - [ ] Decouple runtime from compiler
