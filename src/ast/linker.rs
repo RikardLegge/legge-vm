@@ -5,37 +5,77 @@ use crate::ast::ast::{
 };
 use crate::ast::nodebody::UnlinkedNodeBody::*;
 use crate::ast::nodebody::{NBCall, NodeBody};
-use crate::ast::{Err, ErrPart, NodeType, NodeValue, PathKey, Result};
-use crate::runtime::Runtime;
+use crate::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue, PathKey, Result};
+use crate::runtime::{FunctionDefinition, Runtime};
+use std::borrow::Borrow;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
+use std::sync::{Arc, Mutex, RwLock};
 use std::{mem, result};
 
+#[derive(Debug)]
+struct PendingRef {
+    target: (NodeID, NodeReferenceType),
+    referencer: (NodeID, NodeReferenceType),
+    loc: NodeReferenceLocation,
+}
+
 pub fn link<T>(
-    mut asts: AstCollection<T>,
-    runtime: &Runtime,
+    asts: AstCollection<T>,
+    vm_runtime: &Runtime,
+    runtime: &tokio::runtime::Runtime,
 ) -> result::Result<AstCollection<StateLinked>, (AstCollection<T>, Err)>
 where
-    T: Debug,
+    T: Debug + 'static,
 {
-    let exports = asts
-        .named()
-        .map(|(path, ast)| (path.clone(), ast.borrow().exports()))
-        .collect::<HashMap<_, _>>();
-    let mut err = None;
-    for ast in asts.iter_mut() {
-        let root_id = ast.borrow().root();
-        let mut ast = ast.borrow_mut();
-        let linker = Linker::new(&mut ast, runtime, &exports);
-        if let Err(e) = linker.link(root_id) {
-            err = Some(e);
-            break;
+    runtime.block_on(async {
+        let exports = asts
+            .named()
+            .map(|(path, ast)| (path.clone(), ast.read().unwrap().exports()))
+            .collect::<HashMap<_, _>>();
+        let exports = Arc::new(exports);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let asts = Arc::new(RwLock::new(asts));
+        let pending_refs = Arc::new(Mutex::new(Vec::new()));
+        for ast in asts.read().unwrap().iter() {
+            let id = ast.read().unwrap().id();
+
+            let vm_runtime = vm_runtime.definitions.clone();
+            let tx = tx.clone();
+            let asts = asts.clone();
+            let exports = exports.clone();
+            let pending_refs = pending_refs.clone();
+            tokio::task::spawn_blocking(move || {
+                let asts = asts.read().unwrap();
+                let vm_runtime = vm_runtime.borrow();
+                let mut ast = asts.get(id).write().unwrap();
+                let root_id = ast.root();
+                let linker = Linker::new(&mut ast, vm_runtime, &exports);
+                match linker.link(root_id) {
+                    Ok(pending) => pending_refs.lock().unwrap().push(pending),
+                    Err(e) => tx.send(e).unwrap(),
+                }
+            });
         }
-    }
-    match err {
-        Some(err) => Err((asts, err)),
-        None => Ok(asts.guarantee_state()),
-    }
+
+        drop(tx);
+        if let Some(err) = rx.recv().await {
+            let asts = Arc::try_unwrap(asts).unwrap().into_inner().unwrap();
+            return Err((asts, err));
+        }
+
+        let mut asts = Arc::try_unwrap(asts).unwrap().into_inner().unwrap();
+        let pending_refs: Vec<Vec<PendingRef>> =
+            Arc::try_unwrap(pending_refs).unwrap().into_inner().unwrap();
+        for outer in pending_refs {
+            for pending in outer {
+                asts.add_ref(pending.target, pending.referencer, pending.loc);
+            }
+        }
+
+        Ok(asts.guarantee_state())
+    })
 }
 
 struct Linker<'a, 'b, T>
@@ -43,7 +83,7 @@ where
     T: Debug,
 {
     ast: &'a mut Ast<T>,
-    runtime: &'b Runtime,
+    runtime: &'b Vec<FunctionDefinition>,
     exports: &'b HashMap<PathKey, HashMap<String, (NodeID, bool)>>,
 }
 
@@ -53,7 +93,7 @@ where
 {
     fn new(
         ast: &'a mut Ast<T>,
-        runtime: &'b Runtime,
+        runtime: &'b Vec<FunctionDefinition>,
         exports: &'b HashMap<PathKey, HashMap<String, (NodeID, bool)>>,
     ) -> Self {
         Self {
@@ -253,7 +293,22 @@ where
         Ok(tp)
     }
 
-    fn link(mut self, root_id: NodeID) -> Result<()> {
+    fn loc_relative_to_root(&self, mut node_id: NodeID) -> NodeReferenceLocation {
+        loop {
+            let node = self.ast.get_node(node_id);
+            if let Some(parent_id) = node.parent_id {
+                if node.is_closure_boundary() {
+                    break NodeReferenceLocation::Closure;
+                }
+                node_id = parent_id;
+            } else {
+                break NodeReferenceLocation::Local;
+            }
+        }
+    }
+
+    fn link(mut self, root_id: NodeID) -> Result<Vec<PendingRef>> {
+        let mut pending_refs = Vec::new();
         let mut queue = VecDeque::from(vec![root_id]);
         while let Some(node_id) = queue.pop_front() {
             let node = self.ast.get_node(node_id);
@@ -322,7 +377,7 @@ where
                     ImportValue { path, module } => {
                         let mut body = None;
                         if let [ident] = &path[..] {
-                            for (i, func) in self.runtime.functions.iter().enumerate() {
+                            for (i, func) in self.runtime.iter().enumerate() {
                                 if func.name == *ident && func.module == module {
                                     body = Some(NodeBody::ConstValue {
                                         tp: None,
@@ -342,6 +397,17 @@ where
                                             if *valid {
                                                 body = Some(NodeBody::Reference {
                                                     node_id: *reference_id,
+                                                });
+                                                pending_refs.push(PendingRef {
+                                                    target: (
+                                                        *reference_id,
+                                                        NodeReferenceType::ReadValue,
+                                                    ),
+                                                    referencer: (
+                                                        node_id,
+                                                        NodeReferenceType::WriteValue,
+                                                    ),
+                                                    loc: self.loc_relative_to_root(node_id),
                                                 });
                                             } else {
                                                 Err(Err::new(
@@ -393,6 +459,6 @@ where
                 self.link_types(node_id)?;
             }
         }
-        Ok(())
+        Ok(pending_refs)
     }
 }

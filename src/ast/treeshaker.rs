@@ -11,8 +11,8 @@ pub fn treeshake<T: Linked>(
 ) -> result::Result<AstCollection<T>, (AstCollection<T>, ast::Err)> {
     let mut err = None;
     for ast in asts.iter_mut() {
-        let root_id = ast.borrow().root();
-        let mut ast = ast.borrow_mut();
+        let root_id = ast.read().unwrap().root();
+        let mut ast = ast.write().unwrap();
         let shaker = TreeShaker::new(&mut ast);
         if let Err(e) = shaker.shake(root_id) {
             err = Some(e);

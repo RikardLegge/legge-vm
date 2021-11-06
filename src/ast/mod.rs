@@ -7,6 +7,7 @@ mod treeshaker;
 mod typer;
 
 use colored::*;
+use std::borrow::Borrow;
 use std::cmp::{max, min};
 
 use std::collections::HashSet;
@@ -95,7 +96,7 @@ impl Err {
                 let mut tokens = Vec::new();
                 let mut ids = HashSet::new();
                 for &node_id in &part.nodes {
-                    let ast = &asts.get(node_id.ast()).borrow();
+                    let ast = &asts.get(node_id.ast()).read().unwrap();
                     let mut root = ast.get_node(node_id);
                     let mut curr = ast.get_node(node_id);
                     loop {
@@ -149,7 +150,7 @@ impl Err {
         let mut builder = vec![];
 
         let mut curr_ast = token_parts[0].1.nodes[0].ast();
-        let file_name = &asts.get(curr_ast).borrow().file_name;
+        let file_name = &asts.get(curr_ast).read().unwrap().file_name;
         builder.push(format!("\n"));
         builder.push(format!(" {} \n", file_name));
         builder.push(format!("{}\n", "‾".repeat(file_name.len() + 2)));
@@ -158,7 +159,7 @@ impl Err {
             let i_ast = part.nodes[0].ast();
             if curr_ast != i_ast {
                 curr_ast = i_ast;
-                let file_name = &asts.get(curr_ast).borrow().file_name;
+                let file_name = &asts.get(curr_ast).read().unwrap().file_name;
                 builder.push(format!(" {} \n", file_name));
                 builder.push(format!("{}\n", "‾".repeat(file_name.len() + 2)));
             }
@@ -201,7 +202,7 @@ impl Err {
 }
 
 #[derive(Debug)]
-enum TaskState {
+enum ToAstTaskState {
     New(Path),
     ToTokens(Path, String),
     ToAst(Path, Vec<Token>),
@@ -211,20 +212,21 @@ enum TaskState {
 fn to_asts(
     path: Path,
     file: String,
-    runtime: tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Runtime,
 ) -> result::Result<AstCollection, (AstCollection, Err)> {
     runtime.block_on(async {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut processed_paths = HashSet::new();
 
-        tx.send(TaskState::ToTokens(path.clone(), file)).unwrap();
+        tx.send(ToAstTaskState::ToTokens(path.clone(), file))
+            .unwrap();
         processed_paths.insert(path);
         let active_tasks = Arc::new(AtomicUsize::new(1));
 
         let mut asts = AstCollection::new();
         while let Some(task) = rx.recv().await {
             match task {
-                TaskState::New(path) => {
+                ToAstTaskState::New(path) => {
                     if !processed_paths.contains(&path) {
                         processed_paths.insert(path.clone());
                         let tx = tx.clone();
@@ -235,16 +237,16 @@ fn to_asts(
                                     .await
                                     .expect("something went wrong reading file");
 
-                                tx.send(TaskState::ToTokens(path, code)).unwrap();
+                                tx.send(ToAstTaskState::ToTokens(path, code)).unwrap();
                             } else {
-                                tx.send(TaskState::Done(None)).unwrap();
+                                tx.send(ToAstTaskState::Done(None)).unwrap();
                             }
                         });
                     } else {
-                        tx.send(TaskState::Done(None)).unwrap();
+                        tx.send(ToAstTaskState::Done(None)).unwrap();
                     }
                 }
-                TaskState::ToTokens(path, code) => {
+                ToAstTaskState::ToTokens(path, code) => {
                     let tx = tx.clone();
                     let active_tasks = active_tasks.clone();
                     tokio::task::spawn_blocking(move || {
@@ -256,23 +258,23 @@ fn to_asts(
                                     if module == "local" && rest.len() >= 1 {
                                         let path = Path::new(rest.into());
                                         active_tasks.fetch_add(1, Ordering::AcqRel);
-                                        import_tx.send(TaskState::New(path)).unwrap();
+                                        import_tx.send(ToAstTaskState::New(path)).unwrap();
                                     }
                                 }
                             });
-                        tx.send(TaskState::ToAst(path, tokens)).unwrap();
+                        tx.send(ToAstTaskState::ToAst(path, tokens)).unwrap();
                     });
                 }
-                TaskState::ToAst(path, tokens) => {
+                ToAstTaskState::ToAst(path, tokens) => {
                     let ast_id = asts.reserve();
 
                     let tx = tx.clone();
                     tokio::task::spawn_blocking(move || {
                         let res = parser::ast_from_tokens(path.file(), ast_id, tokens.into_iter());
-                        tx.send(TaskState::Done(Some((path, res)))).unwrap();
+                        tx.send(ToAstTaskState::Done(Some((path, res)))).unwrap();
                     });
                 }
-                TaskState::Done(result) => {
+                ToAstTaskState::Done(result) => {
                     active_tasks.fetch_sub(1, Ordering::AcqRel);
                     if let Some((path, res)) = result {
                         match res {
@@ -305,14 +307,14 @@ pub fn from_entrypoint(
         .enable_all()
         .build()
         .unwrap();
-    let asts = match to_asts(path, code, tokio_runtime) {
+    let asts = match to_asts(path, code, &tokio_runtime) {
         Ok(asts) => asts,
         Err((asts, err)) => return Err((asts, err)),
     };
     timing.build_ast = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let asts = match linker::link(asts, runtime) {
+    let asts = match linker::link(asts, runtime, &tokio_runtime) {
         Ok(ast) => ast,
         Err((asts, err)) => {
             println!("{:?}", asts);
@@ -322,7 +324,7 @@ pub fn from_entrypoint(
     timing.linker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let asts = match typer::infer_types(asts, runtime) {
+    let asts = match typer::infer_types(asts, runtime.borrow()) {
         Ok(asts) => asts,
         Err((asts, err)) => {
             println!("{:?}", asts);

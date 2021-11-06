@@ -2,12 +2,14 @@ use crate::ast::NodeType;
 use crate::bytecode::Value::Int;
 use crate::bytecode::{Value, OP};
 use crate::interpreter::{Err, Interpreter, Result};
+use std::sync::Arc;
 
 pub type FunctionReturn = Result<Option<Value>>;
 pub type Function = &'static dyn Fn(&mut Interpreter, &mut Vec<Value>) -> FunctionReturn;
 
 pub struct Runtime {
-    pub functions: Vec<FunctionDefinition>,
+    pub definitions: Arc<Vec<FunctionDefinition>>,
+    pub functions: Vec<Function>,
 }
 
 pub struct FunctionDefinition {
@@ -16,58 +18,75 @@ pub struct FunctionDefinition {
     pub arguments: Vec<NodeType>,
     pub returns: NodeType,
     pub tp: NodeType,
-    pub function: Function,
 }
 
 pub fn std() -> Runtime {
     use crate::ast::NodeType::*;
-    let functions = vec![
-        ff("std", "int", vec![Any], Int, &to_int),
-        ff("std", "float", vec![Any], Float, &to_float),
-        ff(
-            "std",
-            "print",
-            vec![VarArg {
-                args: Box::new(Any),
-            }],
-            Void,
-            &print,
-        ),
-        ff("std", "assert", vec![Any, Any], Void, &assert),
-        ff("std", "exit", vec![Any], Void, &exit),
-        ff(
-            "std",
-            "touch",
-            vec![VarArg {
-                args: Box::new(Any),
-            }],
-            Void,
-            &touch,
-        ),
-        ff("math", "sin", vec![Int], Int, &sin),
-    ];
-    Runtime { functions }
+    let mut f = vec![];
+    let mut d = vec![];
+    ff(&mut f, &mut d, "std", "int", vec![Any], Int, &to_int);
+    ff(&mut f, &mut d, "std", "float", vec![Any], Float, &to_float);
+    ff(
+        &mut f,
+        &mut d,
+        "std",
+        "print",
+        vec![VarArg {
+            args: Box::new(Any),
+        }],
+        Void,
+        &print,
+    );
+    ff(
+        &mut f,
+        &mut d,
+        r"std",
+        "assert",
+        vec![Any, Any],
+        Void,
+        &assert,
+    );
+    ff(&mut f, &mut d, "std", "exit", vec![Any], Void, &exit);
+    ff(
+        &mut f,
+        &mut d,
+        "std",
+        "touch",
+        vec![VarArg {
+            args: Box::new(Any),
+        }],
+        Void,
+        &touch,
+    );
+    ff(&mut f, &mut d, "math", "sin", vec![Int], Int, &sin);
+    Runtime {
+        functions: f,
+        definitions: Arc::new(d),
+    }
 }
 
 fn ff(
+    functions: &mut Vec<Function>,
+    definitions: &mut Vec<FunctionDefinition>,
     namespace: &str,
     name: &str,
     arguments: Vec<NodeType>,
     returns: NodeType,
     function: Function,
-) -> FunctionDefinition {
+) {
     let tp = NodeType::Fn {
         args: arguments.clone(),
         returns: Box::new(returns.clone()),
     };
-    FunctionDefinition {
+    let definition = FunctionDefinition {
         module: namespace.into(),
         name: name.into(),
         arguments,
         returns,
-        function,
         tp,
-    }
+    };
+    definitions.push(definition);
+    functions.push(function);
 }
 
 fn to_int(_: &mut Interpreter, args: &mut Vec<Value>) -> FunctionReturn {

@@ -255,7 +255,7 @@ where
 
     fn evaluate_global_static(&mut self) -> usize {
         for ast in self.asts.iter() {
-            let root_id = ast.borrow().root();
+            let root_id = ast.read().unwrap().root();
             let node = self.asts.get_node(root_id);
             if let NodeBody::Block { static_body, .. } = &node.body {
                 self.ev_block_inner(static_body, &[]);
@@ -270,7 +270,7 @@ where
         let scope = self.with_scope(root_id, ContextType::Block, |bc| {
             let static_allocations = bc.evaluate_global_static();
             for ast in bc.asts.iter() {
-                let root_id = ast.borrow().root();
+                let root_id = ast.read().unwrap().root();
                 let usage = bc.ev_node(root_id);
                 assert_eq!(StackUsage::zero(), usage);
             }

@@ -2,11 +2,11 @@ use super::Result;
 use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody};
 use crate::ast::{Err, Path, PathKey};
 use crate::token::Token;
-use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{fmt, mem};
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
@@ -23,11 +23,11 @@ pub struct AstCollection<T = state::StateAny>
 where
     T: Debug,
 {
-    asts: Vec<RefCell<Ast<T>>>,
+    asts: Vec<RwLock<Ast<T>>>,
     names: HashMap<PathKey, AstID>,
 }
 
-pub struct AstGuard<'a, T>(NodeID, Ref<'a, Ast<T>>)
+pub struct AstGuard<'a, T>(NodeID, RwLockReadGuard<'a, Ast<T>>)
 where
     T: Debug;
 
@@ -39,6 +39,30 @@ where
 
     fn deref(&self) -> &Node<T> {
         &self.1.get_node(self.0)
+    }
+}
+
+pub struct AstGuardMut<'a, T>(NodeID, RwLockWriteGuard<'a, Ast<T>>)
+where
+    T: Debug;
+
+impl<'a, T> Deref for AstGuardMut<'a, T>
+where
+    T: Debug,
+{
+    type Target = Node<T>;
+
+    fn deref(&self) -> &Node<T> {
+        &self.1.get_node(self.0)
+    }
+}
+
+impl<'a, T> DerefMut for AstGuardMut<'a, T>
+where
+    T: Debug,
+{
+    fn deref_mut(&mut self) -> &mut Node<T> {
+        self.1.get_node_mut(self.0)
     }
 }
 
@@ -55,33 +79,37 @@ where
 
     pub fn reserve(&mut self) -> AstID {
         let id = AstID::new(self.asts.len());
-        self.asts
-            .push(RefCell::new(Ast::new("...".to_string(), id)));
+        self.asts.push(RwLock::new(Ast::new("...".to_string(), id)));
         id
     }
 
     pub fn root(&self) -> NodeID {
-        self.asts[0].borrow().root()
+        self.asts[0].read().unwrap().root()
     }
 
     pub fn get_node(&self, id: NodeID) -> AstGuard<T> {
-        let ast = self.asts.get(id.ast().0).unwrap().borrow();
+        let ast = self.asts.get(id.ast().0).unwrap().read().unwrap();
         AstGuard(id, ast)
     }
 
-    pub fn get(&self, id: AstID) -> &RefCell<Ast<T>> {
+    pub fn get_node_mut(&self, id: NodeID) -> AstGuardMut<T> {
+        let ast = self.asts.get(id.ast().0).unwrap().write().unwrap();
+        AstGuardMut(id, ast)
+    }
+
+    pub fn get(&self, id: AstID) -> &RwLock<Ast<T>> {
         self.asts.get(id.0).unwrap()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &RefCell<Ast<T>>> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &RwLock<Ast<T>>> + '_ {
         self.asts.iter()
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut RefCell<Ast<T>>> + '_ {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut RwLock<Ast<T>>> + '_ {
         self.asts.iter_mut()
     }
 
-    pub fn named(&self) -> impl Iterator<Item = (&PathKey, &RefCell<Ast<T>>)> + '_ {
+    pub fn named(&self) -> impl Iterator<Item = (&PathKey, &RwLock<Ast<T>>)> + '_ {
         self.names.iter().map(|(name, i)| (name, &self.asts[i.0]))
     }
 
@@ -92,7 +120,30 @@ where
     pub fn add(&mut self, path: Path, ast: Ast<T>) {
         let id = ast.id();
         self.names.insert(path.key(), id);
-        *self.asts[id.0].borrow_mut() = ast;
+        *self.asts[id.0].write().unwrap() = ast;
+    }
+
+    pub fn add_ref(
+        &mut self,
+        target: (NodeID, NodeReferenceType),
+        referencer: (NodeID, NodeReferenceType),
+        loc: NodeReferenceLocation,
+    ) {
+        let referenced_by = NodeReference::new(referencer.0, referencer.1, loc);
+        let inserted_referenced = self
+            .get_node_mut(target.0)
+            .referenced_by
+            .insert(referenced_by);
+
+        let references = NodeReference::new(target.0, target.1, loc);
+        let inserted_references = self
+            .get_node_mut(referencer.0)
+            .references
+            .insert(references);
+
+        if !(inserted_referenced && inserted_references) {
+            format!("WARNING: inserted already existing reference!");
+        }
     }
 }
 

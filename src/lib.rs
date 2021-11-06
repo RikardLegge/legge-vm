@@ -68,7 +68,8 @@ where
 
     let get_line = |node_id: NodeID| match asts
         .get(node_id.ast())
-        .borrow()
+        .read()
+        .unwrap()
         .get_node(node_id)
         .tokens
         .first()

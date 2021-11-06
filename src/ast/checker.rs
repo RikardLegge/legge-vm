@@ -14,8 +14,8 @@ where
 {
     let mut err = None;
     for ast in asts.iter() {
-        let root_id = ast.borrow().root();
-        let ast = ast.borrow();
+        let ast = ast.read().unwrap();
+        let root_id = ast.root();
         let checker = Checker::new(&ast, &asts);
         if let Err(e) = checker.check_all_types(root_id) {
             err = Some(e);

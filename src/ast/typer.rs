@@ -5,9 +5,9 @@ use crate::ast::{Ast, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result}
 use crate::runtime::Runtime;
 use crate::token::ArithmeticOP;
 use std::borrow::Borrow;
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::result;
+use std::sync::RwLock;
 
 pub fn infer_types<T>(
     asts: AstCollection<T>,
@@ -52,7 +52,7 @@ where
     T: Linked,
 {
     queue: VecDeque<NodeID>,
-    ast: &'a RefCell<Ast<T>>,
+    ast: &'a RwLock<Ast<T>>,
     asts: &'a AstCollection<T>,
     runtime: &'a Runtime,
     since_last_changed: usize,
@@ -62,8 +62,8 @@ impl<'a, T> Typer<'a, T>
 where
     T: Linked,
 {
-    pub fn new(ast: &'a RefCell<Ast<T>>, asts: &'a AstCollection<T>, runtime: &'a Runtime) -> Self {
-        let queue = VecDeque::from(vec![ast.borrow().root()]);
+    pub fn new(ast: &'a RwLock<Ast<T>>, asts: &'a AstCollection<T>, runtime: &'a Runtime) -> Self {
+        let queue = VecDeque::from(vec![ast.read().unwrap().root()]);
         let since_last_changed = 0;
         Self {
             queue,
@@ -104,8 +104,8 @@ where
 
     fn get_type(&self, node_id: &NodeID) -> Option<NodeType> {
         let node_id = *node_id;
-        let ast = self.ast.borrow();
-        if let Some(tp) = ast.borrow().get_node(node_id).maybe_tp() {
+        let ast = self.ast.read().unwrap();
+        if let Some(tp) = ast.get_node(node_id).maybe_tp() {
             Some(tp.clone())
         } else if let Some((_, tp)) = ast.borrow().partial_type(node_id) {
             Some(tp.clone())
@@ -133,7 +133,7 @@ where
                 }
             }
             NodeValue::RuntimeFn(id) => {
-                let func = &self.runtime.functions[*id];
+                let func = &self.runtime.definitions[*id];
                 func.tp.clone()
             }
         }
@@ -143,7 +143,7 @@ where
         use super::NodeType::*;
         use super::NodeTypeSource::*;
         use crate::ast::nodebody::NodeBody::*;
-        let ast = self.ast.borrow();
+        let ast = self.ast.read().unwrap();
         let tp = match &node.body {
             TypeReference { tp } => ast
                 .partial_type(*tp)
@@ -205,8 +205,7 @@ where
             PrefixOp { rhs, .. } => InferredType::maybe(self.get_type(rhs), Value),
             Reference { node_id } => {
                 drop(ast);
-                let ast = self.asts.get(node_id.ast()).borrow();
-                let node = ast.get_node(*node_id);
+                let node = self.asts.get_node(*node_id);
                 node.maybe_inferred_tp().cloned()
             }
             VariableValue { variable, path } => {
@@ -334,7 +333,7 @@ where
 
     pub fn infer_all_types(&mut self) -> Result<Option<()>> {
         while let Some(node_id) = self.queue.pop_front() {
-            let ast = self.ast.borrow();
+            let ast = self.ast.read().unwrap();
             let node = ast.get_node(node_id);
             for &child_id in node.body.children() {
                 if let None = ast.get_node(child_id).maybe_tp() {
@@ -345,7 +344,7 @@ where
             if let Some(tp) = tp {
                 let source = tp.source;
                 drop(ast);
-                let mut ast = self.ast.borrow_mut();
+                let mut ast = self.ast.write().unwrap();
                 let node = ast.get_node_mut(node_id);
                 node.infer_type(tp);
                 // Do not mark values which are only used as type checked
