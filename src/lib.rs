@@ -85,6 +85,8 @@ where
     timing.avg_instruction = timing.interpreter / timing.instructions as u32;
 
     if log_level >= LogLevel::LogTiming {
+        timing.line_count = asts.iter().map(|ast| ast.read().unwrap().line_count).sum();
+        timing.file_count = asts.iter().count();
         dbg!(&timing);
         dbg!(timing.total());
     }

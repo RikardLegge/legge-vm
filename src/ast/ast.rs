@@ -705,6 +705,7 @@ where
     T: Debug,
 {
     pub file_name: String,
+    pub line_count: usize,
     ast_id: AstID,
     nodes: Vec<Node<T>>,
     root: NodeID,
@@ -775,6 +776,7 @@ where
         Self {
             file_name,
             ast_id,
+            line_count: 0,
             root: NodeID::zero(ast_id),
             nodes: Vec::new(),
             _tp: PhantomData::default(),

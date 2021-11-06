@@ -5,6 +5,8 @@ pub struct Timing {
     pub ast: AstTiming,
     pub bytecode: Duration,
     pub interpreter: Duration,
+    pub line_count: usize,
+    pub file_count: usize,
     pub instructions: usize,
     pub avg_instruction: Duration,
 }

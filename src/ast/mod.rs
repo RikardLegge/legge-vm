@@ -270,8 +270,13 @@ fn to_asts(
 
                     let tx = tx.clone();
                     tokio::task::spawn_blocking(move || {
-                        let res = parser::ast_from_tokens(path.file(), ast_id, tokens.into_iter());
-                        tx.send(ToAstTaskState::Done(Some((path, res)))).unwrap();
+                        let last_token = tokens.last().cloned();
+                        let mut ast =
+                            parser::ast_from_tokens(path.file(), ast_id, tokens.into_iter());
+                        if let Ok(ast) = &mut ast {
+                            ast.line_count = last_token.map(|t| t.line).unwrap_or(0);
+                        }
+                        tx.send(ToAstTaskState::Done(Some((path, ast)))).unwrap();
                     });
                 }
                 ToAstTaskState::Done(result) => {
