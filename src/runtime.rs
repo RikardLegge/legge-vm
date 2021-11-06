@@ -12,6 +12,7 @@ pub struct Runtime {
     pub functions: Vec<Function>,
 }
 
+#[derive(Debug)]
 pub struct FunctionDefinition {
     pub module: String,
     pub name: String,

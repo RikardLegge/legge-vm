@@ -7,7 +7,6 @@ mod treeshaker;
 mod typer;
 
 use colored::*;
-use std::borrow::Borrow;
 use std::cmp::{max, min};
 
 use std::collections::HashSet;
@@ -148,6 +147,10 @@ impl Err {
         token_parts.sort_by(|(_, l), (_, r)| l.nodes[0].ast().cmp(&r.nodes[0].ast()));
 
         let mut builder = vec![];
+
+        if token_parts.len() == 0 {
+            return "Missing tokens to render...".to_string();
+        }
 
         let mut curr_ast = token_parts[0].1.nodes[0].ast();
         let file_name = &asts.get(curr_ast).read().unwrap().file_name;
@@ -329,10 +332,11 @@ pub fn from_entrypoint(
     timing.linker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let asts = match typer::infer_types(asts, runtime.borrow()) {
+    let asts = match typer::infer_types(asts, runtime, &tokio_runtime) {
         Ok(asts) => asts,
         Err((asts, err)) => {
             println!("{:?}", asts);
+            println!("{}", err.print_line(&asts));
             Err((asts.guarantee_state(), err))?
         }
     };

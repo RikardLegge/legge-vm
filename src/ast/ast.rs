@@ -121,6 +121,10 @@ where
         self.asts.iter()
     }
 
+    pub fn iter_keys(&self) -> impl Iterator<Item = AstID> + '_ {
+        self.iter().map(|ast| ast.read().unwrap().id())
+    }
+
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut RwLock<Ast<T>>> + '_ {
         self.asts.iter_mut()
     }

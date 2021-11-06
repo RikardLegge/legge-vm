@@ -65,7 +65,7 @@ and run any sequence of valid characters which can be good from an educational p
       - [ ] Type inference (MEDIUM: Already implemented )
       - [ ] Type checker (EASY: Data does not get mutated)
       - [ ] Bytecode generation (MEDIUM: Requires a pre-pass for exports)
-- [ ] Language features
+- [x] Language features
   - [x] Custom types
   - [x] Custom function declarations
   - [x] Closures

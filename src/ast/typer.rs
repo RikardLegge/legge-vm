@@ -1,73 +1,165 @@
 use crate::ast;
 use crate::ast::ast::{AstCollection, InferredType, Linked, StateTypesInferred};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
-use crate::ast::{Ast, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
-use crate::runtime::Runtime;
+use crate::ast::{Ast, AstID, ErrPart, Node, NodeID, NodeType, NodeTypeSource, NodeValue, Result};
+use crate::runtime::{FunctionDefinition, Runtime};
 use crate::token::ArithmeticOP;
 use std::borrow::Borrow;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::fmt::{Debug, Formatter};
 use std::result;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
+
+enum TyperState<T>
+where
+    T: Linked + 'static,
+{
+    TypeCheck(Typer<T>),
+    TypeCheckBlocked(AstID, Typer<T>),
+    Err(ast::Err),
+    Done(AstID),
+}
+
+impl<T> Debug for TyperState<T>
+where
+    T: Linked + 'static,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TyperState::TypeCheck(t) => write!(f, "TypeCheck({:?}, q:{})", t.ast_id, t.queue.len()),
+            TyperState::TypeCheckBlocked(ast_id, t) => {
+                write!(f, "TypeCheckBlocked({:?}, by: {:?})", t.ast_id, ast_id)
+            }
+            TyperState::Err(err) => write!(f, "Err({})", err.details),
+            TyperState::Done(ast_id) => write!(f, "Done({:?})", ast_id),
+        }
+    }
+}
 
 pub fn infer_types<T>(
     asts: AstCollection<T>,
-    runtime: &Runtime,
+    vm_runtime: &Runtime,
+    runtime: &tokio::runtime::Runtime,
 ) -> result::Result<AstCollection<StateTypesInferred>, (AstCollection<T>, ast::Err)>
 where
-    T: Linked,
+    T: Linked + 'static,
 {
-    let mut typers = asts
-        .iter()
-        .map(|ast| Typer::new(&ast, &asts, runtime))
-        .collect::<VecDeque<Typer<T>>>();
-    let mut since_last_changed = 0;
+    runtime.block_on(async {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut n_active = 0;
+        let asts = Arc::new(asts);
+        for id in (&asts).iter_keys() {
+            let asts = asts.clone();
+            let definitions = vm_runtime.definitions.clone();
+            let typer = Typer::new(id, asts, definitions);
+            tx.send(TyperState::TypeCheck(typer)).unwrap();
+            n_active += 1;
+        }
+        let mut since_last_changed = 0;
 
-    while let Some(mut typer) = typers.pop_front() {
-        match typer.infer_all_types() {
-            Err(err) => {
-                return Err((asts, err));
-            }
-            Ok(Some(_)) => since_last_changed = 0,
-            Ok(None) => {
-                since_last_changed += 1;
-                if since_last_changed > typers.len() + 1 {
-                    let err = ast::Err::single(
-                        "Failed to complete type check, unable to infer the type of the following expressions",
-                        "unable to infer type",
-                        typer.queue.into(),
-                    );
+        let mut blocked_checkers = HashMap::new();
+        let mut n_blocked = 0;
+
+        while let Some(msg) = rx.recv().await {
+            println!("{:?}", msg);
+            match msg {
+                TyperState::TypeCheck(mut typer) => {
+                    since_last_changed += 1;
+                    let tx = tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        match typer.infer_all_types() {
+                            Err(err) => tx.send(TyperState::Err(err)).unwrap(),
+                            Ok(Some(blocked_by)) => tx.send(TyperState::TypeCheckBlocked(blocked_by, typer)).unwrap(),
+                            Ok(None) => tx.send(TyperState::Done(typer.ast_id)).unwrap(),
+                        };
+                    });
+                }
+                TyperState::TypeCheckBlocked(by, typer) => {
+                    if !blocked_checkers.contains_key(&by) {
+                        blocked_checkers.insert(by, vec![]);
+                    }
+                    blocked_checkers.get_mut(&by).unwrap().push(typer);
+                    n_blocked += 1;
+                }
+                TyperState::Err(err) => {
+                    let asts = Arc::try_unwrap(asts).unwrap();
                     return Err((asts, err));
-                } else {
-                    typers.push_back(typer);
+                }
+                TyperState::Done(ast_id) => {
+                    since_last_changed = 0;
+                    n_active -= 1;
+                    if let Some(blocked) = blocked_checkers.get_mut(&ast_id) {
+                        let blocked = std::mem::replace(blocked, vec![]);
+                        for typer in blocked {
+                            tx.send(TyperState::TypeCheck(typer)).unwrap();
+                            n_blocked -= 1;
+                        }
+                    }
                 }
             }
+            if n_active == 0 {
+                break;
+            }
+            if since_last_changed > n_active || n_blocked == n_active {
+                let nodes = blocked_checkers
+                    .into_values()
+                    .map(|typers|typers
+                        .into_iter()
+                        .map(|typer|Vec::from(typer.queue))
+                        .reduce(|mut all, mut next|{
+                            all.append(&mut next);
+                            all
+                        })
+                        .unwrap_or(vec![])
+                    )
+                    .reduce(|mut all, mut next| {
+                        all.append(&mut next);
+                        all
+                    })
+                    .unwrap_or(vec![]);
+                let err = ast::Err::single(
+                    "Failed to complete type check, unable to infer the type of the following expressions",
+                    "unable to infer type",
+                    nodes,
+                );
+                let asts = Arc::try_unwrap(asts).unwrap();
+                return Err((asts, err));
+            }
         }
-    }
 
-    Ok(asts.guarantee_state())
+        let asts = Arc::try_unwrap(asts).unwrap();
+        Ok(asts.guarantee_state())
+    })
 }
 
-pub struct Typer<'a, T>
+#[derive(Debug)]
+pub struct Typer<T>
 where
     T: Linked,
 {
     queue: VecDeque<NodeID>,
-    ast: &'a RwLock<Ast<T>>,
-    asts: &'a AstCollection<T>,
-    runtime: &'a Runtime,
+    blocked: HashMap<NodeID, Vec<NodeID>>,
+    ast_id: AstID,
+    asts: Arc<AstCollection<T>>,
+    runtime: Arc<Vec<FunctionDefinition>>,
     since_last_changed: usize,
 }
 
-impl<'a, T> Typer<'a, T>
+impl<T> Typer<T>
 where
     T: Linked,
 {
-    pub fn new(ast: &'a RwLock<Ast<T>>, asts: &'a AstCollection<T>, runtime: &'a Runtime) -> Self {
-        let queue = VecDeque::from(vec![ast.read().unwrap().root()]);
+    pub fn new(
+        ast_id: AstID,
+        asts: Arc<AstCollection<T>>,
+        runtime: Arc<Vec<FunctionDefinition>>,
+    ) -> Self {
+        let root = asts.get(ast_id).read().unwrap().root();
+        let queue = VecDeque::from(vec![root]);
         let since_last_changed = 0;
         Self {
             queue,
-            ast,
+            ast_id,
             asts,
             runtime,
             since_last_changed,
@@ -102,9 +194,17 @@ where
         }
     }
 
+    fn ast(&self) -> RwLockReadGuard<Ast<T>> {
+        self.asts.get(self.ast_id).read().unwrap()
+    }
+
+    fn ast_mut(&self) -> RwLockWriteGuard<Ast<T>> {
+        self.asts.get(self.ast_id).write().unwrap()
+    }
+
     fn get_type(&self, node_id: &NodeID) -> Option<NodeType> {
         let node_id = *node_id;
-        let ast = self.ast.read().unwrap();
+        let ast = self.ast();
         if let Some(tp) = ast.get_node(node_id).maybe_tp() {
             Some(tp.clone())
         } else if let Some((_, tp)) = ast.borrow().partial_type(node_id) {
@@ -133,8 +233,8 @@ where
                 }
             }
             NodeValue::RuntimeFn(id) => {
-                let func = &self.runtime.definitions[*id];
-                func.tp.clone()
+                let def: &Vec<FunctionDefinition> = &self.runtime.borrow();
+                def[*id].tp.clone()
             }
         }
     }
@@ -143,7 +243,7 @@ where
         use super::NodeType::*;
         use super::NodeTypeSource::*;
         use crate::ast::nodebody::NodeBody::*;
-        let ast = self.ast.read().unwrap();
+        let ast = self.ast();
         let tp = match &node.body {
             TypeReference { tp } => ast
                 .partial_type(*tp)
@@ -205,7 +305,7 @@ where
             PrefixOp { rhs, .. } => InferredType::maybe(self.get_type(rhs), Value),
             Reference { node_id } => {
                 drop(ast);
-                let node = self.asts.get_node(*node_id);
+                let node = (&self.asts).get_node(*node_id);
                 node.maybe_inferred_tp().cloned()
             }
             VariableValue { variable, path } => {
@@ -331,9 +431,10 @@ where
         Ok(tp)
     }
 
-    pub fn infer_all_types(&mut self) -> Result<Option<()>> {
+    pub fn infer_all_types(&mut self) -> Result<Option<AstID>> {
+        let ast_id = self.ast_id;
         while let Some(node_id) = self.queue.pop_front() {
-            let ast = self.ast.read().unwrap();
+            let ast = self.asts.get(self.ast_id).read().unwrap();
             let node = ast.get_node(node_id);
             for &child_id in node.body.children() {
                 if let None = ast.get_node(child_id).maybe_tp() {
@@ -341,12 +442,13 @@ where
                 }
             }
             let tp = self.infer_type(node)?;
+            drop(ast);
             if let Some(tp) = tp {
                 let source = tp.source;
-                drop(ast);
-                let mut ast = self.ast.write().unwrap();
+                let mut ast = self.ast_mut();
                 let node = ast.get_node_mut(node_id);
                 node.infer_type(tp);
+                drop(ast);
                 // Do not mark values which are only used as type checked
                 if source != NodeTypeSource::Usage {
                     self.since_last_changed = 0;
@@ -357,9 +459,26 @@ where
             self.since_last_changed += 1;
             self.queue.push_back(node_id);
             if self.since_last_changed > self.queue.len() {
-                return Ok(None);
+                let foreign_node_id = self.queue.iter().find(|n| n.ast() != ast_id);
+                return match foreign_node_id {
+                    Some(id) => {
+                        self.since_last_changed = 0;
+                        Ok(Some(id.ast()))
+                    }
+                    None => {
+                        let parts = self
+                            .queue
+                            .iter()
+                            .map(|n| ErrPart::new("Unable to resolve type".to_string(), vec![*n]))
+                            .collect();
+                        Err(ast::Err::new(
+                            "Unable to make progress type checking...".to_string(),
+                            parts,
+                        ))
+                    }
+                };
             }
         }
-        Ok(Some(()))
+        Ok(None)
     }
 }
