@@ -58,19 +58,19 @@ and run any sequence of valid characters which can be good from an educational p
   - [x] Type checker
   - [x] Side effect based tree shaker
   - [x] Bytecode generator
+  - [ ] Multi threading
+      - [x] Parsing
+      - [x] Ast variable resolution/inter file linking
+      - [ ] Tree shaker (HARD: In it's current state not possible due to high level of interleaving between code units)
+      - [ ] Type inference (MEDIUM: Already implemented )
+      - [ ] Type checker (EASY: Data does not get mutated)
+      - [ ] Bytecode generation (MEDIUM: Requires a pre-pass for exports)
 - [ ] Language features
   - [x] Custom types
   - [x] Custom function declarations
   - [x] Closures
   - [x] External functions
   - [x] Importing constants and functions from other files
-- [ ] Multi thread
-  - [x] Parsing
-  - [x] Ast variable resolution/inter file linking
-  - [ ] Tree shaker
-  - [ ] Type inference
-  - [ ] Type checker
-  - [ ] Bytecode generation
 - [x] Bytecode interpreter
 - [x] Bugs
 - [x] A few tests showcasing the functionality
