@@ -9,7 +9,10 @@ for arbitrary code.
 ## Goals
 The goals of this project is to learn more about the difficulties when implementing compilers, type checkers and tree-shaking with 
 strong focus on good error messages and with the goal of reasonable performance. Current single core compilation speed is around 
-100K lines of code per second on an 2.6 GHz Intel Core i7 9750H for compilation, type checking and tree shaking. 
+1M lines of code per 10 seconds on an 2.6 GHz Intel Core i7 9750H for compilation, type checking and tree shaking. 
+Multi core compilation speed is improving. 
+Parsing and inter file linking have been made multi threaded and can currently process 1M lines in around 700ms on 8 hyper threaded cores, 
+same machine as before.
 
 ## Experiments
 Since this is a project for learning and testing out ideas, here are a few exotic functions of the compiler.
@@ -49,19 +52,28 @@ Allowing this for the type checker would be more of a challenge but should not b
 recommendations are likely to be worse than for the parser but would allow the compiler to compile
 and run any sequence of valid characters which can be good from an educational point of view. 
 
-## Features
-- [x] Compiler (Tokenizer -> Ast -> Bytecode)
-- [x] Interpreter
-- [x] Type checker
-- [x] Custom function declarations
-- [x] Closures
-- [x] External functions
+## Features/Roadmap
+- [x] Compiler 
+  - [x] Source code to byte code
+  - [x] Type checker
+  - [x] Side effect based tree shaker
+  - [x] Bytecode generator
+- [ ] Language features
+  - [x] Custom types
+  - [x] Custom function declarations
+  - [x] Closures
+  - [x] External functions
+  - [x] Importing constants and functions from other files
+- [ ] Multi thread
+  - [x] Parsing
+  - [x] Ast variable resolution/inter file linking
+  - [ ] Tree shaker
+  - [ ] Type inference
+  - [ ] Type checker
+  - [ ] Bytecode generation
+- [x] Bytecode interpreter
 - [x] Bugs
-- [x] Side effect based tree shaker
-- [x] Custom types
-- [x] Importing constants and functions from other files
 - [x] A few tests showcasing the functionality
-- [x] Multi thread compilation of tokenization and ast building
 - [ ] Decouple runtime from compiler
 - [ ] Test to se if it actually works
 
