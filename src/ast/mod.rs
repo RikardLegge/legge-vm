@@ -335,7 +335,7 @@ pub fn from_entrypoint(
 
     let start = debug::start_timer();
     let asts = match checker::check_types(asts) {
-        Ok(ast) => ast,
+        Ok(asts) => asts,
         Err((asts, err)) => {
             println!("{:?}", asts);
             Err((asts.guarantee_state(), err))?
@@ -344,13 +344,13 @@ pub fn from_entrypoint(
     timing.type_checker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    // let asts = match treeshaker::treeshake(asts) {
-    //     Ok(ast) => ast,
-    //     Err((ast, err)) => {
-    //         println!("{:?}", ast);
-    //         Err(err)?
-    //     }
-    // };
+    let asts = match treeshaker::treeshake(asts) {
+        Ok(asts) => asts,
+        Err((asts, err)) => {
+            println!("{:?}", asts);
+            Err((asts.guarantee_state(), err))?
+        }
+    };
     timing.treeshaker = debug::stop_timer(start);
 
     Ok((asts, timing))

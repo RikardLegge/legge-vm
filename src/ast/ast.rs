@@ -18,13 +18,29 @@ impl AstID {
     }
 }
 
-#[derive(Debug)]
 pub struct AstCollection<T = state::StateAny>
 where
     T: Debug,
 {
     asts: Vec<RwLock<Ast<T>>>,
     names: HashMap<PathKey, AstID>,
+}
+
+impl<T> Debug for AstCollection<T>
+where
+    T: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "AstCollection {{\n")?;
+        for (i, (name, id)) in self.names.iter().enumerate() {
+            let ast = &self.asts[id.0].read().unwrap();
+            write!(f, "{:?}:\n{:?}", name, ast)?;
+            if i + 1 < self.asts.len() {
+                write!(f, "\n")?;
+            }
+        }
+        write!(f, "}}")
+    }
 }
 
 pub struct AstGuard<'a, T>(NodeID, RwLockReadGuard<'a, Ast<T>>)
@@ -92,7 +108,7 @@ where
         AstGuard(id, ast)
     }
 
-    pub fn get_node_mut(&self, id: NodeID) -> AstGuardMut<T> {
+    pub fn get_node_mut(&mut self, id: NodeID) -> AstGuardMut<T> {
         let ast = self.asts.get(id.ast().0).unwrap().write().unwrap();
         AstGuardMut(id, ast)
     }
@@ -409,6 +425,8 @@ impl SideEffectSet {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum NodeReferenceType {
+    ReadExternalValue,
+    WriteExternalValue,
     ReadValue,
     WriteValue,
     ExecuteValue,

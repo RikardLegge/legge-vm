@@ -18,9 +18,7 @@ fn main() {
         .expect("something went wrong reading the file");
 
     let path = ast::Path::new(vec![filename.trim_end_matches(".bc").to_string()]);
-    let res = run_code(path, contents, LogLevel::LogTiming, &|v| {
-        println!("{:?}", v)
-    });
+    let res = run_code(path, contents, LogLevel::LogEval, &|v| println!("{:?}", v));
     if res.is_some() {
         exit(0);
     } else {

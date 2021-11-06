@@ -2,7 +2,7 @@ use super::{Ast, NodeID, Result};
 use crate::ast;
 use crate::ast::ast::{AstCollection, Linked, NodeReference, PartialNodeValue, SideEffect};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody, NodeBodyIterator};
-use crate::ast::{Node, NodeType, NodeValue};
+use crate::ast::{Node, NodeReferenceType, NodeType, NodeValue};
 use std::collections::{HashSet, VecDeque};
 use std::result;
 
@@ -110,7 +110,9 @@ where
                     // Safety: the child ids of the node is not updated in mark_dependencies_as_active.
                     let children = unsafe { self.node_children(&node_id) };
                     for &child_id in children {
-                        self.mark_dependencies_as_active(child_id, effect)
+                        if child_id.ast() == self.ast.id() {
+                            self.mark_dependencies_as_active(child_id, effect)
+                        }
                     }
                 }
             }
@@ -178,7 +180,9 @@ where
 
             // Safety: the nodes references table is not updated in mark_dependencies_as_active.
             for reference in unsafe { self.node_references(&node_id) } {
-                self.mark_dependencies_as_active(reference.id, effect)
+                if reference.ref_tp != NodeReferenceType::ReadExternalValue {
+                    self.mark_dependencies_as_active(reference.id, effect)
+                }
             }
             self.stack.remove(&node_id);
         }
@@ -231,7 +235,9 @@ where
 
             // Safety: the nodes referenced_by table is not updated in mark_dependencies_as_active.
             for reference in unsafe { self.node_referenced_by(&node_id) } {
-                self.find_mark_alive_triggers(reference.id, effect);
+                if reference.ref_tp != NodeReferenceType::WriteExternalValue {
+                    self.find_mark_alive_triggers(reference.id, effect);
+                }
             }
 
             self.stack.remove(&node_id);

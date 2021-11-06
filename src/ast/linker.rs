@@ -401,11 +401,11 @@ where
                                                 pending_refs.push(PendingRef {
                                                     target: (
                                                         *reference_id,
-                                                        NodeReferenceType::ReadValue,
+                                                        NodeReferenceType::ReadExternalValue,
                                                     ),
                                                     referencer: (
                                                         node_id,
-                                                        NodeReferenceType::WriteValue,
+                                                        NodeReferenceType::WriteExternalValue,
                                                     ),
                                                     loc: self.loc_relative_to_root(node_id),
                                                 });

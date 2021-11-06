@@ -1,9 +1,6 @@
-import std.int;
-import std.float;
+import std.touch;
 
 b :: 10;
 a :: 1 + b;
 
-import local.main.factory;
-
-factory(10);
+touch(b);
