@@ -98,5 +98,7 @@ where
         dbg!(&timing);
         dbg!(timing.total());
     }
+    let a = Box::new((bytecode, asts));
+    Box::leak(a);
     return Some(());
 }

@@ -1,9 +1,10 @@
 use crate::ast;
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{
-    Ast, AstCollection, Linked, NodeID, NodeType, NodeValue, TypesChecked, TypesInferred,
+    Ast, AstCollection, AstID, Linked, NodeID, NodeType, NodeValue, TypesChecked, TypesInferred,
 };
 use crate::token::ArithmeticOP;
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
@@ -43,7 +44,7 @@ where
 
             tokio::task::spawn_blocking(move || {
                 let ast = &asts.get(ast_id).read().unwrap();
-                let mut bc = Generator::new(context);
+                let mut bc = Generator::new(context, ast);
                 let (global, local) = bc.evaluate(ast);
                 let procedures = bc.procedures;
                 tx.send(Ok((ast_id, global, local, procedures))).unwrap();
@@ -120,7 +121,7 @@ fn allocate_global_variables<T>(asts: &AstCollection<T>) -> (Scope, Context)
 where
     T: Linked + TypesInferred + TypesChecked,
 {
-    let mut bc = Generator::new(None);
+    let mut bc = Generator::new(None, &asts.get(AstID::new(0)).read().unwrap());
     let root_id = asts.root();
 
     let (scope, context) = bc.with_scope(root_id, ContextType::Block, |bc| {
@@ -130,7 +131,7 @@ where
             let root_id = ast.root();
             let node = asts.get_node(root_id);
             if let NodeBody::Block { static_body, .. } = &node.body {
-                bc.ev_block_allocate_variables(&ast, [static_body]);
+                bc.ev_block_allocate_variables(&ast, &[static_body]);
             } else {
                 unreachable!()
             }
@@ -240,36 +241,22 @@ enum ContextType {
 }
 
 #[derive(Clone)]
-struct ContextVariable {
-    node_id: NodeID,
-    offset: usize,
-    requires_closure: bool,
-}
-
-impl ContextVariable {
-    fn new(node_id: NodeID, offset: usize, requires_closure: bool) -> Self {
-        Self {
-            node_id,
-            offset,
-            requires_closure,
-        }
-    }
-}
-
-#[derive(Clone)]
 struct Context {
     node_id: NodeID,
-    variables: Vec<ContextVariable>,
+    closure_variables: HashMap<NodeID, usize>,
+    local_variables: HashMap<NodeID, usize>,
     tp: ContextType,
 }
 
 impl Context {
     fn new(node_id: NodeID, tp: ContextType) -> Self {
-        let variables = Vec::new();
+        let local_variables = HashMap::new();
+        let closure_variables = HashMap::new();
         Self {
             node_id,
             tp,
-            variables,
+            local_variables,
+            closure_variables,
         }
     }
 
@@ -278,13 +265,11 @@ impl Context {
     }
 
     fn allocations(&self, has_closure_reference: bool) -> usize {
-        let mut allocations = 0;
-        for var in &self.variables {
-            if var.requires_closure == has_closure_reference {
-                allocations += 1;
-            }
+        if has_closure_reference {
+            self.closure_variables.len()
+        } else {
+            self.local_variables.len()
         }
-        allocations
     }
 }
 
@@ -336,6 +321,7 @@ where
     scopes: Vec<Scope>,
     contexts: Vec<Context>,
     global_context: Option<Context>,
+    dummy_offset: usize,
     _tp: PhantomData<T>,
 }
 
@@ -343,11 +329,12 @@ impl<T> Generator<T>
 where
     T: Linked + TypesInferred + TypesChecked,
 {
-    fn new(global_context: Option<Context>) -> Self {
+    fn new(global_context: Option<Context>, ast: &Ast<T>) -> Self {
         Generator {
             procedures: Vec::new(),
             scopes: Vec::new(),
             contexts: Vec::new(),
+            dummy_offset: ast.nodes().len(),
             global_context,
             _tp: PhantomData::default(),
         }
@@ -358,12 +345,13 @@ where
         let (global_scope, new_context) = self.with_scope(root_id, ContextType::Block, |bc| {
             let node = ast.get_node(root_id);
             if let NodeBody::Block { static_body, .. } = &node.body {
-                bc.ev_block_inner(ast, [static_body]);
+                bc.ev_block_inner(ast, &[static_body]);
             } else {
                 unreachable!()
             }
         });
-        assert!(new_context.variables.is_empty());
+        assert!(new_context.closure_variables.is_empty());
+        assert!(new_context.local_variables.is_empty());
 
         let (ast_scope, _) = self.with_scope(root_id, ContextType::Block, |bc| {
             let node = ast.get_node(root_id);
@@ -373,8 +361,8 @@ where
                 ..
             } = &node.body
             {
-                bc.ev_block_allocate_variables(ast, [import_body, dynamic_body]);
-                let allocations = bc.ev_block_inner(ast, [import_body, dynamic_body]);
+                bc.ev_block_allocate_variables(ast, &[import_body, dynamic_body]);
+                let allocations = bc.ev_block_inner(ast, &[import_body, dynamic_body]);
                 if allocations > 0 {
                     bc.add_op(root_id, OP::PopStack(allocations));
                 }
@@ -394,18 +382,16 @@ where
     fn get_variable_offset(&self, var_id: NodeID, field: Option<Vec<usize>>) -> SFOffset {
         let mut closure_offset = 0;
         for context in self.context_rev() {
-            if let Some(var) = context.variables.iter().find(|var| var.node_id == var_id) {
-                return if var.requires_closure {
-                    SFOffset::Closure {
-                        offset: var.offset,
-                        depth: closure_offset,
-                        field,
-                    }
-                } else {
-                    SFOffset::Stack {
-                        offset: var.offset as isize,
-                        field,
-                    }
+            if let Some(var) = context.local_variables.get(&var_id) {
+                return SFOffset::Stack {
+                    offset: (*var) as isize,
+                    field,
+                };
+            } else if let Some(var) = context.closure_variables.get(&var_id) {
+                return SFOffset::Closure {
+                    offset: *var,
+                    depth: closure_offset,
+                    field,
                 };
             }
             if context.tp == ContextType::ClosureBoundary {
@@ -478,15 +464,24 @@ where
         let has_closure_reference = ast.get_node(var_id).has_closure_references();
         let offset = self.new_var_offset(has_closure_reference);
         let context = self.get_context_mut();
-        let var = ContextVariable::new(var_id, offset, has_closure_reference);
-        context.variables.push(var);
+        if has_closure_reference {
+            context.closure_variables.insert(var_id, offset);
+        } else {
+            context.local_variables.insert(var_id, offset);
+        }
     }
 
     fn add_dummy_var(&mut self, has_closure_reference: bool) {
         let offset = self.new_var_offset(has_closure_reference);
+        let node_id = NodeID::new(self.dummy_offset, AstID::new(usize::MAX));
+        self.dummy_offset += 1;
+
         let context = self.get_context_mut();
-        let var = ContextVariable::new(Default::default(), offset, has_closure_reference);
-        context.variables.push(var);
+        if has_closure_reference {
+            context.closure_variables.insert(node_id, offset);
+        } else {
+            context.local_variables.insert(node_id, offset);
+        }
     }
 
     fn add_proc(&mut self, mut scope: Scope) -> usize {
@@ -545,7 +540,7 @@ where
                 static_body,
                 import_body,
                 dynamic_body,
-            } => self.ev_block(ast, node_id, [static_body, import_body, dynamic_body]),
+            } => self.ev_block(ast, node_id, &[static_body, import_body, dynamic_body]),
             Call(NBCall { func, args }) => self.ev_call(ast, node_id, *func, args, true),
             VariableValue { variable, path } => {
                 self.ev_variable_value(ast, node_id, *variable, path)
@@ -597,7 +592,8 @@ where
                     import_body,
                     dynamic_body,
                 } => {
-                    let usage = bc.ev_block(ast, body_id, [static_body, import_body, dynamic_body]);
+                    let usage =
+                        bc.ev_block(ast, body_id, &[static_body, import_body, dynamic_body]);
                     assert_eq!(usage.pushed, usage.popped);
                 }
                 _ => panic!("The body of a loop statement must be a scope"),
@@ -632,7 +628,7 @@ where
                 import_body,
                 dynamic_body,
             } => {
-                let usage = self.ev_block(ast, body_id, [static_body, import_body, dynamic_body]);
+                let usage = self.ev_block(ast, body_id, &[static_body, import_body, dynamic_body]);
                 assert_eq!(usage.pushed, usage.popped);
             }
             _ => panic!("The body of an if statement must be a Block"),
@@ -724,7 +720,8 @@ where
                     import_body,
                     dynamic_body,
                 } => {
-                    let usage = bc.ev_block(ast, body_id, [static_body, import_body, dynamic_body]);
+                    let usage =
+                        bc.ev_block(ast, body_id, &[static_body, import_body, dynamic_body]);
                     assert_eq!(StackUsage::zero(), usage);
                 }
                 _ => panic!("The body of a procedure statement must be a Block"),
@@ -862,62 +859,61 @@ where
         }
     }
 
-    fn ev_block_allocate_variables<const N: usize>(&mut self, ast: &Ast<T>, body: [&[NodeID]; N]) {
-        for child_id in body.into_iter().flatten() {
-            let child_id = *child_id;
-            let node = ast.get_node(child_id);
-            if node.is_dead() {
-                continue;
-            }
-            if node.has_closure_references() {
-                match &node.body {
-                    NodeBody::VariableDeclaration { .. }
-                    | NodeBody::ConstDeclaration { .. }
-                    | NodeBody::TypeDeclaration { .. }
-                    | NodeBody::StaticDeclaration { .. }
-                    | NodeBody::Import { .. } => {
-                        self.add_var(ast, child_id);
-                        self.add_op(child_id, OP::PushToClosure(Value::Unset));
-                    }
-                    _ => (),
+    fn ev_block_allocate_variables(&mut self, ast: &Ast<T>, body: &[&[NodeID]]) {
+        for body_part in body.iter() {
+            for child_id in (*body_part).iter() {
+                let child_id = *child_id;
+                let node = ast.get_node(child_id);
+                if node.is_dead() {
+                    continue;
                 }
-            } else {
-                match &node.body {
-                    NodeBody::VariableDeclaration { .. }
-                    | NodeBody::ConstDeclaration { .. }
-                    | NodeBody::TypeDeclaration { .. }
-                    | NodeBody::StaticDeclaration { .. }
-                    | NodeBody::Import { .. } => {
-                        self.add_var(ast, child_id);
-                        self.add_op(child_id, OP::PushImmediate(Value::Unset));
+                if node.has_closure_references() {
+                    match &node.body {
+                        NodeBody::VariableDeclaration { .. }
+                        | NodeBody::ConstDeclaration { .. }
+                        | NodeBody::TypeDeclaration { .. }
+                        | NodeBody::StaticDeclaration { .. }
+                        | NodeBody::Import { .. } => {
+                            self.add_var(ast, child_id);
+                            self.add_op(child_id, OP::PushToClosure(Value::Unset));
+                        }
+                        _ => (),
                     }
-                    _ => (),
+                } else {
+                    match &node.body {
+                        NodeBody::VariableDeclaration { .. }
+                        | NodeBody::ConstDeclaration { .. }
+                        | NodeBody::TypeDeclaration { .. }
+                        | NodeBody::StaticDeclaration { .. }
+                        | NodeBody::Import { .. } => {
+                            self.add_var(ast, child_id);
+                            self.add_op(child_id, OP::PushImmediate(Value::Unset));
+                        }
+                        _ => (),
+                    }
                 }
             }
         }
     }
 
-    fn ev_block_inner<const N: usize>(&mut self, ast: &Ast<T>, body: [&[NodeID]; N]) -> usize {
+    fn ev_block_inner(&mut self, ast: &Ast<T>, body: &[&[NodeID]]) -> usize {
         let mut stack_usage = StackUsage::new(0, 0);
-        for child_id in body.into_iter().flatten() {
-            let child_id = *child_id;
-            stack_usage += self.ev_node(ast, child_id);
-            if stack_usage.popped > stack_usage.pushed {
-                panic!("More elements have been popped than pushed");
+        for body_part in body.iter() {
+            for child_id in body_part.iter() {
+                let child_id = *child_id;
+                stack_usage += self.ev_node(ast, child_id);
+                if stack_usage.popped > stack_usage.pushed {
+                    panic!("More elements have been popped than pushed");
+                }
             }
         }
         assert_eq!(stack_usage.pushed, stack_usage.popped);
         self.get_context().local_allocations()
     }
 
-    fn ev_block<const N: usize>(
-        &mut self,
-        ast: &Ast<T>,
-        node_id: NodeID,
-        body: [&[NodeID]; N],
-    ) -> StackUsage {
+    fn ev_block(&mut self, ast: &Ast<T>, node_id: NodeID, body: &[&[NodeID]]) -> StackUsage {
         let (_, allocations) = self.with_context(node_id, ContextType::Block, |bc| {
-            bc.ev_block_allocate_variables(ast, body.clone());
+            bc.ev_block_allocate_variables(ast, body);
             bc.ev_block_inner(ast, body)
         });
         if allocations > 0 {
