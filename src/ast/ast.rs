@@ -16,6 +16,10 @@ impl AstID {
     pub fn new(id: usize) -> Self {
         Self(id)
     }
+
+    pub fn index(&self) -> usize {
+        self.0
+    }
 }
 
 pub struct AstCollection<T = state::StateAny>
@@ -119,6 +123,10 @@ where
 
     pub fn iter(&self) -> impl Iterator<Item = &RwLock<Ast<T>>> + '_ {
         self.asts.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.asts.len()
     }
 
     pub fn iter_keys(&self) -> impl Iterator<Item = AstID> + '_ {

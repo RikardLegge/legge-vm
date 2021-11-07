@@ -191,6 +191,7 @@ where
     fn parse(&mut self) -> Result<()> {
         let node = self.any_node(None);
         let mut static_statements = Vec::new();
+        let mut import_statements = Vec::new();
         let mut dynamic_statements = Vec::new();
         while self.peek_token().any(None).is_ok() {
             let statement = self.do_statement(node.id)?;
@@ -198,6 +199,7 @@ where
                 NodeBody::TypeDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
                     static_statements.push(statement)
                 }
+                NodeBody::Import { .. } => import_statements.push(statement),
                 _ => dynamic_statements.push(statement),
             }
         }
@@ -205,6 +207,7 @@ where
             node,
             NodeBody::Block {
                 static_body: static_statements,
+                import_body: import_statements,
                 dynamic_body: dynamic_statements,
             },
         );
@@ -297,6 +300,7 @@ where
 
     fn do_block(&mut self, node: PendingNode) -> Result {
         let mut static_statements = Vec::new();
+        let mut import_statements = Vec::new();
         let mut dynamic_statements = Vec::new();
         while self.peek_token().not(&TokenType::RightCurlyBrace)? {
             let statement = self.do_statement(node.id)?;
@@ -304,6 +308,7 @@ where
                 NodeBody::TypeDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
                     static_statements.push(statement)
                 }
+                NodeBody::Import { .. } => import_statements.push(statement),
                 _ => dynamic_statements.push(statement),
             }
         }
@@ -312,6 +317,7 @@ where
             node,
             NodeBody::Block {
                 static_body: static_statements,
+                import_body: import_statements,
                 dynamic_body: dynamic_statements,
             },
         ))
@@ -848,6 +854,7 @@ where
 
                 let body = NodeBody::Block {
                     static_body: vec![],
+                    import_body: vec![],
                     dynamic_body: vec![ret_id],
                 };
                 self.add_node(node, body)

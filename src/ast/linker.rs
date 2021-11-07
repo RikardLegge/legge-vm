@@ -10,7 +10,7 @@ use crate::runtime::{FunctionDefinition, Runtime};
 use std::borrow::Borrow;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::{mem, result};
 
 #[derive(Debug)]
@@ -37,7 +37,6 @@ where
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let asts = Arc::new(RwLock::new(asts));
-        let pending_refs = Arc::new(Mutex::new(Vec::new()));
         for ast in asts.read().unwrap().iter() {
             let id = ast.read().unwrap().id();
 
@@ -45,7 +44,6 @@ where
             let tx = tx.clone();
             let asts = asts.clone();
             let exports = exports.clone();
-            let pending_refs = pending_refs.clone();
             tokio::task::spawn_blocking(move || {
                 let asts = asts.read().unwrap();
                 let vm_runtime = vm_runtime.borrow();
@@ -53,28 +51,33 @@ where
                 let root_id = ast.root();
                 let linker = Linker::new(&mut ast, vm_runtime, &exports);
                 match linker.link(root_id) {
-                    Ok(pending) => pending_refs.lock().unwrap().push(pending),
-                    Err(e) => tx.send(e).unwrap(),
+                    Ok(pending) => tx.send(Ok(pending)).unwrap(),
+                    Err(e) => tx.send(Err(e)).unwrap(),
                 }
             });
         }
 
         drop(tx);
-        if let Some(err) = rx.recv().await {
-            let asts = Arc::try_unwrap(asts).unwrap().into_inner().unwrap();
-            return Err((asts, err));
-        }
-
-        let mut asts = Arc::try_unwrap(asts).unwrap().into_inner().unwrap();
-        let pending_refs: Vec<Vec<PendingRef>> =
-            Arc::try_unwrap(pending_refs).unwrap().into_inner().unwrap();
-        for outer in pending_refs {
-            for pending in outer {
-                asts.add_ref(pending.target, pending.referencer, pending.loc);
+        let mut pending_refs = Vec::new();
+        let mut errors = Vec::new();
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                Ok(pending) => pending_refs.push(pending),
+                Err(err) => errors.push(err),
             }
         }
 
-        Ok(asts.guarantee_state())
+        let mut asts = Arc::try_unwrap(asts).unwrap().into_inner().unwrap();
+        if let Some(err) = errors.pop() {
+            Err((asts, err))
+        } else {
+            for outer in pending_refs {
+                for pending in outer {
+                    asts.add_ref(pending.target, pending.referencer, pending.loc);
+                }
+            }
+            Ok(asts.guarantee_state())
+        }
     })
 }
 

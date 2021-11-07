@@ -44,7 +44,10 @@ impl<'a> Interpreter<'a> {
             pending_frame: None,
             frame: StackFrame {
                 stack_pointer: 0,
-                closure: None,
+                closure: Some(Rc::new(RefCell::new(Closure {
+                    parent: None,
+                    stack: Vec::new(),
+                }))),
             },
             get_line: &|_| 0,
             pc: Some(0),
