@@ -325,7 +325,8 @@ pub fn from_entrypoint(
     let asts = match linker::link(asts, runtime, &tokio_runtime) {
         Ok(ast) => ast,
         Err((asts, err)) => {
-            println!("{:?}", asts);
+            // println!("{:?}", asts);
+            println!("{}", err.print_line(&asts));
             Err((asts.guarantee_state(), err))?
         }
     };
@@ -335,7 +336,7 @@ pub fn from_entrypoint(
     let asts = match typer::infer_types(asts, runtime, &tokio_runtime) {
         Ok(asts) => asts,
         Err((asts, err)) => {
-            println!("{:?}", asts);
+            // println!("{:?}", asts);
             println!("{}", err.print_line(&asts));
             Err((asts.guarantee_state(), err))?
         }
@@ -346,19 +347,25 @@ pub fn from_entrypoint(
     let asts = match checker::check_types(asts) {
         Ok(asts) => asts,
         Err((asts, err)) => {
-            println!("{:?}", asts);
+            // println!("{:?}", asts);
+            println!("{}", err.print_line(&asts));
             Err((asts.guarantee_state(), err))?
         }
     };
     timing.type_checker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let asts = match treeshaker::treeshake(asts) {
-        Ok(asts) => asts,
-        Err((asts, err)) => {
-            println!("{:?}", asts);
-            Err((asts.guarantee_state(), err))?
+    let asts = if false {
+        match treeshaker::treeshake(asts) {
+            Ok(asts) => asts,
+            Err((asts, err)) => {
+                // println!("{:?}", asts);
+                println!("{}", err.print_line(&asts));
+                Err((asts.guarantee_state(), err))?
+            }
         }
+    } else {
+        asts
     };
     timing.treeshaker = debug::stop_timer(start);
 

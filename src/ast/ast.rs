@@ -1031,7 +1031,7 @@ where
         }
     }
 
-    pub fn partial_type(&self, node_id: NodeID) -> Option<(NodeID, &NodeType)> {
+    pub fn partial_type<'a, 'b: 'a>(&'b self, node_id: NodeID) -> Option<(NodeID, &'a NodeType)> {
         let node = self.get_node(node_id);
         match &node.body {
             NodeBody::TypeDeclaration { tp, .. } | NodeBody::TypeReference { tp } => {

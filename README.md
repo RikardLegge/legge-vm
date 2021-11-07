@@ -61,8 +61,8 @@ and run any sequence of valid characters which can be good from an educational p
   - [ ] Multi threading
       - [x] Parsing
       - [x] Ast variable resolution/inter file linking
+      - [x] Type inference
       - [ ] Tree shaker (HARD: In it's current state not possible due to high level of interleaving between code units)
-      - [ ] Type inference (MEDIUM: Already implemented )
       - [ ] Type checker (EASY: Data does not get mutated)
       - [ ] Bytecode generation (MEDIUM: Requires a pre-pass for exports)
 - [x] Language features
