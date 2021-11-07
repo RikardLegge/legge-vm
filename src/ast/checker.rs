@@ -5,28 +5,48 @@ use crate::ast::ast::{AstCollection, StateTypesChecked, TypesInferred};
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{Err, ErrPart, NodeID, NodeType};
 use std::result;
+use std::sync::Arc;
 
 pub fn check_types<T: TypesInferred>(
     asts: AstCollection<T>,
+    runtime: &tokio::runtime::Runtime,
 ) -> result::Result<AstCollection<StateTypesChecked>, (AstCollection<T>, Err)>
 where
-    T: TypesInferred,
+    T: TypesInferred + 'static,
 {
-    let mut err = None;
-    for ast in asts.iter() {
-        let ast = ast.read().unwrap();
-        let root_id = ast.root();
-        let checker = Checker::new(&ast, &asts);
-        if let Err(e) = checker.check_all_types(root_id) {
-            err = Some(e);
-            break;
-        }
-    }
+    runtime.block_on(async {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-    match err {
-        Some(err) => Err((asts, err)),
-        None => Ok(asts.guarantee_state()),
-    }
+        let asts = Arc::new(asts);
+        for ast_id in (&asts).iter_keys() {
+            let asts = asts.clone();
+            let tx = tx.clone();
+            tokio::task::spawn_blocking(move || {
+                let ast = asts.get(ast_id).read().unwrap();
+                let root_id = ast.root();
+                let checker = Checker::new(&ast, &asts);
+
+                let result = checker.check_all_types(root_id);
+                tx.send(result).unwrap();
+            });
+        }
+        drop(tx);
+
+        let mut errors = vec![];
+        while let Some(msg) = rx.recv().await {
+            if let Err(err) = msg {
+                errors.push(err);
+            }
+        }
+
+        let asts = Arc::try_unwrap(asts).unwrap();
+
+        if let Some(err) = errors.pop() {
+            Err((asts, err))
+        } else {
+            Ok(asts.guarantee_state())
+        }
+    })
 }
 
 pub struct Checker<'a, T>

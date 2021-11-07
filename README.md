@@ -62,9 +62,9 @@ and run any sequence of valid characters which can be good from an educational p
       - [x] Parsing
       - [x] Ast variable resolution/inter file linking
       - [x] Type inference
-      - [ ] Tree shaker (HARD: In it's current state not possible due to high level of interleaving between code units)
-      - [ ] Type checker (EASY: Data does not get mutated)
-      - [ ] Bytecode generation (MEDIUM: Requires a pre-pass for exports)
+      - [x] Type checker
+      - [ ] Bytecode generation (In progress)
+      - [ ] Tree shaker (Requires rewrite: In it's current state not possible due to high level of interleaving between code units)
 - [x] Language features
   - [x] Custom types
   - [x] Custom function declarations

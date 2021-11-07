@@ -20,4 +20,4 @@
     import std.exit;
     import local.prelude.b;
 
-    exit(b);
+    exit(new(b));

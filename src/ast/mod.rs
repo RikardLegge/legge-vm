@@ -326,7 +326,6 @@ pub fn from_entrypoint(
         Ok(ast) => ast,
         Err((asts, err)) => {
             // println!("{:?}", asts);
-            println!("{}", err.print_line(&asts));
             Err((asts.guarantee_state(), err))?
         }
     };
@@ -337,18 +336,16 @@ pub fn from_entrypoint(
         Ok(asts) => asts,
         Err((asts, err)) => {
             // println!("{:?}", asts);
-            println!("{}", err.print_line(&asts));
             Err((asts.guarantee_state(), err))?
         }
     };
     timing.type_inference = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let asts = match checker::check_types(asts) {
+    let asts = match checker::check_types(asts, &tokio_runtime) {
         Ok(asts) => asts,
         Err((asts, err)) => {
             // println!("{:?}", asts);
-            println!("{}", err.print_line(&asts));
             Err((asts.guarantee_state(), err))?
         }
     };
@@ -360,7 +357,6 @@ pub fn from_entrypoint(
             Ok(asts) => asts,
             Err((asts, err)) => {
                 // println!("{:?}", asts);
-                println!("{}", err.print_line(&asts));
                 Err((asts.guarantee_state(), err))?
             }
         }
