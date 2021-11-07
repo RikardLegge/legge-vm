@@ -20,6 +20,27 @@ where
         let (scope, context) = allocate_global_variables(&asts);
         let init_instructions = scope.instructions;
 
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        for ast_id in (&asts).iter_keys() {
+            let tx = tx.clone();
+            let asts = asts.clone();
+            let context = Some(context.clone());
+
+            tokio::task::spawn_blocking(move || {
+                let ast = &asts.get(ast_id).read().unwrap();
+                let mut bc = Generator::new(context, ast);
+                let (global, local) = bc.evaluate(ast);
+                let procedures = bc.procedures;
+                tx.send(Ok((ast_id, global, local, procedures, bc.procedure_len)))
+                    .unwrap();
+                if false {
+                    tx.send(Err(())).unwrap();
+                }
+            });
+        }
+
+        let mut proc_instruction_len = vec![0; asts.len()];
         let mut global_instructions = vec![vec![]; asts.len()];
         let mut instructions = vec![vec![]; asts.len()];
         let mut proc_instructions = vec![vec![]; asts.len()];
@@ -32,37 +53,18 @@ where
             inst.push(Instruction::new(node_id, OP::Halt));
             inst
         };
-
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
         let mut proc_start_offset = init_instructions.len() + halt_instructions.len();
-
-        for ast_id in (&asts).iter_keys() {
-            let tx = tx.clone();
-            let asts = asts.clone();
-            let context = Some(context.clone());
-
-            tokio::task::spawn_blocking(move || {
-                let ast = &asts.get(ast_id).read().unwrap();
-                let mut bc = Generator::new(context, ast);
-                let (global, local) = bc.evaluate(ast);
-                let procedures = bc.procedures;
-                tx.send(Ok((ast_id, global, local, procedures))).unwrap();
-                if false {
-                    tx.send(Err(())).unwrap();
-                }
-            });
-        }
 
         drop(tx);
         while let Some(msg) = rx.recv().await {
             match msg {
-                Ok((ast_id, global, local, procedures)) => {
+                Ok((ast_id, global, local, procedures, proc_length)) => {
                     let ast_i = ast_id.index();
                     proc_start_offset += global.len() + local.len();
                     global_instructions[ast_i] = global;
                     instructions[ast_i] = local;
                     proc_instructions[ast_i] = procedures;
+                    proc_instruction_len[ast_i] = proc_length;
                 }
                 _ => unimplemented!(),
             }
@@ -72,7 +74,7 @@ where
         for ast in asts.iter() {
             let ast_i = ast.read().unwrap().id().index();
             proc_offsets[ast_i] = proc_start_offset;
-            proc_start_offset += proc_instructions[ast_i].len();
+            proc_start_offset += proc_instruction_len[ast_i];
         }
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -86,11 +88,13 @@ where
             let offset = proc_offsets[ast_i];
             let tx = tx.clone();
             tokio::task::spawn_blocking(move || {
-                for set in [&mut global, &mut local, &mut proc] {
-                    for inst in set {
-                        if let OP::PushImmediate(Value::ProcAddress(proc_index)) = &mut inst.op {
-                            *proc_index += offset;
-                        }
+                for inst in global
+                    .iter_mut()
+                    .chain(local.iter_mut())
+                    .chain(proc.iter_mut().flatten())
+                {
+                    if let OP::PushImmediate(Value::ProcAddress(proc_index)) = &mut inst.op {
+                        *proc_index += offset;
                     }
                 }
                 tx.send((ast_i, global, local, proc)).unwrap();
@@ -111,7 +115,7 @@ where
         code.extend(global_instructions.into_iter().flatten());
         code.extend(instructions.into_iter().flatten());
         code.extend(halt_instructions.into_iter());
-        code.extend(proc_instructions.into_iter().flatten());
+        code.extend(proc_instructions.into_iter().flatten().flatten());
 
         Bytecode { code }
     })
@@ -317,7 +321,8 @@ struct Generator<T>
 where
     T: Debug,
 {
-    procedures: Vec<Instruction>,
+    procedures: Vec<Vec<Instruction>>,
+    procedure_len: usize,
     scopes: Vec<Scope>,
     contexts: Vec<Context>,
     global_context: Option<Context>,
@@ -331,6 +336,7 @@ where
 {
     fn new(global_context: Option<Context>, ast: &Ast<T>) -> Self {
         Generator {
+            procedure_len: 0,
             procedures: Vec::new(),
             scopes: Vec::new(),
             contexts: Vec::new(),
@@ -484,9 +490,10 @@ where
         }
     }
 
-    fn add_proc(&mut self, mut scope: Scope) -> usize {
-        let proc_id = self.procedures.len();
-        self.procedures.append(&mut scope.instructions);
+    fn add_proc(&mut self, scope: Scope) -> usize {
+        let proc_id = self.procedure_len;
+        self.procedure_len += scope.instructions.len();
+        self.procedures.push(scope.instructions);
         proc_id
     }
 
