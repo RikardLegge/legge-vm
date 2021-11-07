@@ -265,42 +265,63 @@ where
 
     fn evaluate(&mut self) -> Scope {
         let root_id = self.asts.root();
-        let global_scope = self.with_scope(root_id, ContextType::Block, |bc| {
-            let static_allocations = bc.allocate_global_variables();
-            for ast in bc.asts.iter() {
-                let root_id = ast.read().unwrap().root();
-                let node = self.asts.get_node(root_id);
-                if let NodeBody::Block { static_body, .. } = &node.body {
-                    bc.ev_block_inner(static_body.iter().cloned());
-                } else {
-                    unreachable!()
-                }
-                let usage = bc.ev_node(root_id);
-                assert_eq!(StackUsage::zero(), usage);
-            }
-            for ast in bc.asts.iter() {
-                let root_id = ast.read().unwrap().root();
-                let mut ast_scope = bc.with_scope(root_id, ContextType::Block, |bc| {
-                    let node = bc.asts.get_node(root_id);
-                    if let NodeBody::Block { dynamic_body, .. } = &node.body {
-                        bc.ev_block_allocate_variables(dynamic_body.iter().cloned());
-                        bc.ev_block_inner(dynamic_body.iter().cloned());
-                    } else {
-                        unreachable!()
-                    }
-                    let usage = bc.ev_node(root_id);
-                    assert_eq!(StackUsage::zero(), usage);
+        let (mut init_scope, mut global_context, static_allocations) =
+            self.with_scope(root_id, ContextType::Block, |bc| {
+                bc.allocate_global_variables()
+            });
+
+        let mut global_scopes = Vec::new();
+        let mut ast_scopes = Vec::new();
+        for ast in self.asts.iter() {
+            let root_id = ast.read().unwrap().root();
+            let (context, (global_scope, ast_scope)) =
+                self.with_existing_context(global_context, |bc| {
+                    let (global_scope, new_context, ..) =
+                        bc.with_scope(root_id, ContextType::Block, |bc| {
+                            let node = self.asts.get_node(root_id);
+                            if let NodeBody::Block { static_body, .. } = &node.body {
+                                bc.ev_block_inner(static_body.iter().cloned());
+                            } else {
+                                unreachable!()
+                            }
+                            let usage = bc.ev_node(root_id);
+                            assert_eq!(StackUsage::zero(), usage);
+                        });
+                    assert!(new_context.variables.is_empty());
+
+                    let (ast_scope, _, _) = bc.with_scope(root_id, ContextType::Block, |bc| {
+                        let node = bc.asts.get_node(root_id);
+                        if let NodeBody::Block { dynamic_body, .. } = &node.body {
+                            bc.ev_block_allocate_variables(dynamic_body.iter().cloned());
+                            bc.ev_block_inner(dynamic_body.iter().cloned());
+                        } else {
+                            unreachable!()
+                        }
+                        let usage = bc.ev_node(root_id);
+                        assert_eq!(StackUsage::zero(), usage);
+                    });
+
+                    (global_scope, ast_scope)
                 });
-                bc.get_scope_mut()
-                    .instructions
-                    .append(&mut ast_scope.instructions);
-            }
+            global_scopes.push(global_scope.instructions);
+            ast_scopes.push(ast_scope.instructions);
+            global_context = context;
+        }
+        let (mut end_scope, ..) = self.with_scope(root_id, ContextType::Block, |bc| {
             if static_allocations > 0 {
                 bc.add_op(root_id, OP::PopStack(static_allocations));
             }
         });
         assert_eq!(0, self.scopes.len());
-        global_scope
+
+        init_scope
+            .instructions
+            .extend(global_scopes.into_iter().flatten());
+        init_scope
+            .instructions
+            .extend(ast_scopes.into_iter().flatten());
+        init_scope.instructions.append(&mut end_scope.instructions);
+        init_scope
     }
 
     fn get_variable_offset(
@@ -420,42 +441,45 @@ where
         self.get_scope_mut().instructions[index].op = op
     }
 
-    fn with_context<F, K>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> K
+    fn with_context<F, K>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> (Context, K)
     where
         F: Fn(&mut Self) -> K,
     {
-        self.push_context(node_id, tp);
-        let result = func(self);
-        self.pop_context(node_id);
-        result
-    }
-
-    fn with_scope<F>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> Scope
-    where
-        F: Fn(&mut Self),
-    {
-        self.push_scope(node_id);
-        self.with_context(node_id, tp, func);
-        self.pop_scope(node_id)
-    }
-
-    fn push_context(&mut self, node_id: NodeID, tp: ContextType) {
         self.contexts.push(Context::new(node_id, tp));
-    }
 
-    fn pop_context(&mut self, node_id: NodeID) {
+        let result = func(self);
+
         let context = self.contexts.pop().unwrap();
         assert_eq!(context.node_id, node_id);
+
+        (context, result)
     }
 
-    fn push_scope(&mut self, node_id: NodeID) {
+    fn with_existing_context<F, K>(&mut self, context: Context, func: F) -> (Context, K)
+    where
+        F: Fn(&mut Self) -> K,
+    {
+        let node_id = context.node_id;
+        self.contexts.push(context);
+
+        let result = func(self);
+
+        let context = self.contexts.pop().unwrap();
+        assert_eq!(context.node_id, node_id);
+        (context, result)
+    }
+
+    fn with_scope<F, K>(&mut self, node_id: NodeID, tp: ContextType, func: F) -> (Scope, Context, K)
+    where
+        F: Fn(&mut Self) -> K,
+    {
         self.scopes.push(Scope::new(node_id));
-    }
 
-    fn pop_scope(&mut self, node_id: NodeID) -> Scope {
+        let (context, result) = self.with_context(node_id, tp, func);
+
         let scope = self.scopes.pop().unwrap();
         assert_eq!(scope.node_id, node_id);
-        scope
+        (scope, context, result)
     }
 
     fn ev_node(&mut self, node_id: NodeID) -> StackUsage {
@@ -591,7 +615,7 @@ where
     }
 
     fn ev_procedure(&mut self, node_id: NodeID, args: &[NodeID], body_id: NodeID) -> StackUsage {
-        let scope = self.with_scope(node_id, ContextType::ClosureBoundary, |bc| {
+        let (scope, ..) = self.with_scope(node_id, ContextType::ClosureBoundary, |bc| {
             for (i, arg) in args.iter().enumerate() {
                 if bc.asts.get_node(*arg).has_closure_references() {
                     // All variables are by default passed to function on the stack.
@@ -814,7 +838,7 @@ where
         static_body: &[NodeID],
         dynamic_body: &[NodeID],
     ) -> StackUsage {
-        let allocations = self.with_context(node_id, ContextType::Block, |bc| {
+        let (_, allocations) = self.with_context(node_id, ContextType::Block, |bc| {
             bc.ev_block_allocate_variables(static_body.iter().chain(dynamic_body).cloned());
             bc.ev_block_inner(static_body.iter().chain(dynamic_body).cloned())
         });
