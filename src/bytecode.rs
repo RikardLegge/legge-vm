@@ -8,75 +8,113 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::AddAssign;
+use std::sync::Arc;
 
-pub fn from_ast<T>(asts: &ast::AstCollection<T>, _: &tokio::runtime::Runtime) -> Bytecode
+pub fn from_ast<T>(asts: Arc<ast::AstCollection<T>>, runtime: &tokio::runtime::Runtime) -> Bytecode
 where
-    T: Linked + TypesInferred + TypesChecked,
+    T: Linked + TypesInferred + TypesChecked + 'static,
 {
-    let node_id = asts.root();
-    let (scope, context) = allocate_global_variables(asts);
-    let init_instructions = scope.instructions;
+    runtime.block_on(async {
+        let node_id = asts.root();
+        let (scope, context) = allocate_global_variables(&asts);
+        let init_instructions = scope.instructions;
 
-    let mut global_instructions = vec![vec![]; asts.len()];
-    let mut instructions = vec![vec![]; asts.len()];
-    let mut proc_instructions = vec![vec![]; asts.len()];
-    let halt_instructions = {
-        let mut inst = vec![];
-        let allocations = context.local_allocations();
-        if allocations > 0 {
-            inst.push(Instruction::new(node_id, OP::PopStack(allocations)));
-        }
-        inst.push(Instruction::new(node_id, OP::Halt));
-        inst
-    };
+        let mut global_instructions = vec![vec![]; asts.len()];
+        let mut instructions = vec![vec![]; asts.len()];
+        let mut proc_instructions = vec![vec![]; asts.len()];
+        let halt_instructions = {
+            let mut inst = vec![];
+            let allocations = context.local_allocations();
+            if allocations > 0 {
+                inst.push(Instruction::new(node_id, OP::PopStack(allocations)));
+            }
+            inst.push(Instruction::new(node_id, OP::Halt));
+            inst
+        };
 
-    let mut proc_start_offset = init_instructions.len() + halt_instructions.len();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-    for ast in asts.iter() {
-        let ast = ast.read().unwrap();
-        let ast_i = (&ast).id().index();
-        let mut bc = Generator::new(Some(context.clone()));
+        let mut proc_start_offset = init_instructions.len() + halt_instructions.len();
 
-        let (global, local) = bc.evaluate(&ast);
-        let procedures = bc.procedures;
+        for ast_id in (&asts).iter_keys() {
+            let tx = tx.clone();
+            let asts = asts.clone();
+            let context = Some(context.clone());
 
-        proc_start_offset += global.len() + local.len();
-        global_instructions[ast_i] = global;
-        instructions[ast_i] = local;
-        proc_instructions[ast_i] = procedures;
-    }
-
-    let mut proc_offsets = vec![0; asts.len()];
-    for ast in asts.iter() {
-        let ast_i = ast.read().unwrap().id().index();
-        proc_offsets[ast_i] = proc_start_offset;
-        proc_start_offset += proc_instructions[ast_i].len();
-    }
-
-    for ast in asts.iter() {
-        let ast_i = ast.read().unwrap().id().index();
-        let offset = proc_offsets[ast_i];
-        for set in [
-            &mut global_instructions[ast_i],
-            &mut instructions[ast_i],
-            &mut proc_instructions[ast_i],
-        ] {
-            for inst in set {
-                if let OP::PushImmediate(Value::ProcAddress(proc_index)) = &mut inst.op {
-                    *proc_index += offset;
+            tokio::task::spawn_blocking(move || {
+                let asts = asts;
+                let ast = &asts.get(ast_id).read().unwrap();
+                let mut bc = Generator::new(context);
+                let (global, local) = bc.evaluate(ast);
+                let procedures = bc.procedures;
+                tx.send(Ok((ast_id, global, local, procedures))).unwrap();
+                if false {
+                    tx.send(Err(())).unwrap();
                 }
+            });
+        }
+
+        drop(tx);
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                Ok((ast_id, global, local, procedures)) => {
+                    let ast_i = ast_id.index();
+                    proc_start_offset += global.len() + local.len();
+                    global_instructions[ast_i] = global;
+                    instructions[ast_i] = local;
+                    proc_instructions[ast_i] = procedures;
+                }
+                _ => unimplemented!(),
             }
         }
-    }
 
-    let mut code = init_instructions;
-    code.extend(global_instructions.into_iter().flatten());
-    code.extend(instructions.into_iter().flatten());
-    code.extend(halt_instructions.into_iter());
-    println!("Proc start: {}", code.len());
-    code.extend(proc_instructions.into_iter().flatten());
+        let mut proc_offsets = vec![0; asts.len()];
+        for ast in asts.iter() {
+            let ast_i = ast.read().unwrap().id().index();
+            proc_offsets[ast_i] = proc_start_offset;
+            proc_start_offset += proc_instructions[ast_i].len();
+        }
 
-    Bytecode { code }
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        for (ast_i, ((mut global, mut local), mut proc)) in global_instructions
+            .into_iter()
+            .zip(instructions.into_iter())
+            .zip(proc_instructions.into_iter())
+            .enumerate()
+        {
+            let offset = proc_offsets[ast_i];
+            let tx = tx.clone();
+            tokio::task::spawn_blocking(move || {
+                for set in [&mut global, &mut local, &mut proc] {
+                    for inst in set {
+                        if let OP::PushImmediate(Value::ProcAddress(proc_index)) = &mut inst.op {
+                            *proc_index += offset;
+                        }
+                    }
+                }
+                tx.send((ast_i, global, local, proc)).unwrap();
+            });
+        }
+
+        let mut global_instructions = vec![vec![]; asts.len()];
+        let mut instructions = vec![vec![]; asts.len()];
+        let mut proc_instructions = vec![vec![]; asts.len()];
+        drop(tx);
+        while let Some((ast_i, global, local, proc)) = rx.recv().await {
+            global_instructions[ast_i] = global;
+            instructions[ast_i] = local;
+            proc_instructions[ast_i] = proc;
+        }
+
+        let mut code = init_instructions;
+        code.extend(global_instructions.into_iter().flatten());
+        code.extend(instructions.into_iter().flatten());
+        code.extend(halt_instructions.into_iter());
+        code.extend(proc_instructions.into_iter().flatten());
+
+        Bytecode { code }
+    })
 }
 
 fn allocate_global_variables<T>(asts: &AstCollection<T>) -> (Scope, Context)

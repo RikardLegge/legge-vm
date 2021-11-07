@@ -11,6 +11,7 @@ pub mod token;
 
 use crate::ast::{NodeID, Path, ValidAstCollection};
 pub use debug::Timing;
+use std::sync::Arc;
 
 #[allow(dead_code)]
 #[derive(Debug, PartialOrd, PartialEq, Copy, Clone)]
@@ -47,11 +48,13 @@ pub fn compile(
     timing.ast = ast_timing;
 
     let start = debug::start_timer();
-    let bytecode = bytecode::from_ast(&asts, &tokio_runtime);
+    let asts = Arc::new(asts);
+    let bytecode = bytecode::from_ast(asts.clone(), &tokio_runtime);
     timing.bytecode = debug::stop_timer(start);
     if log_level >= LogLevel::LogEval {
         println!("{:?}", bytecode);
     }
+    let asts = Arc::try_unwrap(asts).unwrap();
     return Some((bytecode, asts));
 }
 

@@ -12,7 +12,7 @@ pub struct Timing {
 }
 impl Timing {
     pub fn total(&self) -> Duration {
-        self.bytecode + self.interpreter + self.ast.total()
+        self.bytecode + self.ast.total()
     }
 }
 
