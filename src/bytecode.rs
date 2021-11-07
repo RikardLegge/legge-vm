@@ -284,8 +284,6 @@ where
                             } else {
                                 unreachable!()
                             }
-                            let usage = bc.ev_node(root_id);
-                            assert_eq!(StackUsage::zero(), usage);
                         });
                     assert!(new_context.variables.is_empty());
 
@@ -293,12 +291,13 @@ where
                         let node = bc.asts.get_node(root_id);
                         if let NodeBody::Block { dynamic_body, .. } = &node.body {
                             bc.ev_block_allocate_variables(dynamic_body.iter().cloned());
-                            bc.ev_block_inner(dynamic_body.iter().cloned());
+                            let allocations = bc.ev_block_inner(dynamic_body.iter().cloned());
+                            if allocations > 0 {
+                                bc.add_op(root_id, OP::PopStack(static_allocations));
+                            }
                         } else {
                             unreachable!()
-                        }
-                        let usage = bc.ev_node(root_id);
-                        assert_eq!(StackUsage::zero(), usage);
+                        };
                     });
 
                     (global_scope, ast_scope)

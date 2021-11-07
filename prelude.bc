@@ -1,6 +1,3 @@
-import std.touch;
+import std.print;
 
-b :: 10;
-a :: 1 + b;
-
-touch(b);
+b :: 1;
