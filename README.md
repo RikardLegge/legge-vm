@@ -11,7 +11,7 @@ The goals of this project is to learn more about the difficulties when implement
 strong focus on good error messages and reasonable performance. 
 
 ### Performance
-Current multi-core compilation speed of a synthetic semi-trivial dataset is around 1M source lines of code in per 1.4 seconds on 
+Current multi-core compilation speed of a synthetic semi-trivial dataset is around 1M source lines of code in per 1.3 seconds on 
 an 2.6 GHz Intel Core i7 9750H with 8 hyper threaded cores. 
 The benchmark is run over a set of 300 files, with file(0) importing file(1), etc, and time keeping starts when the entrypoint 
 starts parsing and ends when the bytecode has completed generating.

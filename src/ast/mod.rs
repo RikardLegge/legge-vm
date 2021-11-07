@@ -254,7 +254,7 @@ fn to_asts(
                     let active_tasks = active_tasks.clone();
                     tokio::task::spawn_blocking(move || {
                         let import_tx = tx.clone();
-                        let size = Some(code.len() / 5);
+                        let size = Some(code.len() / 2);
                         let tokens =
                             token::from_chars(code.chars(), size, move |import: Vec<String>| {
                                 if let [module, rest @ .., _] = &import[..] {
@@ -274,8 +274,13 @@ fn to_asts(
                     let tx = tx.clone();
                     tokio::task::spawn_blocking(move || {
                         let last_token = tokens.last().cloned();
-                        let mut ast =
-                            parser::ast_from_tokens(path.file(), ast_id, tokens.into_iter());
+                        let size_hint = tokens.len();
+                        let mut ast = parser::ast_from_tokens(
+                            path.file(),
+                            ast_id,
+                            tokens.into_iter(),
+                            size_hint,
+                        );
                         if let Ok(ast) = &mut ast {
                             ast.line_count = last_token.map(|t| t.line).unwrap_or(0);
                         }

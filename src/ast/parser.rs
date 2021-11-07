@@ -15,11 +15,12 @@ pub fn ast_from_tokens<I>(
     file_name: String,
     ast_id: AstID,
     iter: I,
+    size_hint: usize,
 ) -> result::Result<Ast, (ast::Ast, ast::Err)>
 where
     I: Iterator<Item = Token>,
 {
-    let mut parser = Parser::new(file_name, ast_id, iter);
+    let mut parser = Parser::new(file_name, ast_id, iter, size_hint);
     match parser.parse() {
         Ok(()) => Ok(parser.ast),
         Err(err) => Err((parser.ast, err)),
@@ -177,8 +178,8 @@ impl<I> Parser<I>
 where
     I: Iterator<Item = Token>,
 {
-    fn new(file_name: String, ast_id: AstID, iter: I) -> Self {
-        let ast = Ast::new(file_name, ast_id);
+    fn new(file_name: String, ast_id: AstID, iter: I, size_hint: usize) -> Self {
+        let ast = Ast::new(file_name, ast_id, size_hint);
 
         Self {
             ast,

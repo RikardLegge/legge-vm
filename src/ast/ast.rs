@@ -99,7 +99,8 @@ where
 
     pub fn reserve(&mut self) -> AstID {
         let id = AstID::new(self.asts.len());
-        self.asts.push(RwLock::new(Ast::new("...".to_string(), id)));
+        self.asts
+            .push(RwLock::new(Ast::new("...".to_string(), id, 0)));
         id
     }
 
@@ -790,13 +791,13 @@ where
         Err::single(details, row_details, nodes)
     }
 
-    pub fn new(file_name: String, ast_id: AstID) -> Self {
+    pub fn new(file_name: String, ast_id: AstID, size_hint: usize) -> Self {
         Self {
             file_name,
             ast_id,
             line_count: 0,
             root: NodeID::zero(ast_id),
-            nodes: Vec::new(),
+            nodes: Vec::with_capacity(size_hint),
             _tp: PhantomData::default(),
         }
     }
