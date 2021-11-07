@@ -11,8 +11,8 @@ The goals of this project is to learn more about the difficulties when implement
 strong focus on good error messages and with the goal of reasonable performance. Current single core compilation speed is around 
 1M lines of code per 10 seconds on an 2.6 GHz Intel Core i7 9750H for compilation, type checking and tree shaking. 
 Multi core compilation speed is improving. 
-Parsing and inter file linking have been made multi threaded and can currently process 1M lines in around 700ms on 8 hyper threaded cores, 
-same machine as before.
+Parsing, inter file linking, type inference and type checking have been made multi threaded and can currently process 
+1M lines per second 1s on 8 hyper threaded cores, same machine as before.
 
 ## Experiments
 Since this is a project for learning and testing out ideas, here are a few exotic functions of the compiler.
