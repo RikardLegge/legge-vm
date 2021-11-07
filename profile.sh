@@ -5,8 +5,8 @@ set -e
 browser="Firefox Developer Edition"
 flamegraphdir="../flamegraph"
 
-sudo rm -rf ./tmp/profile/
 mkdir -p tmp/profile
+sudo rm -rf ./tmp/profile/*
 cd tmp
 sudo dtrace -c '../target/release/main test0.bc' -o ./profile/out.stacks -n 'profile-997 { @[ustack()] = count(); }'
 cd ..

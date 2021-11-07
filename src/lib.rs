@@ -96,7 +96,8 @@ where
         timing.line_count = asts.iter().map(|ast| ast.read().unwrap().line_count).sum();
         timing.file_count = asts.iter().count();
         dbg!(&timing);
-        dbg!(timing.total());
+        let mil_lines = (timing.line_count as f64 / 1_000_000.0) as u32;
+        dbg!(timing.total() / mil_lines);
     }
     let a = Box::new((bytecode, asts));
     Box::leak(a);

@@ -1,14 +1,26 @@
-#!/bin/sh
+#!/bin/bash
+cd "$(dirname "$0")"
 set -e
 
-for i in `seq 0 300`; do
+mkdir -p tmp
+rm -rf ./tmp/*
+
+count=300;
+
+for i in `seq 0 $count`; do
   ii=$((i+1));
   echo "count :: $i;" > "tmp/test$i.bc"
   for j in `seq 0 100`; do
+    i1=$(($RANDOM % $count))
+    i2=$(($RANDOM % $count))
+    i3=$(($RANDOM % $count))
     echo "
     if(true) {
       import std.touch;
       import local.test$ii.count;
+      import local.test$i1.count;
+      import local.test$i2.count;
+      import local.test$i3.count;
 
       A -> type {
          value: int
