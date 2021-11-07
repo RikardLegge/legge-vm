@@ -42,7 +42,6 @@ where
             let context = Some(context.clone());
 
             tokio::task::spawn_blocking(move || {
-                let asts = asts;
                 let ast = &asts.get(ast_id).read().unwrap();
                 let mut bc = Generator::new(context);
                 let (global, local) = bc.evaluate(ast);

@@ -8,11 +8,13 @@ for arbitrary code.
 
 ## Goals
 The goals of this project is to learn more about the difficulties when implementing compilers, type checkers and tree-shaking with 
-strong focus on good error messages and with the goal of reasonable performance. Current single core compilation speed is around 
-1M lines of code per 10 seconds on an 2.6 GHz Intel Core i7 9750H for compilation, type checking and tree shaking. 
-Multi core compilation speed is improving. 
-Parsing, inter file linking, type inference and type checking have been made multi threaded and can currently process 
-1M lines per second 1s on 8 hyper threaded cores, same machine as before.
+strong focus on good error messages and reasonable performance. 
+
+### Performance
+Current multi-core compilation speed of a synthetic semi-trivial dataset is around 1M source lines of code in per 1.4 seconds on 
+an 2.6 GHz Intel Core i7 9750H with 8 hyper threaded cores. 
+The benchmark is run over a set of 300 files, with file(0) importing file(1), etc, and time keeping starts when the entrypoint 
+starts parsing and ends when the bytecode has completed generating.
 
 ## Experiments
 Since this is a project for learning and testing out ideas, here are a few exotic functions of the compiler.
@@ -58,13 +60,12 @@ and run any sequence of valid characters which can be good from an educational p
   - [x] Type checker
   - [x] Side effect based tree shaker
   - [x] Bytecode generator
-  - [ ] Multi threading
+  - [x] Multi threading
       - [x] Parsing
       - [x] Ast variable resolution/inter file linking
       - [x] Type inference
       - [x] Type checker
-      - [ ] Bytecode generation (In progress)
-      - [ ] Tree shaker (Requires rewrite: In it's current state not possible due to high level of interleaving between code units)
+      - [x] Bytecode generation (In progress)
 - [x] Language features
   - [x] Custom types
   - [x] Custom function declarations
@@ -76,6 +77,7 @@ and run any sequence of valid characters which can be good from an educational p
 - [x] A few tests showcasing the functionality
 - [ ] Decouple runtime from compiler
 - [ ] Test to se if it actually works
+- [ ] Rewrite/Improve tree shaker 
 
 ## Example 1: Overview
 ```rust
