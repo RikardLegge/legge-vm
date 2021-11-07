@@ -28,7 +28,12 @@ pub fn compile(
     path: Path,
     code: String,
 ) -> Option<(bytecode::Bytecode, ValidAstCollection)> {
-    let result = ast::from_entrypoint(path, code, &runtime);
+    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let result = ast::from_entrypoint(path, code, &runtime, &tokio_runtime);
     let (asts, ast_timing) = match result {
         Ok((asts, ast_timing)) => (asts, ast_timing),
         Err((asts, e)) => {
@@ -42,7 +47,7 @@ pub fn compile(
     timing.ast = ast_timing;
 
     let start = debug::start_timer();
-    let bytecode = bytecode::from_ast(&asts);
+    let bytecode = bytecode::from_ast(&asts, &tokio_runtime);
     timing.bytecode = debug::stop_timer(start);
     if log_level >= LogLevel::LogEval {
         println!("{:?}", bytecode);

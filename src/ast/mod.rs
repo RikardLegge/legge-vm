@@ -308,21 +308,19 @@ pub fn from_entrypoint(
     path: Path,
     code: String,
     runtime: &Runtime,
+    tokio_runtime: &tokio::runtime::Runtime,
 ) -> result::Result<(AstCollection<StateTypesChecked>, debug::AstTiming), (AstCollection, Err)> {
     let mut timing = debug::AstTiming::default();
     let start = debug::start_timer();
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let asts = match to_asts(path, code, &tokio_runtime) {
+
+    let asts = match to_asts(path, code, tokio_runtime) {
         Ok(asts) => asts,
         Err((asts, err)) => return Err((asts, err)),
     };
     timing.build_ast = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let asts = match linker::link(asts, runtime, &tokio_runtime) {
+    let asts = match linker::link(asts, runtime, tokio_runtime) {
         Ok(ast) => ast,
         Err((asts, err)) => {
             // println!("{:?}", asts);
@@ -332,7 +330,7 @@ pub fn from_entrypoint(
     timing.linker = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let asts = match typer::infer_types(asts, runtime, &tokio_runtime) {
+    let asts = match typer::infer_types(asts, runtime, tokio_runtime) {
         Ok(asts) => asts,
         Err((asts, err)) => {
             // println!("{:?}", asts);
@@ -342,7 +340,7 @@ pub fn from_entrypoint(
     timing.type_inference = debug::stop_timer(start);
 
     let start = debug::start_timer();
-    let asts = match checker::check_types(asts, &tokio_runtime) {
+    let asts = match checker::check_types(asts, tokio_runtime) {
         Ok(asts) => asts,
         Err((asts, err)) => {
             // println!("{:?}", asts);

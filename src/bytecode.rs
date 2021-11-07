@@ -6,7 +6,7 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::ops::AddAssign;
 
-pub fn from_ast<T>(asts: &ast::AstCollection<T>) -> Bytecode
+pub fn from_ast<T>(asts: &ast::AstCollection<T>, _: &tokio::runtime::Runtime) -> Bytecode
 where
     T: Linked + TypesInferred + TypesChecked,
 {
@@ -256,7 +256,6 @@ where
             let node = self.asts.get_node(root_id);
             if let NodeBody::Block { static_body, .. } = &node.body {
                 self.ev_block_allocate_variables(static_body.iter().cloned());
-                self.ev_block_inner(static_body.iter().cloned());
             } else {
                 unreachable!()
             }
@@ -266,26 +265,42 @@ where
 
     fn evaluate(&mut self) -> Scope {
         let root_id = self.asts.root();
-        let scope = self.with_scope(root_id, ContextType::Block, |bc| {
+        let global_scope = self.with_scope(root_id, ContextType::Block, |bc| {
             let static_allocations = bc.allocate_global_variables();
             for ast in bc.asts.iter() {
                 let root_id = ast.read().unwrap().root();
                 let node = self.asts.get_node(root_id);
-                if let NodeBody::Block { dynamic_body, .. } = &node.body {
-                    bc.ev_block_allocate_variables(dynamic_body.iter().cloned());
-                    bc.ev_block_inner(dynamic_body.iter().cloned());
+                if let NodeBody::Block { static_body, .. } = &node.body {
+                    bc.ev_block_inner(static_body.iter().cloned());
                 } else {
                     unreachable!()
                 }
                 let usage = bc.ev_node(root_id);
                 assert_eq!(StackUsage::zero(), usage);
             }
+            for ast in bc.asts.iter() {
+                let root_id = ast.read().unwrap().root();
+                let mut ast_scope = bc.with_scope(root_id, ContextType::Block, |bc| {
+                    let node = bc.asts.get_node(root_id);
+                    if let NodeBody::Block { dynamic_body, .. } = &node.body {
+                        bc.ev_block_allocate_variables(dynamic_body.iter().cloned());
+                        bc.ev_block_inner(dynamic_body.iter().cloned());
+                    } else {
+                        unreachable!()
+                    }
+                    let usage = bc.ev_node(root_id);
+                    assert_eq!(StackUsage::zero(), usage);
+                });
+                bc.get_scope_mut()
+                    .instructions
+                    .append(&mut ast_scope.instructions);
+            }
             if static_allocations > 0 {
                 bc.add_op(root_id, OP::PopStack(static_allocations));
             }
         });
         assert_eq!(0, self.scopes.len());
-        scope
+        global_scope
     }
 
     fn get_variable_offset(
