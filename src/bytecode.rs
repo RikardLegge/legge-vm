@@ -2,7 +2,6 @@ use crate::ast;
 use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::ast::{AstCollection, Linked, NodeID, NodeType, NodeValue, TypesChecked, TypesInferred};
 use crate::token::ArithmeticOP;
-use std::collections::HashSet;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::ops::AddAssign;
@@ -205,7 +204,6 @@ where
     asts: &'a AstCollection<T>,
     scopes: Vec<Scope>,
     contexts: Vec<Context>,
-    static_evaluations: HashSet<NodeID>,
 }
 
 impl<'a, T> Generator<'a, T>
@@ -220,7 +218,6 @@ where
         Generator {
             asts,
             procedures: vec![placeholder.clone(), placeholder.clone(), placeholder],
-            static_evaluations: HashSet::new(),
             scopes: Vec::new(),
             contexts: Vec::new(),
         }
@@ -253,13 +250,15 @@ where
         Bytecode { code }
     }
 
-    fn evaluate_global_static(&mut self) -> usize {
+    fn allocate_global_variables(&mut self) -> usize {
         for ast in self.asts.iter() {
             let root_id = ast.read().unwrap().root();
             let node = self.asts.get_node(root_id);
             if let NodeBody::Block { static_body, .. } = &node.body {
-                self.ev_block_inner(static_body, &[]);
-                self.static_evaluations.extend(static_body.clone().iter());
+                self.ev_block_allocate_variables(static_body.iter().cloned());
+                self.ev_block_inner(static_body.iter().cloned());
+            } else {
+                unreachable!()
             }
         }
         self.get_context().local_allocations()
@@ -268,9 +267,16 @@ where
     fn evaluate(&mut self) -> Scope {
         let root_id = self.asts.root();
         let scope = self.with_scope(root_id, ContextType::Block, |bc| {
-            let static_allocations = bc.evaluate_global_static();
+            let static_allocations = bc.allocate_global_variables();
             for ast in bc.asts.iter() {
                 let root_id = ast.read().unwrap().root();
+                let node = self.asts.get_node(root_id);
+                if let NodeBody::Block { dynamic_body, .. } = &node.body {
+                    bc.ev_block_allocate_variables(dynamic_body.iter().cloned());
+                    bc.ev_block_inner(dynamic_body.iter().cloned());
+                } else {
+                    unreachable!()
+                }
                 let usage = bc.ev_node(root_id);
                 assert_eq!(StackUsage::zero(), usage);
             }
@@ -308,10 +314,7 @@ where
                 closure_offset += 1;
             }
         }
-        panic!(
-            "Failed to get variable offset of {:?}",
-            *self.asts.get_node(var_id)
-        );
+        panic!("Failed to get variable offset of {:?}", var_id);
     }
 
     fn get_loop_break_offset(&self, loop_id: NodeID) -> OPOffset {
@@ -325,10 +328,7 @@ where
                 }
             }
         }
-        panic!(
-            "Failed to find loop searching for {:?}",
-            *self.asts.get_node(loop_id)
-        );
+        panic!("Failed to find loop searching for {:?}", loop_id);
     }
     fn get_allocations(&self, node_id: NodeID) -> usize {
         let mut allocations = 0;
@@ -340,7 +340,7 @@ where
         }
         panic!(
             "Failed to find node when counting allocations: {:?}",
-            *self.asts.get_node(node_id)
+            node_id
         );
     }
 
@@ -479,7 +479,7 @@ where
             Loop { body } => self.ev_loop(node_id, *body),
             Break { r#loop } => self.ev_break(node_id, *r#loop),
             Comment(_) | Empty => StackUsage::zero(),
-            _ => panic!("Unsupported node here {:?}", *node),
+            _ => panic!("Unsupported node here {:?}", node_id),
         }
     }
 
@@ -747,12 +747,12 @@ where
         }
     }
 
-    fn ev_block_inner(&mut self, static_body: &[NodeID], dynamic_body: &[NodeID]) -> usize {
-        for child_id in static_body.iter().chain(dynamic_body) {
-            if self.static_evaluations.contains(child_id) {
+    fn ev_block_allocate_variables(&mut self, body: impl Iterator<Item = NodeID>) {
+        for child_id in body {
+            let node = self.asts.get_node(child_id);
+            if node.is_dead() {
                 continue;
             }
-            let node = self.asts.get_node(*child_id);
             if node.has_closure_references() {
                 match &node.body {
                     NodeBody::VariableDeclaration { .. }
@@ -760,8 +760,8 @@ where
                     | NodeBody::TypeDeclaration { .. }
                     | NodeBody::StaticDeclaration { .. }
                     | NodeBody::Import { .. } => {
-                        self.add_var(*child_id);
-                        self.add_op(*child_id, OP::PushToClosure(Value::Unset));
+                        self.add_var(child_id);
+                        self.add_op(child_id, OP::PushToClosure(Value::Unset));
                     }
                     _ => (),
                 }
@@ -772,20 +772,19 @@ where
                     | NodeBody::TypeDeclaration { .. }
                     | NodeBody::StaticDeclaration { .. }
                     | NodeBody::Import { .. } => {
-                        self.add_var(*child_id);
-                        self.add_op(*child_id, OP::PushImmediate(Value::Unset));
+                        self.add_var(child_id);
+                        self.add_op(child_id, OP::PushImmediate(Value::Unset));
                     }
                     _ => (),
                 }
             }
         }
+    }
 
+    fn ev_block_inner(&mut self, body: impl Iterator<Item = NodeID>) -> usize {
         let mut stack_usage = StackUsage::new(0, 0);
-        for child_id in static_body.iter().chain(dynamic_body) {
-            if self.static_evaluations.contains(child_id) {
-                continue;
-            }
-            stack_usage += self.ev_node(*child_id);
+        for child_id in body {
+            stack_usage += self.ev_node(child_id);
             if stack_usage.popped > stack_usage.pushed {
                 panic!("More elements have been popped than pushed");
             }
@@ -801,7 +800,8 @@ where
         dynamic_body: &[NodeID],
     ) -> StackUsage {
         let allocations = self.with_context(node_id, ContextType::Block, |bc| {
-            bc.ev_block_inner(static_body, dynamic_body)
+            bc.ev_block_allocate_variables(static_body.iter().chain(dynamic_body).cloned());
+            bc.ev_block_inner(static_body.iter().chain(dynamic_body).cloned())
         });
         if allocations > 0 {
             self.add_op(node_id, OP::PopStack(allocations));
@@ -869,7 +869,7 @@ where
             Reference { node_id } => self.ev_variable_value(expr_id, *node_id, &None),
             Call(NBCall { func, args }) => self.ev_call(expr_id, *func, args, false),
             Expression(value) => self.ev_expression(*value),
-            _ => panic!("Unsupported node {:?} used as expression", *expr),
+            _ => panic!("Unsupported node {:?} used as expression", expr_id),
         }
     }
 

@@ -167,8 +167,14 @@ where
     }
 }
 
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Default, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct NodeID(usize, AstID);
+
+impl Debug for NodeID {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "Node({},{})", self.0, self.1 .0)
+    }
+}
 
 impl NodeID {
     pub fn new(id: usize, ast_id: AstID) -> Self {
@@ -887,7 +893,7 @@ where
         let pad_end = " ".repeat(pad_len);
         write!(f, "{}", pad_start)?;
 
-        write!(f, " Node({},{}):", node.id.index(), node.id.ast().0)?;
+        write!(f, " {:?}", node.id())?;
         if node.has_closure_references() {
             write!(f, " closure ")?;
         }
@@ -923,7 +929,7 @@ where
         assert_eq!(node_id.ast(), self.ast_id, "Accessing node from wrong ast");
         match self.nodes.get(node_id.0) {
             Some(node) => node,
-            None => panic!("Could not find Node({}) in ast", node_id.0),
+            None => panic!("Could not find {:?} in ast", node_id),
         }
     }
 
@@ -943,7 +949,7 @@ where
     pub fn get_node_mut(&mut self, node_id: NodeID) -> &mut Node<T> {
         match self.nodes.get_mut(node_id.0) {
             Some(node) => node,
-            None => panic!("Could not find Node({}) in ast", node_id.0),
+            None => panic!("Could not find {:?} in ast", node_id),
         }
     }
 
