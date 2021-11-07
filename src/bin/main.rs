@@ -1,16 +1,43 @@
 use leggevm::LogLevel;
 use leggevm::{ast, run_code};
-use std::env::args;
 use std::fs::File;
 use std::io::prelude::*;
 use std::process::exit;
 
+use clap::{App, Arg};
+
 fn main() {
-    let args = args().skip(1).collect::<Vec<String>>();
-    if args.len() == 0 {
-        panic!("First argument must be the file name");
-    }
-    let filename = &args[0];
+    let matches = App::new("Legge VM")
+        .version("0.1.0")
+        .author("Rikard Legge <rikard@legge.se>")
+        .about("Compiler and virtual machine for the Legge language")
+        .arg(
+            Arg::new("v")
+                .short('v')
+                .multiple_occurrences(true)
+                .about("Sets the level of verbosity"),
+        )
+        .arg(
+            Arg::new("INPUT")
+                .about("Sets the input file to use")
+                .required(true)
+                .index(1),
+        )
+        .get_matches();
+
+    let log_level = match matches.occurrences_of("v") {
+        0 => LogLevel::LogNone,
+        1 => LogLevel::LogDebug,
+        2 => LogLevel::LogTiming,
+        3 => LogLevel::LogEval,
+        _ => panic!("invalid log level, maximum log level is 3"),
+    };
+
+    let filename = match matches.value_of("INPUT") {
+        Some(filename) => filename,
+        None => panic!("No input file provided"),
+    };
+
     let mut f = File::open(filename).expect("file not found");
 
     let mut contents = String::new();
@@ -18,7 +45,7 @@ fn main() {
         .expect("something went wrong reading the file");
 
     let path = ast::Path::new(vec![filename.trim_end_matches(".bc").to_string()]);
-    let res = run_code(path, contents, LogLevel::LogEval, &|v| println!("{:?}", v));
+    let res = run_code(path, contents, log_level, &|v| println!("{:?}", v));
     if res.is_some() {
         exit(0);
     } else {
