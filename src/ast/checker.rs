@@ -283,7 +283,7 @@ where
                                         self.ast.get_node_and_children(return_id),
                                     ));
                                 };
-                                let details = format!("Return statement does not return the right type, {:?} expected, {:?} provided", func, ret);
+                                let details = format!("Return statement does not return the right type, {:?} expected, {:?} provided", func.tp(), ret);
                                 Err(ast::Err::new(details, parts))?
                             }
                             Ok(())
