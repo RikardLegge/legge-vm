@@ -48,6 +48,8 @@ where
     runtime.block_on(async {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut n_active = 0;
+        let mut n_blocked = 0;
+
         let asts = Arc::new(asts);
         for id in (&asts).iter_keys() {
             let asts = asts.clone();
@@ -59,7 +61,6 @@ where
 
         let mut blocked_checkers = HashMap::new();
         let mut completed = HashSet::new();
-        let mut n_blocked = 0;
         let mut error = None;
 
         while let Some(msg) = rx.recv().await {
@@ -71,6 +72,7 @@ where
                     let err = std::mem::replace(&mut error, None).unwrap();
                     return Err((asts, err));
                 }
+                continue
             }
             match msg {
                 TyperState::TypeCheck(mut typer) => {
@@ -118,7 +120,11 @@ where
                 }
             }
             if n_active == 0 {
-                break;
+                if blocked_checkers.values().any(|l|l.len()>0) {
+                    panic!("Not all blockers are dropped")
+                }
+                let asts = Arc::try_unwrap(asts).unwrap();
+                return Ok(asts.guarantee_state());
             }
             if n_blocked == n_active {
                 let nodes = blocked_checkers
@@ -146,9 +152,7 @@ where
                 return Err((asts, err));
             }
         }
-
-        let asts = Arc::try_unwrap(asts).unwrap();
-        Ok(asts.guarantee_state())
+        unreachable!()
     })
 }
 

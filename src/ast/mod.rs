@@ -11,9 +11,8 @@ use std::cmp::{max, min};
 
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::io::ErrorKind;
 use std::result;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 
 use crate::runtime::Runtime;
@@ -206,10 +205,12 @@ impl Err {
 
 #[derive(Debug)]
 enum ToAstTaskState {
-    New(Path),
+    New(Path, bool),
     ToTokens(Path, String),
     ToAst(Path, Vec<Token>),
-    Done(Option<(Path, result::Result<Ast, (Ast, Err)>)>),
+    TooManyFiles(Path, usize),
+    Err(Path, Err, Option<Ast>),
+    Done(Path, Ast),
 }
 
 fn to_asts(
@@ -224,34 +225,71 @@ fn to_asts(
         tx.send(ToAstTaskState::ToTokens(path.clone(), file))
             .unwrap();
         processed_paths.insert(path);
-        let active_tasks = Arc::new(AtomicUsize::new(1));
 
         let mut asts = AstCollection::new();
+        let mut n_started = 1;
+        let mut open_files = 1;
+        let mut n_completed = 0;
+        let mut pending_files = Vec::new();
+        let mut error = None;
         while let Some(task) = rx.recv().await {
+            if error.is_some() {
+                n_completed += 1;
+                continue;
+            }
             match task {
-                ToAstTaskState::New(path) => {
-                    if !processed_paths.contains(&path) {
+                ToAstTaskState::New(path, is_retry) => {
+                    if !processed_paths.contains(&path) || is_retry {
                         processed_paths.insert(path.clone());
-                        let tx = tx.clone();
-                        tokio::task::spawn(async move {
-                            if let Ok(mut file) = tokio::fs::File::open(path.file()).await {
-                                let mut code = String::new();
-                                file.read_to_string(&mut code)
-                                    .await
-                                    .expect("something went wrong reading file");
+                        if !is_retry {
+                            n_started += 1;
+                        }
 
-                                tx.send(ToAstTaskState::ToTokens(path, code)).unwrap();
-                            } else {
-                                tx.send(ToAstTaskState::Done(None)).unwrap();
-                            }
+                        let tx = tx.clone();
+                        open_files += 1;
+                        tokio::task::spawn(async move {
+                            match tokio::fs::File::open(path.file()).await {
+                                Ok(mut file) => {
+                                    let mut code = String::new();
+                                    file.read_to_string(&mut code)
+                                        .await
+                                        .expect("something went wrong reading file");
+
+                                    tx.send(ToAstTaskState::ToTokens(path, code)).unwrap();
+                                }
+                                Err(err) => match err.kind() {
+                                    ErrorKind::NotFound
+                                    | ErrorKind::PermissionDenied
+                                    | ErrorKind::BrokenPipe
+                                    | ErrorKind::TimedOut
+                                    | ErrorKind::Interrupted
+                                    | ErrorKind::Unsupported
+                                    | ErrorKind::Other => {
+                                        panic!("{:?}", err);
+                                    }
+                                    _ => {
+                                        tx.send(ToAstTaskState::TooManyFiles(path, open_files))
+                                            .unwrap();
+                                    }
+                                },
+                            };
                         });
-                    } else {
-                        tx.send(ToAstTaskState::Done(None)).unwrap();
                     }
                 }
+                ToAstTaskState::TooManyFiles(path, error_count) => {
+                    if open_files < error_count {
+                        tx.send(ToAstTaskState::New(path, true)).unwrap();
+                    } else {
+                        pending_files.push(path);
+                    }
+                    open_files -= 1;
+                }
                 ToAstTaskState::ToTokens(path, code) => {
+                    open_files -= 1;
+                    if let Some(path) = pending_files.pop() {
+                        tx.send(ToAstTaskState::New(path, true)).unwrap();
+                    }
                     let tx = tx.clone();
-                    let active_tasks = active_tasks.clone();
                     tokio::task::spawn_blocking(move || {
                         let import_tx = tx.clone();
                         let size = Some(code.len() / 2);
@@ -260,8 +298,7 @@ fn to_asts(
                                 if let [module, rest @ .., _] = &import[..] {
                                     if module == "local" && rest.len() >= 1 {
                                         let path = Path::new(rest.into());
-                                        active_tasks.fetch_add(1, Ordering::AcqRel);
-                                        import_tx.send(ToAstTaskState::New(path)).unwrap();
+                                        import_tx.send(ToAstTaskState::New(path, false)).unwrap();
                                     }
                                 }
                             });
@@ -275,37 +312,43 @@ fn to_asts(
                     tokio::task::spawn_blocking(move || {
                         let last_token = tokens.last().cloned();
                         let size_hint = tokens.len();
-                        let mut ast = parser::ast_from_tokens(
+                        let ast = parser::ast_from_tokens(
                             path.file(),
                             ast_id,
                             tokens.into_iter(),
                             size_hint,
                         );
-                        if let Ok(ast) = &mut ast {
-                            ast.line_count = last_token.map(|t| t.line).unwrap_or(0);
-                        }
-                        tx.send(ToAstTaskState::Done(Some((path, ast)))).unwrap();
-                    });
-                }
-                ToAstTaskState::Done(result) => {
-                    active_tasks.fetch_sub(1, Ordering::AcqRel);
-                    if let Some((path, res)) = result {
-                        match res {
-                            Ok(ast) => asts.add(path, ast),
+                        match ast {
+                            Ok(mut ast) => {
+                                ast.line_count = last_token.map(|t| t.line).unwrap_or(0);
+                                tx.send(ToAstTaskState::Done(path, ast)).unwrap();
+                            }
                             Err((ast, err)) => {
-                                asts.add(path, ast);
-                                return Err((asts, err));
+                                tx.send(ToAstTaskState::Err(path, err, Some(ast))).unwrap();
                             }
                         }
+                    });
+                }
+                ToAstTaskState::Err(path, err, ast) => {
+                    if let Some(ast) = ast {
+                        asts.add(path, ast);
                     }
+                    error = Some(err);
+                }
+                ToAstTaskState::Done(path, ast) => {
+                    n_completed += 1;
+                    asts.add(path, ast);
                 }
             }
-            let active_tasks = active_tasks.load(Ordering::SeqCst);
-            if active_tasks == 0 {
-                break;
+            if n_started == n_completed {
+                return if let Some(err) = error {
+                    Err((asts, err))
+                } else {
+                    Ok(asts)
+                };
             }
         }
-        Ok(asts)
+        unreachable!();
     })
 }
 

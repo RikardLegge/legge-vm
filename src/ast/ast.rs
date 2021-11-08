@@ -38,7 +38,12 @@ where
         write!(f, "AstCollection {{\n")?;
         for (i, (name, id)) in self.names.iter().enumerate() {
             let ast = &self.asts[id.0].read().unwrap();
-            write!(f, "{:?}:\n{:?}", name, ast)?;
+            write!(f, "{:?}:\n", name)?;
+            if ast.nodes.len() < 100 {
+                write!(f, "{:?}", ast)?;
+            } else {
+                write!(f, "{{ ... }}")?;
+            }
             if i + 1 < self.asts.len() {
                 write!(f, "\n")?;
             }
