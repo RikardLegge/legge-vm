@@ -18,7 +18,7 @@ where
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let asts = Arc::new(asts);
-        for ast_id in (&asts).iter_keys() {
+        for ast_id in (&asts).ids() {
             let asts = asts.clone();
             let tx = tx.clone();
             tokio::task::spawn_blocking(move || {

@@ -51,7 +51,7 @@ where
         let mut n_blocked = 0;
 
         let asts = Arc::new(asts);
-        for id in (&asts).iter_keys() {
+        for id in (&asts).ids() {
             let asts = asts.clone();
             let definitions = vm_runtime.definitions.clone();
             let typer = Typer::new(id, asts, definitions);

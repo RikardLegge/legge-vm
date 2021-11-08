@@ -22,7 +22,7 @@ where
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        for ast_id in (&asts).iter_keys() {
+        for ast_id in (&asts).ids() {
             let tx = tx.clone();
             let asts = asts.clone();
             let context = Some(context.clone());
@@ -71,8 +71,8 @@ where
         }
 
         let mut proc_offsets = vec![0; asts.len()];
-        for ast in asts.iter() {
-            let ast_i = ast.read().unwrap().id().index();
+        for ast_id in asts.ids() {
+            let ast_i = ast_id.index();
             proc_offsets[ast_i] = proc_start_offset;
             proc_start_offset += proc_instruction_len[ast_i];
         }
@@ -130,8 +130,6 @@ where
 
     let (scope, context) = bc.with_scope(root_id, ContextType::Block, |bc| {
         for ast in asts.iter() {
-            let ast = &ast.read().unwrap();
-
             let root_id = ast.root();
             let node = asts.get_node(root_id);
             if let NodeBody::Block { static_body, .. } = &node.body {

@@ -30,16 +30,14 @@ where
 {
     runtime.block_on(async {
         let exports = asts
-            .named()
-            .map(|(path, ast)| (path.clone(), ast.read().unwrap().exports()))
+            .paths()
+            .map(|(path, ast)| (path.clone(), ast.exports()))
             .collect::<HashMap<_, _>>();
         let exports = Arc::new(exports);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let asts = Arc::new(RwLock::new(asts));
-        for ast in asts.read().unwrap().iter() {
-            let id = ast.read().unwrap().id();
-
+        for id in asts.read().unwrap().ids() {
             let vm_runtime = vm_runtime.definitions.clone();
             let tx = tx.clone();
             let asts = asts.clone();

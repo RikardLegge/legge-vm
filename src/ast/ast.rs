@@ -114,47 +114,54 @@ where
     }
 
     pub fn get_node(&self, id: NodeID) -> AstGuard<T> {
-        let ast = self.asts.get(id.ast().0).unwrap().read().unwrap();
+        let ast = self.get(id.ast()).read().unwrap();
         AstGuard(id, ast)
     }
 
     pub fn get_node_mut(&mut self, id: NodeID) -> AstGuardMut<T> {
-        let ast = self.asts.get(id.ast().0).unwrap().write().unwrap();
+        let ast = self.get(id.ast()).write().unwrap();
         AstGuardMut(id, ast)
     }
 
     pub fn get(&self, id: AstID) -> &RwLock<Ast<T>> {
-        self.asts.get(id.0).unwrap()
+        self.asts.get(id.index()).unwrap()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &RwLock<Ast<T>>> + '_ {
-        self.asts.iter()
+    pub fn iter(&self) -> impl Iterator<Item = RwLockReadGuard<Ast<T>>> + '_ {
+        self.asts.iter().map(|ast| ast.read().unwrap())
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = RwLockWriteGuard<Ast<T>>> + '_ {
+        self.asts.iter().map(|ast| ast.write().unwrap())
+    }
+
+    pub fn ids(&self) -> impl Iterator<Item = AstID> + '_ {
+        self.iter().map(|ast| ast.id())
+    }
+
+    pub fn paths(&self) -> impl Iterator<Item = (&PathKey, RwLockReadGuard<Ast<T>>)> + '_ {
+        self.names
+            .iter()
+            .map(|(path, id)| (path, self.asts[id.index()].read().unwrap()))
     }
 
     pub fn len(&self) -> usize {
         self.asts.len()
     }
 
-    pub fn iter_keys(&self) -> impl Iterator<Item = AstID> + '_ {
-        self.iter().map(|ast| ast.read().unwrap().id())
-    }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut RwLock<Ast<T>>> + '_ {
-        self.asts.iter_mut()
-    }
-
-    pub fn named(&self) -> impl Iterator<Item = (&PathKey, &RwLock<Ast<T>>)> + '_ {
-        self.names.iter().map(|(name, i)| (name, &self.asts[i.0]))
-    }
-
     pub fn guarantee_state<D: Debug>(self) -> AstCollection<D> {
-        unsafe { mem::transmute(self) }
+        unsafe {
+            // Safety: safe since D is only used a phantom data
+            // and will therefore always be zero sized.
+            // Hopefully the memory representation stays stable...
+            mem::transmute(self)
+        }
     }
 
     pub fn add(&mut self, path: Path, ast: Ast<T>) {
         let id = ast.id();
         self.names.insert(path.key(), id);
-        *self.asts[id.0].write().unwrap() = ast;
+        *self.asts[id.index()].write().unwrap() = ast;
     }
 
     pub fn add_ref(
