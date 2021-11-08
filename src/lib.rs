@@ -65,23 +65,17 @@ where
     let runtime = runtime::std();
     let mut timing = debug::Timing::default();
     let compiled = compile(&mut timing, &runtime, log_level, path, code);
-    if compiled.is_none() {
-        return None;
-    }
-    let (bytecode, asts) = compiled.unwrap();
+
+    let (bytecode, asts) = match compiled {
+        Some(v) => v,
+        None => return None,
+    };
 
     let mut interpreter = interpreter::Interpreter::new(&runtime);
     interpreter.log_level = log_level;
     interpreter.interrupt = &interrupt;
 
-    let get_line = |node_id: NodeID| match asts
-        .get(node_id.ast())
-        .read()
-        .unwrap()
-        .get_node(node_id)
-        .tokens
-        .first()
-    {
+    let get_line = |node_id: NodeID| match asts.get_node(node_id).tokens.first() {
         Some(token) => token.line,
         None => 0,
     };

@@ -353,9 +353,9 @@ impl<'a> Interpreter<'a> {
                         self.pc = Some(addr);
                     }
                     Value::RuntimeFn(id) => {
-                        let mut args = self.foreign_function_arguments()?;
+                        let args = self.foreign_function_arguments()?;
                         let func = self.runtime.functions[id];
-                        let returns = func(self, &mut args)?;
+                        let returns = func(self, args)?;
                         // Just make sure that the function has not set the pc to None
                         // If pc is none then we will terminate
                         if self.pc != None {

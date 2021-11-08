@@ -45,7 +45,7 @@ where
             tokio::task::spawn_blocking(move || {
                 let asts = asts.read().unwrap();
                 let vm_runtime = vm_runtime.borrow();
-                let mut ast = asts.get(id).write().unwrap();
+                let mut ast = asts.get_mut(id);
                 let root_id = ast.root();
                 let linker = Linker::new(&mut ast, vm_runtime, &exports);
                 match linker.link(root_id) {

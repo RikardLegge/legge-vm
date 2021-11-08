@@ -28,7 +28,7 @@ where
             let context = Some(context.clone());
 
             tokio::task::spawn_blocking(move || {
-                let ast = &asts.get(ast_id).read().unwrap();
+                let ast = &asts.get(ast_id);
                 let mut bc = Generator::new(context, ast);
                 let (global, local) = bc.evaluate(ast);
                 let procedures = bc.procedures;
@@ -125,7 +125,7 @@ fn allocate_global_variables<T>(asts: &AstCollection<T>) -> (Scope, Context)
 where
     T: Linked + TypesInferred + TypesChecked,
 {
-    let mut bc = Generator::new(None, &asts.get(AstID::new(0)).read().unwrap());
+    let mut bc = Generator::new(None, &asts.get(AstID::new(0)));
     let root_id = asts.root();
 
     let (scope, context) = bc.with_scope(root_id, ContextType::Block, |bc| {

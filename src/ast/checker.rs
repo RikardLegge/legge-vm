@@ -22,7 +22,7 @@ where
             let asts = asts.clone();
             let tx = tx.clone();
             tokio::task::spawn_blocking(move || {
-                let ast = asts.get(ast_id).read().unwrap();
+                let ast = asts.get(ast_id);
                 let root_id = ast.root();
                 let checker = Checker::new(&ast, &asts);
 

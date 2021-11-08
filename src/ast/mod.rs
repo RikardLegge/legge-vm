@@ -94,7 +94,7 @@ impl Err {
                 let mut tokens = Vec::new();
                 let mut ids = HashSet::new();
                 for &node_id in &part.nodes {
-                    let ast = &asts.get(node_id.ast()).read().unwrap();
+                    let ast = &asts.get(node_id.ast());
                     let mut root = ast.get_node(node_id);
                     let mut curr = ast.get_node(node_id);
                     loop {
@@ -152,7 +152,7 @@ impl Err {
         }
 
         let mut curr_ast = token_parts[0].1.nodes[0].ast();
-        let file_name = &asts.get(curr_ast).read().unwrap().file_name;
+        let file_name = &asts.get(curr_ast).file_name;
         builder.push(format!("\n"));
         builder.push(format!(" {} \n", file_name));
         builder.push(format!("{}\n", "‾".repeat(file_name.len() + 2)));
@@ -161,7 +161,7 @@ impl Err {
             let i_ast = part.nodes[0].ast();
             if curr_ast != i_ast {
                 curr_ast = i_ast;
-                let file_name = &asts.get(curr_ast).read().unwrap().file_name;
+                let file_name = &asts.get(curr_ast).file_name;
                 builder.push(format!(" {} \n", file_name));
                 builder.push(format!("{}\n", "‾".repeat(file_name.len() + 2)));
             }
@@ -291,14 +291,13 @@ fn to_asts(
                     }
                     let tx = tx.clone();
                     tokio::task::spawn_blocking(move || {
-                        let import_tx = tx.clone();
                         let size = Some(code.len() / 2);
                         let tokens =
-                            token::from_chars(code.chars(), size, move |import: Vec<String>| {
+                            token::from_chars(code.chars(), size, |import: Vec<String>| {
                                 if let [module, rest @ .., _] = &import[..] {
                                     if module == "local" && rest.len() >= 1 {
                                         let path = Path::new(rest.into());
-                                        import_tx.send(ToAstTaskState::New(path, false)).unwrap();
+                                        tx.send(ToAstTaskState::New(path, false)).unwrap();
                                     }
                                 }
                             });

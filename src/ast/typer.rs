@@ -192,7 +192,7 @@ where
         asts: Arc<AstCollection<T>>,
         runtime: Arc<Vec<FunctionDefinition>>,
     ) -> Self {
-        let root = asts.get(ast_id).read().unwrap().root();
+        let root = asts.get(ast_id).root();
         let queue = VecDeque::from(vec![root]);
         let blocked = HashMap::new();
         Self {
@@ -239,11 +239,11 @@ where
     }
 
     fn ast(&self) -> RwLockReadGuard<Ast<T>> {
-        self.asts.get(self.ast_id).read().unwrap()
+        self.asts.get(self.ast_id)
     }
 
     fn ast_mut(&self) -> RwLockWriteGuard<Ast<T>> {
-        self.asts.get(self.ast_id).write().unwrap()
+        self.asts.get_mut(self.ast_id)
     }
 
     fn get_type<'a, 'b: 'a>(
@@ -484,7 +484,7 @@ where
         let ast_id = self.ast_id;
         while let Some(node_id) = self.queue.pop_front() {
             let tp = {
-                let ast = self.asts.get(self.ast_id).read().unwrap();
+                let ast = self.asts.get(self.ast_id);
                 let node = ast.get_node(node_id);
                 for &child_id in node.body.children() {
                     if let None = ast.get_node(child_id).maybe_tp() {

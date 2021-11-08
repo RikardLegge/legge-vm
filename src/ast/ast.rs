@@ -36,8 +36,7 @@ where
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "AstCollection {{\n")?;
-        for (i, (name, id)) in self.names.iter().enumerate() {
-            let ast = &self.asts[id.0].read().unwrap();
+        for (i, (name, ast)) in self.paths().enumerate() {
             write!(f, "{:?}:\n", name)?;
             if ast.nodes.len() < 100 {
                 write!(f, "{:?}", ast)?;
@@ -114,17 +113,21 @@ where
     }
 
     pub fn get_node(&self, id: NodeID) -> AstGuard<T> {
-        let ast = self.get(id.ast()).read().unwrap();
+        let ast = self.get(id.ast());
         AstGuard(id, ast)
     }
 
     pub fn get_node_mut(&mut self, id: NodeID) -> AstGuardMut<T> {
-        let ast = self.get(id.ast()).write().unwrap();
+        let ast = self.get_mut(id.ast());
         AstGuardMut(id, ast)
     }
 
-    pub fn get(&self, id: AstID) -> &RwLock<Ast<T>> {
-        self.asts.get(id.index()).unwrap()
+    pub fn get(&self, id: AstID) -> RwLockReadGuard<Ast<T>> {
+        self.asts.get(id.index()).unwrap().read().unwrap()
+    }
+
+    pub fn get_mut(&self, id: AstID) -> RwLockWriteGuard<Ast<T>> {
+        self.asts.get(id.index()).unwrap().write().unwrap()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = RwLockReadGuard<Ast<T>>> + '_ {
