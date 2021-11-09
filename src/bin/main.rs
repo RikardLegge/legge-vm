@@ -39,7 +39,7 @@ fn main() {
     let store = SystemFileStore::new();
     let path = Path::new(vec![filename.trim_end_matches(".bc").to_string()]);
 
-    match run_code(store, path, log_level, &|v| println!("{:?}", v)) {
+    match run_code(store, path, log_level, true, &|v| println!("{:?}", v)) {
         Ok(()) => exit(0),
         Err(err) => {
             println!("{}", err);

@@ -12,7 +12,7 @@ pub fn run_test(code: &str, expected_result: Option<Value>) {
     store.add(path.clone(), code);
     let result = Rc::new(RefCell::new(None));
     let assign_result = result.clone();
-    run_code(store, path, LogLevel::LogNone, move |v| {
+    run_code(store, path, LogLevel::LogNone, false, move |v| {
         *assign_result.borrow_mut() = Some(v);
     })
     .expect("code should compile and run");

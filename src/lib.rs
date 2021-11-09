@@ -60,6 +60,7 @@ pub fn run_code<F>(
     file_store: impl vm::FileStore,
     path: Path,
     log_level: LogLevel,
+    leak_ast: bool,
     interrupt: F,
 ) -> crate::Result<()>
 where
@@ -73,11 +74,15 @@ where
 
     let start = vm::start_timer();
     let compiler = vm::Compiler::new(&tokio_runtime, &vm_runtime, &file_store, log_level);
-    let bytecode = compiler.compile(path)?;
+    let bytecode = compiler.compile(path, leak_ast)?;
     vm::time("Total compile time", start, log_level);
 
     let mut interpreter = vm::Interpreter::new(&vm_runtime, log_level, &interrupt);
     interpreter.run(&bytecode);
+
+    if leak_ast {
+        Box::leak(Box::new(bytecode));
+    }
 
     return Ok(());
 }

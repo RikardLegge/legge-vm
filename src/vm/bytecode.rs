@@ -24,7 +24,7 @@ impl<'a> BytecodeGenerator<'a> {
         }
     }
 
-    pub fn generate(&self, asts: vm::Ast) -> crate::Result<vm::Bytecode> {
+    pub fn generate(&self, asts: vm::Ast, leak_ast: bool) -> crate::Result<vm::Bytecode> {
         self.tokio_runtime.block_on(async {
             let log_level = self.log_level;
             let asts = Arc::new(asts);
@@ -150,7 +150,11 @@ impl<'a> BytecodeGenerator<'a> {
             let mut asts = Arc::try_unwrap(asts).expect("Single instance of ast in bytecode");
             let debug_symbols = Some(asts.debug_symbols());
             let start = vm::time("Bytecode debug symbols", start, log_level);
-            drop(asts);
+            if leak_ast {
+                Box::leak(Box::new(asts));
+            } else {
+                drop(asts);
+            }
             vm::time("De-allocating ast", start, log_level);
 
             if self.log_level >= LogLevel::LogEval {

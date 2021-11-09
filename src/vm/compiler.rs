@@ -22,7 +22,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    pub fn compile(&self, path: Path) -> crate::Result<vm::Bytecode> {
+    pub fn compile(&self, path: Path, leak_ast: bool) -> crate::Result<vm::Bytecode> {
         let parser = vm::Parser::new(
             self.tokio_runtime,
             self.vm_runtime,
@@ -32,7 +32,7 @@ impl<'a> Compiler<'a> {
         let asts = parser.parse(path)?;
 
         let generator = vm::BytecodeGenerator::new(&self.tokio_runtime, self.log_level);
-        let bytecode = generator.generate(asts)?;
+        let bytecode = generator.generate(asts, leak_ast)?;
 
         return Ok(bytecode);
     }
