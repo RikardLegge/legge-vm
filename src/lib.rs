@@ -56,7 +56,12 @@ impl Err {
     }
 }
 
-pub fn run_code<F>(path: Path, code: String, log_level: LogLevel, interrupt: F) -> crate::Result<()>
+pub fn run_code<F>(
+    file_store: impl vm::FileStore,
+    path: Path,
+    log_level: LogLevel,
+    interrupt: F,
+) -> crate::Result<()>
 where
     F: Fn(vm::Value),
 {
@@ -67,8 +72,8 @@ where
         .unwrap();
 
     let start = vm::start_timer();
-    let compiler = vm::Compiler::new(&tokio_runtime, &vm_runtime, log_level);
-    let bytecode = compiler.compile(path, code)?;
+    let compiler = vm::Compiler::new(&tokio_runtime, &vm_runtime, &file_store, log_level);
+    let bytecode = compiler.compile(path)?;
     vm::time("Total compile time", start, log_level);
 
     let mut interpreter = vm::Interpreter::new(&vm_runtime, log_level, &interrupt);

@@ -1,6 +1,7 @@
 mod ast;
 mod bytecode;
 mod compiler;
+mod filestore;
 mod interpreter;
 mod parser;
 mod runtime;
@@ -8,6 +9,8 @@ mod token;
 pub mod transform;
 
 type Ast = ast::Ast<ast::TypesChecked>;
+
+pub use filestore::{FileStore, SystemFileStore, VirtualFileStore};
 
 pub use bytecode::{Bytecode, OPCode, Value};
 

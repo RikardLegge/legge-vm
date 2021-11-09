@@ -1,22 +1,20 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::vm::Value;
+use crate::vm::{Value, VirtualFileStore};
 use crate::LogLevel;
 use crate::{run_code, Path};
 
 pub fn run_test(code: &str, expected_result: Option<Value>) {
     let code = format!("import std.exit;{}", code);
+    let path = Path::new(vec!["test".to_string(), "generated".to_string()]);
+    let mut store = VirtualFileStore::new();
+    store.add(path.clone(), code);
     let result = Rc::new(RefCell::new(None));
     let assign_result = result.clone();
-    run_code(
-        Path::new(vec!["test".to_string(), "generated".to_string()]),
-        code.into(),
-        LogLevel::LogNone,
-        move |v| {
-            *assign_result.borrow_mut() = Some(v);
-        },
-    )
+    run_code(store, path, LogLevel::LogNone, move |v| {
+        *assign_result.borrow_mut() = Some(v);
+    })
     .expect("code should compile and run");
     let result = result.borrow();
     assert_eq!(*result, expected_result);

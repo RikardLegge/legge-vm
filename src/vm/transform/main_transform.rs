@@ -1,3 +1,4 @@
+use crate::vm;
 use crate::vm::ast::{AstBranch, IsValid, Valid};
 use crate::vm::token;
 use crate::vm::token::Token;
@@ -6,7 +7,6 @@ use crate::vm::{ast, transform};
 use crate::Path;
 use std::collections::HashSet;
 use std::fmt::Debug;
-use tokio::io::{AsyncReadExt, ErrorKind};
 
 #[derive(Debug)]
 enum ToAstTaskState<T>
@@ -16,23 +16,27 @@ where
     New(Path, bool),
     ToTokens(Path, String),
     ToAst(Path, Vec<Token>),
-    TooManyFiles(Path, usize),
+    Retry(Path, usize),
     Err(Path, ast::Err, Option<AstBranch<T>>),
     Done(Path, AstBranch<T>),
 }
 
 pub struct Main<'a> {
     runtime: &'a tokio::runtime::Runtime,
+    file_store: &'a dyn vm::FileStore,
     path: Path,
-    file: String,
 }
 
 impl<'a> Main<'a> {
-    pub fn new(runtime: &'a tokio::runtime::Runtime, path: Path, file: String) -> Self {
+    pub fn new(
+        runtime: &'a tokio::runtime::Runtime,
+        file_store: &'a dyn vm::FileStore,
+        path: Path,
+    ) -> Self {
         Self {
             runtime,
+            file_store,
             path,
-            file,
         }
     }
 }
@@ -50,12 +54,11 @@ where
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let mut processed_paths = HashSet::new();
 
-            let task = ToAstTaskState::ToTokens(self.path.clone(), self.file.clone());
-            processed_paths.insert(self.path.clone());
+            let task = ToAstTaskState::New(self.path.clone(), false);
             tx.send(task).unwrap();
 
-            let mut n_started = 1;
-            let mut open_files = 1;
+            let mut n_started = 0;
+            let mut open_files = 0;
             let mut n_completed = 0;
             let mut pending_files = Vec::new();
             let mut error = None;
@@ -74,36 +77,25 @@ where
 
                             let tx = tx.clone();
                             open_files += 1;
+                            let file = self.file_store.file(&path);
                             tokio::task::spawn(async move {
-                                match tokio::fs::File::open(path.file()).await {
-                                    Ok(mut file) => {
-                                        let mut code = String::new();
-                                        file.read_to_string(&mut code)
-                                            .await
-                                            .expect("something went wrong reading file");
-
+                                match file.read().await {
+                                    Ok(code) => {
                                         tx.send(ToAstTaskState::ToTokens(path, code)).unwrap();
                                     }
-                                    Err(err) => match err.kind() {
-                                        ErrorKind::NotFound
-                                        | ErrorKind::PermissionDenied
-                                        | ErrorKind::BrokenPipe
-                                        | ErrorKind::TimedOut
-                                        | ErrorKind::Interrupted
-                                        | ErrorKind::Unsupported
-                                        | ErrorKind::Other => {
+                                    Err(err) => {
+                                        if err.retryable() {
+                                            tx.send(ToAstTaskState::Retry(path, open_files))
+                                                .unwrap();
+                                        } else {
                                             panic!("{:?}", err);
                                         }
-                                        _ => {
-                                            tx.send(ToAstTaskState::TooManyFiles(path, open_files))
-                                                .unwrap();
-                                        }
-                                    },
+                                    }
                                 };
                             });
                         }
                     }
-                    ToAstTaskState::TooManyFiles(path, error_count) => {
+                    ToAstTaskState::Retry(path, error_count) => {
                         if open_files < error_count {
                             tx.send(ToAstTaskState::New(path, true)).unwrap();
                         } else {

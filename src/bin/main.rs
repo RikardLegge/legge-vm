@@ -1,11 +1,9 @@
+use leggevm::vm::SystemFileStore;
 use leggevm::LogLevel;
 use leggevm::{run_code, Path};
-use std::fs::File;
-use std::io::prelude::*;
 use std::process::exit;
 
 use clap::{App, Arg};
-
 fn main() {
     let matches = App::new("Legge VM")
         .version("0.1.0")
@@ -38,14 +36,10 @@ fn main() {
         None => panic!("No input file provided"),
     };
 
-    let mut f = File::open(filename).expect("file not found");
-
-    let mut contents = String::new();
-    f.read_to_string(&mut contents)
-        .expect("something went wrong reading the file");
-
+    let store = SystemFileStore::new();
     let path = Path::new(vec![filename.trim_end_matches(".bc").to_string()]);
-    match run_code(path, contents, log_level, &|v| println!("{:?}", v)) {
+
+    match run_code(store, path, log_level, &|v| println!("{:?}", v)) {
         Ok(()) => exit(0),
         Err(err) => {
             println!("{}", err);
