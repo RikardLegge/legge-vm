@@ -46,10 +46,8 @@ starts parsing and ends when the bytecode has completed generating.
 - [x] A few tests showcasing the functionality
 
 ### TODO
-- [ ] Fix races introduced by multithreading compilation
 - [ ] Add more test cases
 - [ ] Implement bare-bone standard library
-- [ ] Cleanup after latest round of new features
 - [ ] Decouple runtime from compiler
 
 ## Example code
