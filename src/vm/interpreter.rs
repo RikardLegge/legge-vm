@@ -1,8 +1,8 @@
 use crate::vm::ast::{DebugSymbols, NodeID};
+use crate::vm::bytecode;
 use crate::vm::bytecode::{Bytecode, OPCode, SFOffset};
 use crate::vm::runtime::Runtime;
-use crate::vm::{bytecode, debug};
-use crate::LogLevel;
+use crate::{vm, LogLevel};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt::Formatter;
@@ -15,41 +15,60 @@ use crate::Err;
 
 pub type Result<V = ()> = crate::Result<V>;
 
-pub struct InterpreterDebugInfo {
-    pub instructions: usize,
-    pub duration: Duration,
-}
-
-impl InterpreterDebugInfo {
-    pub fn instruction_duration(&self) -> Duration {
-        self.duration / self.instructions as u32
-    }
-}
-
 pub struct Interpreter<'a> {
+    pub runtime: &'a Runtime,
+    pub interrupt: &'a dyn Fn(bytecode::Value),
+    pub log_level: LogLevel,
+}
+
+pub struct InterpreterState<'a> {
     pc: Option<usize>,
     pending_frame: Option<StackFrame>,
     frame: StackFrame,
     stack: Vec<Value>,
     symbols: Option<&'a DebugSymbols>,
-    pub runtime: &'a Runtime,
-    pub log_level: LogLevel,
-    pub stack_max: usize,
-    pub interrupt: &'a dyn Fn(bytecode::Value),
-    pub debug_info: InterpreterDebugInfo,
-}
+    stack_max: usize,
+    executed_instructions: usize,
 
+    interpreter: &'a Interpreter<'a>,
+}
 impl<'a> Interpreter<'a> {
     pub fn new(
         runtime: &'a Runtime,
         log_level: LogLevel,
         interrupt: &'a dyn Fn(bytecode::Value),
     ) -> Self {
-        let stack_size = 10000000;
         Interpreter {
             runtime,
             log_level,
             interrupt,
+        }
+    }
+
+    pub fn run(&mut self, code: &'a Bytecode) {
+        let start = vm::start_timer();
+
+        let stack_size = 10000000;
+        let mut state = InterpreterState::new(&self, stack_size);
+        state.run(&code);
+
+        let duration = vm::stop_timer(start);
+        if self.log_level >= LogLevel::LogTiming {
+            let inst_duration = if state.executed_instructions == 0 {
+                Duration::new(0, 0)
+            } else {
+                duration / state.executed_instructions as u32
+            };
+            println!("Avg Instruction: {:?}", inst_duration)
+        }
+    }
+}
+
+impl<'a> InterpreterState<'a> {
+    pub fn new(interpreter: &'a Interpreter<'a>, stack_size: usize) -> Self {
+        InterpreterState {
+            interpreter,
+            stack_max: stack_size,
 
             pending_frame: None,
             frame: StackFrame {
@@ -60,13 +79,9 @@ impl<'a> Interpreter<'a> {
                 }))),
             },
             pc: Some(0),
-            stack: Vec::with_capacity(stack_size),
             symbols: None,
-            stack_max: stack_size,
-            debug_info: InterpreterDebugInfo {
-                instructions: 0,
-                duration: Duration::new(0, 0),
-            },
+            stack: Vec::with_capacity(stack_size),
+            executed_instructions: 0,
         }
     }
 
@@ -80,8 +95,8 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn execute(&mut self, cmd: &OPCode, node_id: NodeID) -> Result {
-        self.debug_info.instructions += 1;
-        if self.log_level >= LogLevel::LogEval {
+        self.executed_instructions += 1;
+        if self.interpreter.log_level >= LogLevel::LogEval {
             let line = self.symbols.and_then(|s| s.get_line(node_id)).unwrap_or(0);
             self.debug_log(
                 LogLevel::LogEval,
@@ -105,41 +120,36 @@ impl<'a> Interpreter<'a> {
         result
     }
 
-    pub fn run(&mut self, code: &'a Bytecode) {
-        self.symbols = code.debug_symbols.as_ref();
-        let start = debug::start_timer();
-        loop {
-            if let Some(pc) = self.pc {
-                if let Some(cmd) = code.code.get(pc) {
-                    self.pc = Some(pc + 1);
-                    if let Err(err) = self.execute(&cmd.op, cmd.node_id) {
-                        panic!("{:?}", err.details);
+    fn run(&mut self, code: &'a Bytecode) {
+        if code.code.len() > 0 {
+            self.symbols = code.debug_symbols.as_ref();
+            loop {
+                if let Some(pc) = self.pc {
+                    if let Some(cmd) = code.code.get(pc) {
+                        self.pc = Some(pc + 1);
+                        if let Err(err) = self.execute(&cmd.op, cmd.node_id) {
+                            panic!("{:?}", err.details);
+                        }
+                    } else {
+                        panic!("Invalid PC");
                     }
                 } else {
-                    panic!("Invalid PC");
+                    break;
                 }
-            } else {
-                break;
             }
+            self.symbols = None;
         }
-        self.debug_info.duration = debug::stop_timer(start);
-        self.symbols = None;
+
         if self.stack.len() > 0 {
             dbg!(&self.stack);
             panic!("Interpreter stopped without an empty stack")
         }
-        if self.log_level >= LogLevel::LogTiming {
-            println!(
-                "Avg Instruction: {:?}",
-                self.debug_info.instruction_duration()
-            )
-        }
     }
 }
 
-impl<'a> Interpreter<'a> {
+impl<'a> InterpreterState<'a> {
     fn debug_log(&self, level: LogLevel, info: &str) {
-        if self.log_level >= level {
+        if self.interpreter.log_level >= level {
             println!("{}", info);
         }
     }
@@ -363,7 +373,7 @@ impl<'a> Interpreter<'a> {
                     }
                     Value::RuntimeFn(id) => {
                         let args = self.foreign_function_arguments()?;
-                        let func = self.runtime.functions[id];
+                        let func = self.interpreter.runtime.functions[id];
                         let returns = func(self, args)?;
                         // Just make sure that the function has not set the pc to None
                         // If pc is none then we will terminate
@@ -406,7 +416,7 @@ impl<'a> Interpreter<'a> {
             }
             Yield => {
                 let value = self.pop_stack()?;
-                (self.interrupt)(value.into_bytecode().unwrap());
+                (self.interpreter.interrupt)(value.into_bytecode().unwrap());
             }
             _ => panic!("Instruction not implemented: {:?}", cmd),
         }

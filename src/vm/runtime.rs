@@ -4,7 +4,7 @@ use crate::vm::ast;
 use crate::{vm, Err};
 
 pub type FunctionReturn = crate::Result<Option<vm::Value>>;
-pub type Function = &'static dyn Fn(&mut vm::Interpreter, Vec<vm::Value>) -> FunctionReturn;
+pub type Function = &'static dyn Fn(&mut vm::InterpreterState, Vec<vm::Value>) -> FunctionReturn;
 
 pub struct Runtime {
     pub definitions: Arc<Vec<FunctionDefinition>>,
@@ -91,7 +91,7 @@ fn ff(
     functions.push(function);
 }
 
-fn to_int(_: &mut vm::Interpreter, args: Vec<vm::Value>) -> FunctionReturn {
+fn to_int(_: &mut vm::InterpreterState, args: Vec<vm::Value>) -> FunctionReturn {
     if args.len() != 1 {
         panic!("int must be called with one arguments")
     }
@@ -103,7 +103,7 @@ fn to_int(_: &mut vm::Interpreter, args: Vec<vm::Value>) -> FunctionReturn {
     Ok(Some(result))
 }
 
-fn to_float(_: &mut vm::Interpreter, args: Vec<vm::Value>) -> FunctionReturn {
+fn to_float(_: &mut vm::InterpreterState, args: Vec<vm::Value>) -> FunctionReturn {
     if args.len() != 1 {
         panic!("int must be called with one arguments")
     }
@@ -115,7 +115,7 @@ fn to_float(_: &mut vm::Interpreter, args: Vec<vm::Value>) -> FunctionReturn {
     Ok(Some(result))
 }
 
-fn sin(_: &mut vm::Interpreter, args: Vec<vm::Value>) -> FunctionReturn {
+fn sin(_: &mut vm::InterpreterState, args: Vec<vm::Value>) -> FunctionReturn {
     if args.len() != 1 {
         panic!("Assert must be called with one arguments")
     }
@@ -126,7 +126,7 @@ fn sin(_: &mut vm::Interpreter, args: Vec<vm::Value>) -> FunctionReturn {
     Ok(Some(vm::Value::Int(result.round() as isize)))
 }
 
-fn assert(_: &mut vm::Interpreter, args: Vec<vm::Value>) -> FunctionReturn {
+fn assert(_: &mut vm::InterpreterState, args: Vec<vm::Value>) -> FunctionReturn {
     if args.len() != 2 {
         panic!("Assert must be called with two arguments")
     }
@@ -136,7 +136,7 @@ fn assert(_: &mut vm::Interpreter, args: Vec<vm::Value>) -> FunctionReturn {
     Ok(None)
 }
 
-fn print(_: &mut vm::Interpreter, mut args: Vec<vm::Value>) -> FunctionReturn {
+fn print(_: &mut vm::InterpreterState, mut args: Vec<vm::Value>) -> FunctionReturn {
     let last_arg = args.pop();
     for arg in args {
         print!("{:?}, ", arg);
@@ -148,11 +148,11 @@ fn print(_: &mut vm::Interpreter, mut args: Vec<vm::Value>) -> FunctionReturn {
     Ok(None)
 }
 
-fn touch(_: &mut vm::Interpreter, _: Vec<vm::Value>) -> FunctionReturn {
+fn touch(_: &mut vm::InterpreterState, _: Vec<vm::Value>) -> FunctionReturn {
     Ok(None)
 }
 
-fn exit(interp: &mut vm::Interpreter, args: Vec<vm::Value>) -> FunctionReturn {
+fn exit(interp: &mut vm::InterpreterState, args: Vec<vm::Value>) -> FunctionReturn {
     if let [value] = &args[..] {
         interp.execute(
             &vm::OPCode::PushImmediate(value.clone()),

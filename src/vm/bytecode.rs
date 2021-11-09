@@ -1,9 +1,8 @@
-use crate::vm::ast::ArithmeticOP;
 use crate::vm::ast::{
-    Ast, AstBranch, AstBranchID, DebugSymbols, IsLinked, IsTypesChecked, IsTypesInferred, IsValid,
-    NodeID, NodeType, NodeValue,
+    ArithmeticOP, Ast, AstBranch, AstBranchID, DebugSymbols, IsLinked, IsTypesChecked,
+    IsTypesInferred, IsValid, NBCall, NBProcedureDeclaration, NodeBody, NodeID, NodeType,
+    NodeValue,
 };
-use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::{vm, LogLevel};
 use std::collections::HashMap;
 use std::fmt;
@@ -27,10 +26,13 @@ impl<'a> BytecodeGenerator<'a> {
 
     pub fn generate(&self, asts: vm::Ast) -> crate::Result<vm::Bytecode> {
         self.tokio_runtime.block_on(async {
+            let log_level = self.log_level;
             let asts = Arc::new(asts);
             let node_id = asts.root();
+            let start = vm::start_timer();
             let (scope, context) = allocate_global_variables(&asts);
-            let init_instructions = scope.instructions;
+            let start = vm::time("Bytecode Global allocations", start, log_level);
+            let mut init_instructions = scope.instructions;
 
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -41,7 +43,7 @@ impl<'a> BytecodeGenerator<'a> {
 
                 tokio::task::spawn_blocking(move || {
                     let ast = &asts.read_ast(ast_id);
-                    let mut bc = Generator::new(context, ast);
+                    let mut bc = Generator::new(context);
                     let (global, local) = bc.evaluate(ast);
                     let procedures = bc.procedures;
                     tx.send(Ok((ast_id, global, local, procedures, bc.procedure_len)))
@@ -56,7 +58,7 @@ impl<'a> BytecodeGenerator<'a> {
             let mut global_instructions = vec![vec![]; asts.len()];
             let mut instructions = vec![vec![]; asts.len()];
             let mut proc_instructions = vec![vec![]; asts.len()];
-            let halt_instructions = {
+            let mut halt_instructions = {
                 let mut inst = vec![];
                 let allocations = context.local_allocations();
                 if allocations > 0 {
@@ -82,6 +84,7 @@ impl<'a> BytecodeGenerator<'a> {
                 }
             }
 
+            let start = vm::time("Bytecode Local allocations", start, log_level);
             let mut proc_offsets = vec![0; asts.len()];
             for ast_id in asts.ids() {
                 let ast_i = ast_id.index();
@@ -117,21 +120,36 @@ impl<'a> BytecodeGenerator<'a> {
             let mut global_instructions = vec![vec![]; asts.len()];
             let mut instructions = vec![vec![]; asts.len()];
             let mut proc_instructions = vec![vec![]; asts.len()];
+            let n_insturctions = proc_start_offset
+                + proc_instruction_len.iter().sum::<usize>()
+                + halt_instructions.len();
             drop(tx);
             while let Some((ast_i, global, local, proc)) = rx.recv().await {
                 global_instructions[ast_i] = global;
                 instructions[ast_i] = local;
                 proc_instructions[ast_i] = proc;
             }
+            let start = vm::time("Bytecode patch allocations", start, log_level);
 
-            let mut code = init_instructions;
-            code.extend(global_instructions.into_iter().flatten());
-            code.extend(instructions.into_iter().flatten());
-            code.extend(halt_instructions.into_iter());
-            code.extend(proc_instructions.into_iter().flatten().flatten());
+            let mut code = Vec::with_capacity(n_insturctions);
+            code.append(&mut init_instructions);
+            for mut i in global_instructions {
+                code.append(&mut i);
+            }
+            for mut i in instructions {
+                code.append(&mut i);
+            }
+            code.append(&mut halt_instructions);
+            for proc in proc_instructions {
+                for mut p in proc {
+                    code.append(&mut p);
+                }
+            }
+            let start = vm::time("Bytecode output", start, log_level);
 
-            let asts = Arc::try_unwrap(asts).unwrap();
+            let asts = Arc::try_unwrap(asts).expect("Single instance of ast in bytecode");
             let debug_symbols = Some(asts.debug_symbols());
+            vm::time("Bytecode debug symbols", start, log_level);
 
             if self.log_level >= LogLevel::LogEval {
                 println!("{:?}", code);
@@ -149,7 +167,7 @@ fn allocate_global_variables<T>(asts: &Ast<T>) -> (Scope, Context)
 where
     T: IsLinked + IsTypesInferred + IsTypesChecked,
 {
-    let mut bc = Generator::new(None, &asts.read_ast(AstBranchID::new(0)));
+    let mut bc = Generator::new(None);
     let root_id = asts.root();
 
     let (scope, context) = bc.with_scope(root_id, ContextType::Block, |bc| {
@@ -358,19 +376,20 @@ impl<T> Generator<T>
 where
     T: IsLinked + IsTypesInferred + IsTypesChecked,
 {
-    fn new(global_context: Option<Context>, ast: &AstBranch<T>) -> Self {
+    fn new(global_context: Option<Context>) -> Self {
         Generator {
             procedure_len: 0,
             procedures: Vec::new(),
             scopes: Vec::new(),
             contexts: Vec::new(),
-            dummy_offset: ast.nodes().len(),
+            dummy_offset: 0,
             global_context,
             _tp: PhantomData::default(),
         }
     }
 
     fn evaluate(&mut self, ast: &AstBranch<T>) -> (Vec<Instruction>, Vec<Instruction>) {
+        self.dummy_offset = ast.nodes().len();
         let root_id = ast.root();
         let (global_scope, new_context) = self.with_scope(root_id, ContextType::Block, |bc| {
             let node = ast.get_node(root_id);

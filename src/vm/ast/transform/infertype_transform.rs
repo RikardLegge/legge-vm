@@ -93,7 +93,7 @@ where
                     n_active -= 1;
                     if n_active == 0 {
                         drop(blocked_checkers);
-                        let asts = Arc::try_unwrap(asts).unwrap();
+                        let asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform error");
                         let err = std::mem::replace(&mut error, None).unwrap();
                         return Err((asts.guarantee_state(), err));
                     }
@@ -145,13 +145,11 @@ where
                     }
                 }
                 if n_active == 0 {
-                    if blocked_checkers.values().any(|l| l.len() > 0) {
-                        panic!("Not all blockers are dropped")
-                    }
-                    let asts = Arc::try_unwrap(asts).unwrap();
+                    assert!(blocked_checkers.values().all(|l| l.len() == 0));
+                    let asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform");
                     return Ok(asts.guarantee_state());
                 }
-                if n_blocked == n_active {
+                if n_active > 0 && n_blocked == n_active {
                     let nodes = blocked_checkers
                         .into_values()
                         .map(|typers| typers
@@ -173,7 +171,7 @@ where
                         "unable to infer type",
                         nodes,
                     );
-                    let asts = Arc::try_unwrap(asts).unwrap();
+                    let asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform blocked");
                     return Err((asts.guarantee_state(), err));
                 }
             }

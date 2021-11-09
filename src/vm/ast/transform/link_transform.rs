@@ -79,7 +79,10 @@ where
                 }
             }
 
-            let mut asts = Arc::try_unwrap(asts).unwrap().into_inner().unwrap();
+            let mut asts = Arc::try_unwrap(asts)
+                .unwrap()
+                .into_inner()
+                .expect("Single instance of ast in link transform");
             if let Some(err) = errors.pop() {
                 Err((asts.guarantee_state(), err))
             } else {

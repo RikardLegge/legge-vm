@@ -27,16 +27,17 @@ impl<'a> Parser<'a> {
     pub fn parse(&self, path: Path, code: String) -> crate::Result<vm::Ast> {
         let tokio = &self.tokio_runtime;
         let std = &self.vm_runtime;
-        let (ast, time) = ast::TransformBuilder::new()
+        let mut builder = ast::TransformBuilder::new();
+        if self.log_level >= LogLevel::LogTiming {
+            builder = builder.after_each(&|name, time| println!("{}: {:?}", name, time))
+        }
+        let ast = builder
             .transform(&MainTransform::new(tokio, path, code))?
             .transform(&LinkTransformation::new(tokio, std))?
             .transform(&InferTypesTransformation::new(tokio, std))?
             .transform(&CheckTypesTransformation::new(tokio))?
             .transform(&TreeShakeTransformation::new())?
             .build();
-        if self.log_level >= LogLevel::LogTiming {
-            println!("{:?}", time);
-        }
         Ok(ast)
     }
 }

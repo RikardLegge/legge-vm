@@ -66,8 +66,10 @@ where
         .build()
         .unwrap();
 
+    let start = vm::start_timer();
     let compiler = vm::Compiler::new(&tokio_runtime, &vm_runtime, log_level);
     let bytecode = compiler.compile(path, code)?;
+    vm::time("Total compile time", start, log_level);
 
     let mut interpreter = vm::Interpreter::new(&vm_runtime, log_level, &interrupt);
     interpreter.run(&bytecode);

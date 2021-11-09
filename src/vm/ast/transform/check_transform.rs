@@ -50,7 +50,7 @@ where
                 }
             }
 
-            let asts = Arc::try_unwrap(asts).unwrap();
+            let asts = Arc::try_unwrap(asts).expect("Single instance of ast in check transform");
 
             if let Some(err) = errors.pop() {
                 Err((asts.guarantee_state(), err))
