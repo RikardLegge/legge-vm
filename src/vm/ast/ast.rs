@@ -135,12 +135,13 @@ where
         id
     }
 
-    pub fn debug_symbols(self) -> DebugSymbols {
-        let mut tokens = HashMap::new();
-        for ast in self.asts.into_iter() {
-            let ast = ast.into_inner().unwrap();
-            for node in ast.nodes {
-                tokens.insert(node.id(), node.tokens);
+    pub fn debug_symbols(&mut self) -> DebugSymbols {
+        let nodes = self.iter().map(|ast| ast.nodes.len()).sum();
+        let mut tokens = HashMap::with_capacity(nodes);
+        for mut ast in self.iter_mut() {
+            for node in &mut ast.nodes {
+                let node_tokens = std::mem::replace(&mut node.tokens, vec![]);
+                tokens.insert(node.id(), node_tokens);
             }
         }
         DebugSymbols { tokens }

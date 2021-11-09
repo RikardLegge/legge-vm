@@ -147,9 +147,11 @@ impl<'a> BytecodeGenerator<'a> {
             }
             let start = vm::time("Bytecode output", start, log_level);
 
-            let asts = Arc::try_unwrap(asts).expect("Single instance of ast in bytecode");
+            let mut asts = Arc::try_unwrap(asts).expect("Single instance of ast in bytecode");
             let debug_symbols = Some(asts.debug_symbols());
-            vm::time("Bytecode debug symbols", start, log_level);
+            let start = vm::time("Bytecode debug symbols", start, log_level);
+            drop(asts);
+            vm::time("De-allocating ast", start, log_level);
 
             if self.log_level >= LogLevel::LogEval {
                 println!("{:?}", code);

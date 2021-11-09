@@ -80,8 +80,8 @@ where
                 let asts = asts.clone();
                 let definitions = self.vm_runtime.definitions.clone();
                 let typer = Typer::new(id, asts, definitions);
-                tx.send(TyperState::TypeCheck(typer)).unwrap();
                 n_active += 1;
+                tx.send(TyperState::TypeCheck(typer)).unwrap();
             }
 
             let mut blocked_checkers = HashMap::new();
@@ -146,6 +146,7 @@ where
                 }
                 if n_active == 0 {
                     assert!(blocked_checkers.values().all(|l| l.len() == 0));
+                    dbg!(rx.try_recv());
                     let asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform");
                     return Ok(asts.guarantee_state());
                 }
