@@ -1,18 +1,19 @@
-use crate::vm::ast::{transform, AstBranch, NodeID, Result};
 use crate::vm::ast::{Ast, IsLinked, NodeReference, PartialNodeValue, SideEffect};
+use crate::vm::ast::{AstBranch, NodeID, Result};
 use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody, NodeBodyIterator};
 use crate::vm::ast::{Node, NodeReferenceType, NodeType, NodeValue};
+use crate::vm::transform;
 use std::collections::{HashSet, VecDeque};
 
-pub struct TreeShakeTransformation {}
+pub struct TreeShake {}
 
-impl TreeShakeTransformation {
+impl TreeShake {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl<T> transform::AstTransformation<T, T> for TreeShakeTransformation
+impl<T> transform::AstTransformation<T, T> for TreeShake
 where
     T: IsLinked,
 {

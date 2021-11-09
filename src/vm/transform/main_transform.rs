@@ -1,8 +1,8 @@
-use crate::vm::ast;
-use crate::vm::ast::transform::token_to_ast;
-use crate::vm::ast::{transform, AstBranch, IsValid, Valid};
+use crate::vm::ast::{AstBranch, IsValid, Valid};
 use crate::vm::token;
 use crate::vm::token::Token;
+use crate::vm::transform::token_to_ast;
+use crate::vm::{ast, transform};
 use crate::Path;
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -21,13 +21,13 @@ where
     Done(Path, AstBranch<T>),
 }
 
-pub struct MainTransform<'a> {
+pub struct Main<'a> {
     runtime: &'a tokio::runtime::Runtime,
     path: Path,
     file: String,
 }
 
-impl<'a> MainTransform<'a> {
+impl<'a> Main<'a> {
     pub fn new(runtime: &'a tokio::runtime::Runtime, path: Path, file: String) -> Self {
         Self {
             runtime,
@@ -37,7 +37,7 @@ impl<'a> MainTransform<'a> {
     }
 }
 
-impl<'a, T> transform::AstTransformation<T, Valid> for MainTransform<'a>
+impl<'a, T> transform::AstTransformation<T, Valid> for Main<'a>
 where
     T: IsValid,
 {

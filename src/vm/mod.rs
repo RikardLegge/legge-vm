@@ -5,6 +5,7 @@ mod interpreter;
 mod parser;
 mod runtime;
 mod token;
+pub mod transform;
 
 type Ast = ast::Ast<ast::TypesChecked>;
 

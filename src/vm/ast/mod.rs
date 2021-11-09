@@ -2,7 +2,6 @@ mod ast;
 mod error;
 mod nodebody;
 mod state;
-mod transform;
 
 use std::result;
 
@@ -15,6 +14,5 @@ pub use error::{Err, ErrPart};
 pub use nodebody::*;
 pub use state::{Invalid, Linked, TypesChecked, TypesInferred, Valid};
 pub use state::{IsInvalid, IsLinked, IsTypesChecked, IsTypesInferred, IsValid};
-pub use transform::*;
 
 pub type Result<N = NodeID> = result::Result<N, Err>;

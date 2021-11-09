@@ -1,8 +1,4 @@
-use crate::vm::ast;
-use crate::vm::ast::{
-    CheckTypesTransformation, InferTypesTransformation, LinkTransformation, MainTransform,
-    TreeShakeTransformation,
-};
+use crate::vm::transform;
 use crate::{vm, LogLevel, Path};
 
 pub struct Parser<'a> {
@@ -27,16 +23,16 @@ impl<'a> Parser<'a> {
     pub fn parse(&self, path: Path, code: String) -> crate::Result<vm::Ast> {
         let tokio = &self.tokio_runtime;
         let std = &self.vm_runtime;
-        let mut builder = ast::TransformBuilder::new();
+        let mut builder = transform::Builder::new();
         if self.log_level >= LogLevel::LogTiming {
             builder = builder.after_each(&|name, time| println!("{}: {:?}", name, time))
         }
         let ast = builder
-            .transform(&MainTransform::new(tokio, path, code))?
-            .transform(&LinkTransformation::new(tokio, std))?
-            .transform(&InferTypesTransformation::new(tokio, std))?
-            .transform(&CheckTypesTransformation::new(tokio))?
-            .transform(&TreeShakeTransformation::new())?
+            .transform(&transform::Main::new(tokio, path, code))?
+            .transform(&transform::Link::new(tokio, std))?
+            .transform(&transform::InferTypes::new(tokio, std))?
+            .transform(&transform::CheckTypes::new(tokio))?
+            .transform(&transform::TreeShake::new())?
             .build();
         Ok(ast)
     }

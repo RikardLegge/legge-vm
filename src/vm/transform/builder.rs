@@ -1,17 +1,16 @@
 use crate::vm;
-use crate::vm::ast;
-use crate::vm::ast::{AstTransformation, IsValid, Valid};
+use crate::vm::{ast, transform};
 use std::time;
 
-pub struct TransformBuilder<T>
+pub struct Builder<T>
 where
-    T: IsValid,
+    T: ast::IsValid,
 {
     asts: ast::Ast<T>,
     after_each_fn: &'static dyn Fn(String, time::Duration),
 }
 
-impl TransformBuilder<Valid> {
+impl Builder<ast::Valid> {
     pub fn new() -> Self {
         Self {
             asts: ast::Ast::new(),
@@ -25,9 +24,9 @@ impl TransformBuilder<Valid> {
     }
 }
 
-impl<T> TransformBuilder<T>
+impl<T> Builder<T>
 where
-    T: IsValid,
+    T: ast::IsValid,
 {
     pub fn build(self) -> ast::Ast<T> {
         self.asts
@@ -35,10 +34,10 @@ where
 
     pub fn transform<N>(
         self,
-        trans: &impl AstTransformation<T, N>,
-    ) -> crate::Result<TransformBuilder<N>>
+        trans: &impl transform::AstTransformation<T, N>,
+    ) -> crate::Result<Builder<N>>
     where
-        N: IsValid,
+        N: ast::IsValid,
     {
         let start = vm::start_timer();
         let result = trans.transform(self.asts);
@@ -48,7 +47,7 @@ where
         (self.after_each_fn)(name, duration);
 
         match result {
-            Ok(asts) => Ok(TransformBuilder {
+            Ok(asts) => Ok(Builder {
                 asts,
                 after_each_fn: self.after_each_fn,
             }),

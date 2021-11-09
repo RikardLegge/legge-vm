@@ -1,12 +1,12 @@
 use crate::vm;
 use crate::vm::ast;
-use crate::vm::ast::transform::{AstTransformation, Result};
 use crate::vm::ast::{
     Ast, AstBranch, AstBranchID, ErrPart, InferredType, IsLinked, Node, NodeID, NodeType,
     NodeTypeSource, NodeValue, TypesInferred,
 };
 use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody};
 use crate::vm::runtime::FunctionDefinition;
+use crate::vm::transform::{AstTransformation, Result};
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
@@ -80,12 +80,12 @@ enum TyperResult {
     Failed(ast::Err),
 }
 
-pub struct InferTypesTransformation<'a> {
+pub struct InferTypes<'a> {
     tokio_runtime: &'a tokio::runtime::Runtime,
     vm_runtime: &'a vm::Runtime,
 }
 
-impl<'a> InferTypesTransformation<'a> {
+impl<'a> InferTypes<'a> {
     pub fn new(tokio_runtime: &'a tokio::runtime::Runtime, vm_runtime: &'a vm::Runtime) -> Self {
         Self {
             tokio_runtime,
@@ -94,7 +94,7 @@ impl<'a> InferTypesTransformation<'a> {
     }
 }
 
-impl<'a, T> AstTransformation<T, TypesInferred> for InferTypesTransformation<'a>
+impl<'a, T> AstTransformation<T, TypesInferred> for InferTypes<'a>
 where
     T: IsLinked,
 {

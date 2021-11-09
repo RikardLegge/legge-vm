@@ -1,11 +1,11 @@
-use super::ast;
 use crate::vm::ast::NodeReferenceType::*;
 use crate::vm::ast::UnlinkedNodeBody::*;
-use crate::vm::ast::{transform, AstBranch, IsValid, NodeID};
 use crate::vm::ast::{Ast, Linked, NodeReferenceLocation, PartialNodeValue, PartialType};
+use crate::vm::ast::{AstBranch, IsValid, NodeID};
 use crate::vm::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue};
 use crate::vm::ast::{NBCall, NodeBody};
 use crate::vm::runtime::FunctionDefinition;
+use crate::vm::{ast, transform};
 use crate::{vm, PathKey};
 use std::borrow::Borrow;
 use std::collections::{HashMap, VecDeque};
@@ -20,12 +20,12 @@ struct PendingRef {
     loc: NodeReferenceLocation,
 }
 
-pub struct LinkTransformation<'a> {
+pub struct Link<'a> {
     tokio_runtime: &'a tokio::runtime::Runtime,
     vm_runtime: &'a vm::Runtime,
 }
 
-impl<'a> LinkTransformation<'a> {
+impl<'a> Link<'a> {
     pub fn new(tokio_runtime: &'a tokio::runtime::Runtime, vm_runtime: &'a vm::Runtime) -> Self {
         Self {
             tokio_runtime,
@@ -34,7 +34,7 @@ impl<'a> LinkTransformation<'a> {
     }
 }
 
-impl<'a, T> transform::AstTransformation<T, Linked> for LinkTransformation<'a>
+impl<'a, T> transform::AstTransformation<T, Linked> for Link<'a>
 where
     T: IsValid,
 {

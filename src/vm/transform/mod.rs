@@ -6,12 +6,12 @@ mod main_transform;
 mod token_to_ast;
 mod treeshake_transform;
 
-pub use builder::TransformBuilder;
-pub use check_transform::CheckTypesTransformation;
-pub use infertype_transform::InferTypesTransformation;
-pub use link_transform::LinkTransformation;
-pub use main_transform::MainTransform;
-pub use treeshake_transform::TreeShakeTransformation;
+pub use builder::Builder;
+pub use check_transform::CheckTypes;
+pub use infertype_transform::InferTypes;
+pub use link_transform::Link;
+pub use main_transform::Main;
+pub use treeshake_transform::TreeShake;
 
 use crate::vm::ast;
 use crate::vm::ast::{Invalid, IsValid};

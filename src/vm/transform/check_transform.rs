@@ -1,23 +1,23 @@
 use super::AstTransformation;
-use crate::vm::ast;
 use crate::vm::ast::PartialType::Complete;
-use crate::vm::ast::{transform, AstBranch, Node};
 use crate::vm::ast::{Ast, IsTypesInferred, TypesChecked};
+use crate::vm::ast::{AstBranch, Node};
 use crate::vm::ast::{ErrPart, NodeID, NodeType};
 use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody};
+use crate::vm::{ast, transform};
 use std::sync::Arc;
 
-pub struct CheckTypesTransformation<'a> {
+pub struct CheckTypes<'a> {
     tokio_runtime: &'a tokio::runtime::Runtime,
 }
 
-impl<'a> CheckTypesTransformation<'a> {
+impl<'a> CheckTypes<'a> {
     pub fn new(tokio_runtime: &'a tokio::runtime::Runtime) -> Self {
         Self { tokio_runtime }
     }
 }
 
-impl<'a, T> AstTransformation<T, TypesChecked> for CheckTypesTransformation<'a>
+impl<'a, T> AstTransformation<T, TypesChecked> for CheckTypes<'a>
 where
     T: IsTypesInferred,
 {
