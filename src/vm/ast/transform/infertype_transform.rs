@@ -12,13 +12,61 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::result;
 use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::mpsc::UnboundedSender;
 
-enum TyperState<T>
+struct Msg<T>
 where
     T: IsLinked,
 {
-    TypeCheck(Typer<T>),
-    TypeCheckBlocked(AstBranchID, Typer<T>),
+    typer: Typer<T>,
+    tx: Box<UnboundedSender<Msg<T>>>,
+    state: TyperState,
+}
+
+impl<T> Debug for Msg<T>
+where
+    T: IsLinked,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let t = &self.typer;
+        match &self.state {
+            TyperState::TypeCheck => {
+                write!(f, "TypeCheck({:?}, q:{})", t.ast_id, t.queue.len())
+            }
+            TyperState::TypeCheckBlocked(ast_id) => {
+                write!(f, "TypeCheckBlocked({:?}, by: {:?})", t.ast_id, ast_id)
+            }
+            TyperState::Err(err) => write!(f, "Err({})", err.to_string()),
+            TyperState::Done(ast_id) => write!(f, "Done({:?})", ast_id),
+        }
+    }
+}
+
+impl<T> Msg<T>
+where
+    T: IsLinked,
+{
+    fn mut_state(mut self, state: TyperState) -> Self {
+        self.state = state;
+        self
+    }
+
+    fn send(mut self, state: TyperState) {
+        self.state = state;
+        self.resend()
+    }
+
+    fn resend(self) {
+        let raw = &*self.tx as *const UnboundedSender<_>;
+        // Safety: The value sent through tx always lives longer than the send call to the tx channel.
+        let tx = unsafe { &*raw };
+        tx.send(self).unwrap()
+    }
+}
+
+enum TyperState {
+    TypeCheck,
+    TypeCheckBlocked(AstBranchID),
     Err(ast::Err),
     Done(AstBranchID),
 }
@@ -30,22 +78,6 @@ enum TyperResult {
         made_progress: bool,
     },
     Failed(ast::Err),
-}
-
-impl<T> Debug for TyperState<T>
-where
-    T: IsLinked,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TyperState::TypeCheck(t) => write!(f, "TypeCheck({:?}, q:{})", t.ast_id, t.queue.len()),
-            TyperState::TypeCheckBlocked(ast_id, t) => {
-                write!(f, "TypeCheckBlocked({:?}, by: {:?})", t.ast_id, ast_id)
-            }
-            TyperState::Err(err) => write!(f, "Err({})", err.to_string()),
-            TyperState::Done(ast_id) => write!(f, "Done({:?})", ast_id),
-        }
-    }
 }
 
 pub struct InferTypesTransformation<'a> {
@@ -79,104 +111,97 @@ where
             for id in (&asts).ids() {
                 let asts = asts.clone();
                 let definitions = self.vm_runtime.definitions.clone();
-                let typer = Typer::new(id, asts, definitions);
                 n_active += 1;
-                tx.send(TyperState::TypeCheck(typer)).unwrap();
+                Msg {
+                    typer: Typer::new(id, asts, definitions),
+                    tx: Box::new(tx.clone()),
+                    state: TyperState::TypeCheck,
+                }.resend();
             }
 
             let mut blocked_checkers = HashMap::new();
             let mut completed = HashSet::new();
             let mut error = None;
 
-            while let Some(msg) = rx.recv().await {
+            drop(tx);
+            while let Some(mut msg) = rx.recv().await {
                 if error.is_some() {
                     n_active -= 1;
-                    if n_active == 0 {
-                        drop(blocked_checkers);
-                        let asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform error");
-                        let err = std::mem::replace(&mut error, None).unwrap();
-                        return Err((asts.guarantee_state(), err));
-                    }
                     continue
                 }
-                match msg {
-                    TyperState::TypeCheck(mut typer) => {
-                        let tx = tx.clone();
+                match msg.state {
+                    TyperState::TypeCheck => {
                         tokio::task::spawn_blocking(move || {
                             use TyperResult::*;
-                            match typer.infer_all_types() {
-                                Complete => tx.send(TyperState::Done(typer.ast_id)).unwrap(),
-                                BlockedBy { blocked_by, made_progress } => {
-                                    if made_progress {
-                                        tx.send(TyperState::TypeCheckBlocked(blocked_by, typer)).unwrap()
-                                    } else {
-                                        tx.send(TyperState::Err(ast::Err::single("Unable to make progress type checking...", "", typer.blocked.values().flatten().cloned().collect()))).unwrap()
-                                    }
+                            let ast_id = msg.typer.ast_id;
+                            match msg.typer.infer_all_types() {
+                                Complete => msg.send(TyperState::Done(ast_id)),
+                                BlockedBy { made_progress:true, blocked_by } => msg.send(TyperState::TypeCheckBlocked(blocked_by)),
+                                BlockedBy { made_progress:false, blocked_by } => {
+                                    let err = ast::Err::single(
+                                        &format!("Unable to make progress type checking, blocked by {:?}", blocked_by), 
+                                        "",
+                                        msg.typer.blocked.values().flatten().cloned().collect()
+                                    );
+                                    msg.send(TyperState::Err(err))
                                 },
-                                Failed(err) => tx.send(TyperState::Err(err)).unwrap(),
+                                Failed(err) => msg.send(TyperState::Err(err)),
                             };
                         });
                     }
-                    TyperState::TypeCheckBlocked(by, typer) => {
+                    TyperState::TypeCheckBlocked(by) => {
+                        let msg = msg.mut_state(TyperState::TypeCheck);
                         if completed.contains(&by) {
-                            tx.send(TyperState::TypeCheck(typer)).unwrap();
+                            msg.resend();
                         } else {
+                            n_blocked += 1;
                             if !blocked_checkers.contains_key(&by) {
                                 blocked_checkers.insert(by, vec![]);
                             }
-                            blocked_checkers.get_mut(&by).unwrap().push(typer);
-                            n_blocked += 1;
+                            blocked_checkers.get_mut(&by).unwrap().push(msg);
                         }
                     }
                     TyperState::Err(err) => {
-                        error = Some(err);
                         n_active -= 1;
+                        error = Some(err);
                     }
                     TyperState::Done(ast_id) => {
                         n_active -= 1;
+                        completed.insert(ast_id);
                         if let Some(blocked) = blocked_checkers.get_mut(&ast_id) {
                             let blocked = std::mem::replace(blocked, vec![]);
-                            for typer in blocked {
-                                tx.send(TyperState::TypeCheck(typer)).unwrap();
+                            for msg in blocked {
                                 n_blocked -= 1;
+                                msg.resend();
                             }
                         }
-                        completed.insert(ast_id);
                     }
-                }
-                if n_active == 0 {
-                    assert!(blocked_checkers.values().all(|l| l.len() == 0));
-                    dbg!(rx.try_recv());
-                    let asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform");
-                    return Ok(asts.guarantee_state());
                 }
                 if n_active > 0 && n_blocked == n_active {
                     let nodes = blocked_checkers
-                        .into_values()
-                        .map(|typers| typers
-                            .into_iter()
-                            .map(|typer| typer.blocked.values().flatten().cloned().collect::<Vec<NodeID>>())
-                            .reduce(|mut all, mut next| {
-                                all.append(&mut next);
-                                all
-                            })
-                            .unwrap_or(vec![])
-                        )
-                        .reduce(|mut all, mut next| {
-                            all.append(&mut next);
-                            all
-                        })
-                        .unwrap_or(vec![]);
-                    let err = ast::Err::single(
+                        .values()
+                        .flatten()
+                        .map(|msg| msg.typer.blocked.values())
+                        .flatten()
+                        .flatten()
+                        .cloned()
+                        .collect();
+                    error = Some(ast::Err::single(
                         "Failed to complete type check, unable to infer the type of the following expressions",
                         "unable to infer type",
                         nodes,
-                    );
-                    let asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform blocked");
-                    return Err((asts.guarantee_state(), err));
+                    ));
                 }
             }
-            unreachable!()
+
+            // Drop blocked_checkers to ensure that all other references to the arch are dropped.
+            drop(blocked_checkers);
+            let asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform error");
+            return if let Some(err) = error {
+                Err((asts.guarantee_state(), err))
+            } else {
+                Ok(asts.guarantee_state())
+            }
         })
     }
 }
