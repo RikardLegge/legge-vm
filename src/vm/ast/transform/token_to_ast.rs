@@ -1,24 +1,28 @@
-use super::{Ast, NodeID, NodeValue, Result};
-use crate::ast;
-use crate::ast::ast::{AstID, PartialNodeValue, PartialType, ProcedureDeclarationNode};
-use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody, UnlinkedNodeBody};
-use crate::ast::NodeType;
-use crate::token::KeyName;
-use crate::token::TokenType::EndStatement;
-use crate::token::{ArithmeticOP, Token, TokenType};
-use ast::Err;
+use crate::vm::ast;
+use crate::vm::ast::ArithmeticOP;
+use crate::vm::ast::Err;
+use crate::vm::ast::NodeType;
+use crate::vm::ast::ProcedureDeclarationNode;
+use crate::vm::ast::{AstBranch, IsValid, NodeID, NodeValue};
+use crate::vm::ast::{AstBranchID, PartialNodeValue, PartialType};
+use crate::vm::ast::{NBProcedureDeclaration, NodeBody, UnlinkedNodeBody};
+use crate::vm::token::KeyName;
+use crate::vm::token::TokenType::EndStatement;
+use crate::vm::token::{Token, TokenType};
 use colored::Colorize;
+use std::fmt::Debug;
 use std::iter::Peekable;
 use std::result;
 
-pub fn ast_from_tokens<I>(
+pub fn ast_from_tokens<I, T>(
     file_name: String,
-    ast_id: AstID,
+    ast_id: AstBranchID,
     iter: I,
     size_hint: usize,
-) -> result::Result<Ast, (ast::Ast, ast::Err)>
+) -> result::Result<AstBranch<T>, (ast::AstBranch<T>, ast::Err)>
 where
     I: Iterator<Item = Token>,
+    T: IsValid,
 {
     let mut parser = Parser::new(file_name, ast_id, iter, size_hint);
     match parser.parse() {
@@ -33,15 +37,18 @@ struct PendingNode {
 }
 
 #[derive(Debug)]
-struct Parser<I: Iterator<Item = Token>> {
-    ast: Ast,
+struct Parser<I: Iterator<Item = Token>, T: IsValid> {
+    ast: AstBranch<T>,
     iter: Peekable<I>,
     pending_statement: Option<NodeID>,
     pending_expression: Option<NodeID>,
 }
 
-struct PendingToken<'a> {
-    ast: &'a Ast,
+struct PendingToken<'a, T>
+where
+    T: IsValid,
+{
+    ast: &'a AstBranch<T>,
     node: NodeID,
     got: Option<&'a TokenType>,
 }
@@ -63,7 +70,10 @@ fn expected_to_message(expected: &[&TokenType]) -> String {
     }
 }
 
-fn missing_token_error(ast: &Ast, node: NodeID, expected: &[&TokenType]) -> ast::Err {
+fn missing_token_error<T>(ast: &AstBranch<T>, node: NodeID, expected: &[&TokenType]) -> ast::Err
+where
+    T: IsValid,
+{
     let expected_message = expected_to_message(expected);
     Err::single(
         &format!("Reached en of file while looking for {}", expected_message),
@@ -72,7 +82,15 @@ fn missing_token_error(ast: &Ast, node: NodeID, expected: &[&TokenType]) -> ast:
     )
 }
 
-fn invalid_keyword_error(ast: &Ast, node: NodeID, got: KeyName, expected: &[KeyName]) -> ast::Err {
+fn invalid_keyword_error<T>(
+    ast: &AstBranch<T>,
+    node: NodeID,
+    got: KeyName,
+    expected: &[KeyName],
+) -> ast::Err
+where
+    T: IsValid,
+{
     let expected_message = match expected {
         &[] => unreachable!(),
         &[one] => format!("{}", one),
@@ -98,12 +116,15 @@ fn invalid_keyword_error(ast: &Ast, node: NodeID, got: KeyName, expected: &[KeyN
     )
 }
 
-fn wrong_token_error(
-    ast: &Ast,
+fn wrong_token_error<T>(
+    ast: &AstBranch<T>,
     node: NodeID,
     got: &TokenType,
     expected: &[&TokenType],
-) -> ast::Err {
+) -> ast::Err
+where
+    T: IsValid,
+{
     let expected_message = expected_to_message(expected);
     Err::single(
         &format!("Found {} while expecting {}", got, expected_message),
@@ -115,8 +136,11 @@ fn wrong_token_error(
     )
 }
 
-impl<'a> PendingToken<'a> {
-    fn new(ast: &'a Ast, node: NodeID, got: Option<&'a TokenType>) -> Self {
+impl<'a, T> PendingToken<'a, T>
+where
+    T: IsValid,
+{
+    fn new(ast: &'a AstBranch<T>, node: NodeID, got: Option<&'a TokenType>) -> Self {
         PendingToken { ast, node, got }
     }
 
@@ -128,7 +152,7 @@ impl<'a> PendingToken<'a> {
         wrong_token_error(self.ast, self.node, self.got.unwrap(), &[expected])
     }
 
-    fn expect(self, other: &TokenType) -> Result<&'a TokenType> {
+    fn expect(self, other: &TokenType) -> ast::Result<&'a TokenType> {
         match self.got {
             Some(tp) => match tp.is(other) {
                 true => Ok(tp),
@@ -138,7 +162,7 @@ impl<'a> PendingToken<'a> {
         }
     }
 
-    fn expect_exact(self, other: &TokenType) -> Result<&'a TokenType> {
+    fn expect_exact(self, other: &TokenType) -> ast::Result<&'a TokenType> {
         match self.got {
             Some(tp) => match tp == other {
                 true => Ok(tp),
@@ -148,7 +172,7 @@ impl<'a> PendingToken<'a> {
         }
     }
 
-    fn any(self, recommendation: Option<&TokenType>) -> Result<&'a TokenType> {
+    fn any(self, recommendation: Option<&TokenType>) -> ast::Result<&'a TokenType> {
         match self.got {
             Some(tp) => Ok(tp),
             None => {
@@ -162,24 +186,25 @@ impl<'a> PendingToken<'a> {
         }
     }
 
-    fn is(self, other: &TokenType) -> Result<bool> {
+    fn is(self, other: &TokenType) -> ast::Result<bool> {
         match self.got {
             Some(tp) => Ok(tp.is(other)),
             None => Err(self.missing_token_error(other)),
         }
     }
 
-    fn not(self, other: &TokenType) -> Result<bool> {
+    fn not(self, other: &TokenType) -> ast::Result<bool> {
         self.is(other).map(|v| !v)
     }
 }
 
-impl<I> Parser<I>
+impl<I, T> Parser<I, T>
 where
     I: Iterator<Item = Token>,
+    T: IsValid,
 {
-    fn new(file_name: String, ast_id: AstID, iter: I, size_hint: usize) -> Self {
-        let ast = Ast::new(file_name, ast_id, size_hint);
+    fn new(file_name: String, ast_id: AstBranchID, iter: I, size_hint: usize) -> Self {
+        let ast = AstBranch::new(file_name, ast_id, size_hint);
 
         Self {
             ast,
@@ -189,7 +214,7 @@ where
         }
     }
 
-    fn parse(&mut self) -> Result<()> {
+    fn parse(&mut self) -> ast::Result<()> {
         let node = self.any_node(None);
         let mut static_statements = Vec::new();
         let mut import_statements = Vec::new();
@@ -223,7 +248,7 @@ where
     }
 
     fn op_precedence(op: ArithmeticOP) -> usize {
-        use crate::token::ArithmeticOP::*;
+        use crate::vm::ast::ArithmeticOP::*;
         match op {
             Eq | GEq | LEq => 1,
             Add | Sub => 2,
@@ -235,7 +260,7 @@ where
         self.next_token(node).any(None).unwrap();
     }
 
-    fn peek_token(&mut self) -> PendingToken {
+    fn peek_token(&mut self) -> PendingToken<T> {
         let tp = self.iter.peek().map(|t| &t.tp);
         let node = self
             .pending_expression
@@ -243,7 +268,7 @@ where
         PendingToken::new(&self.ast, node, tp)
     }
 
-    fn next_token(&mut self, node: &PendingNode) -> PendingToken {
+    fn next_token(&mut self, node: &PendingNode) -> PendingToken<T> {
         let tp = match self.iter.next() {
             Some(token) => {
                 self.ast.get_node_mut(node.id).tokens.push(token);
@@ -268,19 +293,19 @@ where
         return PendingNode { id };
     }
 
-    fn add_node(&mut self, pending_node: PendingNode, body: NodeBody) -> NodeID {
+    fn add_node(&mut self, pending_node: PendingNode, body: NodeBody<T>) -> NodeID {
         let node = self.ast.get_node_mut(pending_node.id);
         node.body = body;
         pending_node.id
     }
 
-    fn add_uncomplete_node(&mut self, pending: PendingNode, body: UnlinkedNodeBody) -> NodeID {
+    fn add_uncomplete_node(&mut self, pending: PendingNode, body: UnlinkedNodeBody<T>) -> NodeID {
         self.ast.get_node_mut(pending.id).body = NodeBody::Unlinked(body);
         pending.id
     }
 
     fn should_terminate_statement(&mut self, node: NodeID) -> bool {
-        use crate::ast::nodebody::NodeBody::*;
+        use crate::vm::ast::NodeBody::*;
 
         match self.ast.get_node(node).body {
             TypeDeclaration { constructor, .. } => self.should_terminate_statement(*constructor),
@@ -299,7 +324,7 @@ where
         }
     }
 
-    fn do_block(&mut self, node: PendingNode) -> Result {
+    fn do_block(&mut self, node: PendingNode) -> ast::Result {
         let mut static_statements = Vec::new();
         let mut import_statements = Vec::new();
         let mut dynamic_statements = Vec::new();
@@ -324,9 +349,9 @@ where
         ))
     }
 
-    fn do_statement(&mut self, parent_id: NodeID) -> Result {
-        use crate::token::KeyName::*;
-        use crate::token::TokenType::*;
+    fn do_statement(&mut self, parent_id: NodeID) -> ast::Result {
+        use crate::vm::token::KeyName::*;
+        use crate::vm::token::TokenType::*;
         let node = self.node(parent_id);
         self.pending_statement = Some(node.id);
         self.pending_expression = None;
@@ -407,9 +432,9 @@ where
         Ok(node)
     }
 
-    fn do_expression(&mut self, parent_id: NodeID) -> Result {
-        use crate::token::KeyName::*;
-        use crate::token::TokenType::*;
+    fn do_expression(&mut self, parent_id: NodeID) -> ast::Result {
+        use crate::vm::token::KeyName::*;
+        use crate::vm::token::TokenType::*;
         let node = self.node(parent_id);
         self.pending_expression = Some(node.id);
 
@@ -517,7 +542,7 @@ where
         }
     }
 
-    fn do_if(&mut self, node: PendingNode) -> Result {
+    fn do_if(&mut self, node: PendingNode) -> ast::Result {
         self.next_token(&node).expect(&TokenType::LeftBrace)?;
         let condition = self.do_expression(node.id)?;
         self.next_token(&node).expect(&TokenType::RightBrace)?;
@@ -529,7 +554,7 @@ where
         Ok(self.add_node(node, NodeBody::If { condition, body }))
     }
 
-    fn do_import(&mut self, node: PendingNode) -> Result {
+    fn do_import(&mut self, node: PendingNode) -> ast::Result {
         // TODO: this can be constant
         let default_module = TokenType::Name("std".to_string());
 
@@ -551,7 +576,7 @@ where
         }
     }
 
-    fn do_bool(&mut self, node: PendingNode, value: bool) -> Result {
+    fn do_bool(&mut self, node: PendingNode, value: bool) -> ast::Result {
         Ok(self.add_node(
             node,
             NodeBody::ConstValue {
@@ -561,7 +586,7 @@ where
         ))
     }
 
-    fn do_loop(&mut self, node: PendingNode) -> Result {
+    fn do_loop(&mut self, node: PendingNode) -> ast::Result {
         let body_node = self.node(node.id);
         self.next_token(&body_node)
             .expect(&TokenType::LeftCurlyBrace)?;
@@ -569,7 +594,7 @@ where
         Ok(self.add_node(node, NodeBody::Loop { body }))
     }
 
-    fn do_break(&mut self, node: PendingNode) -> Result {
+    fn do_break(&mut self, node: PendingNode) -> ast::Result {
         Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Break))
     }
 
@@ -578,7 +603,7 @@ where
         node: PendingNode,
         op: ArithmeticOP,
         pending_node: Option<NodeID>,
-    ) -> Result {
+    ) -> ast::Result {
         let id = node.id;
         self.do_sub_operation(node, id, op, pending_node)
     }
@@ -589,7 +614,7 @@ where
         parent_id: NodeID,
         op: ArithmeticOP,
         pending_node: Option<NodeID>,
-    ) -> Result {
+    ) -> ast::Result {
         let body = {
             if let Some(lhs) = pending_node {
                 // Operation between two nodes
@@ -633,7 +658,7 @@ where
         Ok(self.add_node(node, body))
     }
 
-    fn do_type(&mut self, parent: &PendingNode) -> Result<(NodeID, &PartialType)> {
+    fn do_type(&mut self, parent: &PendingNode) -> ast::Result<(NodeID, &PartialType)> {
         // TODO: this can be constant
         let default_type = TokenType::Name("int".to_string());
 
@@ -730,7 +755,7 @@ where
         Ok((node_id, tp_ref))
     }
 
-    fn default_value(&self, tp: &NodeType) -> (PartialNodeValue, bool) {
+    fn default_value(&self, tp: &NodeType) -> (PartialNodeValue<T>, bool) {
         let mut linked = true;
         let value = match tp {
             NodeType::Int => NodeValue::Int(0).into(),
@@ -759,7 +784,7 @@ where
         (value, linked)
     }
 
-    fn do_type_definition(&mut self, node: PendingNode, ident: String) -> Result {
+    fn do_type_definition(&mut self, node: PendingNode, ident: String) -> ast::Result {
         self.next_token(&node).expect(&TokenType::LeftCurlyBrace)?;
 
         let mut parts = Vec::new();
@@ -883,7 +908,7 @@ where
         Ok(node_id)
     }
 
-    fn do_procedure(&mut self, node: PendingNode) -> Result {
+    fn do_procedure(&mut self, node: PendingNode) -> ast::Result {
         self.next_token(&node).expect(&TokenType::LeftBrace)?;
         let mut args = Vec::new();
 
@@ -981,8 +1006,8 @@ where
         ))
     }
 
-    fn do_statement_symbol(&mut self, node: PendingNode, ident: String) -> Result {
-        use crate::token::TokenType::*;
+    fn do_statement_symbol(&mut self, node: PendingNode, ident: String) -> ast::Result {
+        use crate::vm::token::TokenType::*;
 
         match self.peek_token().any(Some(&ConstDeclaration))? {
             LeftBrace => self.do_function_call(node, ident),
@@ -1023,8 +1048,8 @@ where
         }
     }
 
-    fn find_traverse_path(&mut self, node: &PendingNode) -> Result<Vec<String>> {
-        use crate::token::TokenType::{Dot, Name};
+    fn find_traverse_path(&mut self, node: &PendingNode) -> ast::Result<Vec<String>> {
+        use crate::vm::token::TokenType::{Dot, Name};
         // TODO: this can be constant
         let default_name = Name("part".to_string());
 
@@ -1050,9 +1075,9 @@ where
         node: PendingNode,
         ident: String,
         tp: Option<NodeID>,
-    ) -> Result {
-        use crate::token::KeyName::Type;
-        use crate::token::TokenType::*;
+    ) -> ast::Result {
+        use crate::vm::token::KeyName::Type;
+        use crate::vm::token::TokenType::*;
 
         match self.peek_token().any(Some(&ConstDeclaration))? {
             ReturnTypes => {
@@ -1121,7 +1146,7 @@ where
         node: PendingNode,
         ident: String,
         tp: Option<NodeID>,
-    ) -> Result {
+    ) -> ast::Result {
         self.eat_token(&node);
         let expr = Some(self.do_expression(node.id)?);
         let node = self.add_node(node, NodeBody::VariableDeclaration { ident, tp, expr });
@@ -1133,8 +1158,8 @@ where
         node: PendingNode,
         ident: String,
         path: Option<Vec<String>>,
-    ) -> Result {
-        use crate::token::TokenType::*;
+    ) -> ast::Result {
+        use crate::vm::token::TokenType::*;
 
         match self.peek_token().any(Some(&EndStatement))? {
             LeftBrace => self.do_function_call(node, ident),
@@ -1164,8 +1189,8 @@ where
         }
     }
 
-    fn do_function_call(&mut self, node: PendingNode, ident: String) -> Result {
-        use crate::token::TokenType::*;
+    fn do_function_call(&mut self, node: PendingNode, ident: String) -> ast::Result {
+        use crate::vm::token::TokenType::*;
 
         self.next_token(&node).expect(&LeftBrace)?;
         let mut args = Vec::new();
@@ -1180,7 +1205,7 @@ where
         Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Call { ident, args }))
     }
 
-    fn do_return(&mut self, node: PendingNode) -> Result {
+    fn do_return(&mut self, node: PendingNode) -> ast::Result {
         let expr = match self.peek_token().not(&EndStatement)? {
             true => Some(self.do_expression(node.id)?),
             false => None,

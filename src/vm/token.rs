@@ -1,3 +1,4 @@
+use crate::vm::ast::ArithmeticOP;
 use std::fmt;
 use std::fmt::Formatter;
 use std::iter::Peekable;
@@ -17,32 +18,6 @@ pub fn from_chars(
         parser.end_token(tp);
     }
     parser.tokens
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum ArithmeticOP {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Eq,
-    GEq,
-    LEq,
-}
-
-impl fmt::Display for ArithmeticOP {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        use ArithmeticOP::*;
-        match self {
-            Add => write!(f, "+"),
-            Sub => write!(f, "-"),
-            Mul => write!(f, "*"),
-            Div => write!(f, "/"),
-            Eq => write!(f, "=="),
-            GEq => write!(f, ">="),
-            LEq => write!(f, "<="),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]

@@ -1,9 +1,10 @@
-use crate::ast;
-use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
-use crate::ast::{
-    Ast, AstCollection, AstID, Linked, NodeID, NodeType, NodeValue, TypesChecked, TypesInferred,
+use crate::vm::ast::ArithmeticOP;
+use crate::vm::ast::{
+    Ast, AstBranch, AstBranchID, DebugSymbols, IsLinked, IsTypesChecked, IsTypesInferred, IsValid,
+    NodeID, NodeType, NodeValue,
 };
-use crate::token::ArithmeticOP;
+use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody};
+use crate::{vm, LogLevel};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
@@ -11,121 +12,144 @@ use std::marker::PhantomData;
 use std::ops::AddAssign;
 use std::sync::Arc;
 
-pub fn from_ast<T>(asts: Arc<ast::AstCollection<T>>, runtime: &tokio::runtime::Runtime) -> Bytecode
-where
-    T: Linked + TypesInferred + TypesChecked + 'static,
-{
-    runtime.block_on(async {
-        let node_id = asts.root();
-        let (scope, context) = allocate_global_variables(&asts);
-        let init_instructions = scope.instructions;
-
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
-        for ast_id in (&asts).ids() {
-            let tx = tx.clone();
-            let asts = asts.clone();
-            let context = Some(context.clone());
-
-            tokio::task::spawn_blocking(move || {
-                let ast = &asts.get(ast_id);
-                let mut bc = Generator::new(context, ast);
-                let (global, local) = bc.evaluate(ast);
-                let procedures = bc.procedures;
-                tx.send(Ok((ast_id, global, local, procedures, bc.procedure_len)))
-                    .unwrap();
-                if false {
-                    tx.send(Err(())).unwrap();
-                }
-            });
-        }
-
-        let mut proc_instruction_len = vec![0; asts.len()];
-        let mut global_instructions = vec![vec![]; asts.len()];
-        let mut instructions = vec![vec![]; asts.len()];
-        let mut proc_instructions = vec![vec![]; asts.len()];
-        let halt_instructions = {
-            let mut inst = vec![];
-            let allocations = context.local_allocations();
-            if allocations > 0 {
-                inst.push(Instruction::new(node_id, OP::PopStack(allocations)));
-            }
-            inst.push(Instruction::new(node_id, OP::Halt));
-            inst
-        };
-        let mut proc_start_offset = init_instructions.len() + halt_instructions.len();
-
-        drop(tx);
-        while let Some(msg) = rx.recv().await {
-            match msg {
-                Ok((ast_id, global, local, procedures, proc_length)) => {
-                    let ast_i = ast_id.index();
-                    proc_start_offset += global.len() + local.len();
-                    global_instructions[ast_i] = global;
-                    instructions[ast_i] = local;
-                    proc_instructions[ast_i] = procedures;
-                    proc_instruction_len[ast_i] = proc_length;
-                }
-                _ => unimplemented!(),
-            }
-        }
-
-        let mut proc_offsets = vec![0; asts.len()];
-        for ast_id in asts.ids() {
-            let ast_i = ast_id.index();
-            proc_offsets[ast_i] = proc_start_offset;
-            proc_start_offset += proc_instruction_len[ast_i];
-        }
-
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
-        for (ast_i, ((mut global, mut local), mut proc)) in global_instructions
-            .into_iter()
-            .zip(instructions.into_iter())
-            .zip(proc_instructions.into_iter())
-            .enumerate()
-        {
-            let offset = proc_offsets[ast_i];
-            let tx = tx.clone();
-            tokio::task::spawn_blocking(move || {
-                for inst in global
-                    .iter_mut()
-                    .chain(local.iter_mut())
-                    .chain(proc.iter_mut().flatten())
-                {
-                    if let OP::PushImmediate(Value::ProcAddress(proc_index)) = &mut inst.op {
-                        *proc_index += offset;
-                    }
-                }
-                tx.send((ast_i, global, local, proc)).unwrap();
-            });
-        }
-
-        let mut global_instructions = vec![vec![]; asts.len()];
-        let mut instructions = vec![vec![]; asts.len()];
-        let mut proc_instructions = vec![vec![]; asts.len()];
-        drop(tx);
-        while let Some((ast_i, global, local, proc)) = rx.recv().await {
-            global_instructions[ast_i] = global;
-            instructions[ast_i] = local;
-            proc_instructions[ast_i] = proc;
-        }
-
-        let mut code = init_instructions;
-        code.extend(global_instructions.into_iter().flatten());
-        code.extend(instructions.into_iter().flatten());
-        code.extend(halt_instructions.into_iter());
-        code.extend(proc_instructions.into_iter().flatten().flatten());
-
-        Bytecode { code }
-    })
+pub struct BytecodeGenerator<'a> {
+    tokio_runtime: &'a tokio::runtime::Runtime,
+    log_level: LogLevel,
 }
 
-fn allocate_global_variables<T>(asts: &AstCollection<T>) -> (Scope, Context)
+impl<'a> BytecodeGenerator<'a> {
+    pub fn new(tokio_runtime: &'a tokio::runtime::Runtime, log_level: LogLevel) -> Self {
+        Self {
+            tokio_runtime,
+            log_level,
+        }
+    }
+
+    pub fn generate(&self, asts: vm::Ast) -> crate::Result<vm::Bytecode> {
+        self.tokio_runtime.block_on(async {
+            let asts = Arc::new(asts);
+            let node_id = asts.root();
+            let (scope, context) = allocate_global_variables(&asts);
+            let init_instructions = scope.instructions;
+
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+            for ast_id in (&asts).ids() {
+                let tx = tx.clone();
+                let asts = asts.clone();
+                let context = Some(context.clone());
+
+                tokio::task::spawn_blocking(move || {
+                    let ast = &asts.read_ast(ast_id);
+                    let mut bc = Generator::new(context, ast);
+                    let (global, local) = bc.evaluate(ast);
+                    let procedures = bc.procedures;
+                    tx.send(Ok((ast_id, global, local, procedures, bc.procedure_len)))
+                        .unwrap();
+                    if false {
+                        tx.send(Err(())).unwrap();
+                    }
+                });
+            }
+
+            let mut proc_instruction_len = vec![0; asts.len()];
+            let mut global_instructions = vec![vec![]; asts.len()];
+            let mut instructions = vec![vec![]; asts.len()];
+            let mut proc_instructions = vec![vec![]; asts.len()];
+            let halt_instructions = {
+                let mut inst = vec![];
+                let allocations = context.local_allocations();
+                if allocations > 0 {
+                    inst.push(Instruction::new(node_id, OPCode::PopStack(allocations)));
+                }
+                inst.push(Instruction::new(node_id, OPCode::Halt));
+                inst
+            };
+            let mut proc_start_offset = init_instructions.len() + halt_instructions.len();
+
+            drop(tx);
+            while let Some(msg) = rx.recv().await {
+                match msg {
+                    Ok((ast_id, global, local, procedures, proc_length)) => {
+                        let ast_i = ast_id.index();
+                        proc_start_offset += global.len() + local.len();
+                        global_instructions[ast_i] = global;
+                        instructions[ast_i] = local;
+                        proc_instructions[ast_i] = procedures;
+                        proc_instruction_len[ast_i] = proc_length;
+                    }
+                    _ => unimplemented!(),
+                }
+            }
+
+            let mut proc_offsets = vec![0; asts.len()];
+            for ast_id in asts.ids() {
+                let ast_i = ast_id.index();
+                proc_offsets[ast_i] = proc_start_offset;
+                proc_start_offset += proc_instruction_len[ast_i];
+            }
+
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+            for (ast_i, ((mut global, mut local), mut proc)) in global_instructions
+                .into_iter()
+                .zip(instructions.into_iter())
+                .zip(proc_instructions.into_iter())
+                .enumerate()
+            {
+                let offset = proc_offsets[ast_i];
+                let tx = tx.clone();
+                tokio::task::spawn_blocking(move || {
+                    for inst in global
+                        .iter_mut()
+                        .chain(local.iter_mut())
+                        .chain(proc.iter_mut().flatten())
+                    {
+                        if let OPCode::PushImmediate(Value::ProcAddress(proc_index)) = &mut inst.op
+                        {
+                            *proc_index += offset;
+                        }
+                    }
+                    tx.send((ast_i, global, local, proc)).unwrap();
+                });
+            }
+
+            let mut global_instructions = vec![vec![]; asts.len()];
+            let mut instructions = vec![vec![]; asts.len()];
+            let mut proc_instructions = vec![vec![]; asts.len()];
+            drop(tx);
+            while let Some((ast_i, global, local, proc)) = rx.recv().await {
+                global_instructions[ast_i] = global;
+                instructions[ast_i] = local;
+                proc_instructions[ast_i] = proc;
+            }
+
+            let mut code = init_instructions;
+            code.extend(global_instructions.into_iter().flatten());
+            code.extend(instructions.into_iter().flatten());
+            code.extend(halt_instructions.into_iter());
+            code.extend(proc_instructions.into_iter().flatten().flatten());
+
+            let asts = Arc::try_unwrap(asts).unwrap();
+            let debug_symbols = Some(asts.debug_symbols());
+
+            if self.log_level >= LogLevel::LogEval {
+                println!("{:?}", code);
+            }
+
+            Ok(Bytecode {
+                code,
+                debug_symbols,
+            })
+        })
+    }
+}
+
+fn allocate_global_variables<T>(asts: &Ast<T>) -> (Scope, Context)
 where
-    T: Linked + TypesInferred + TypesChecked,
+    T: IsLinked + IsTypesInferred + IsTypesChecked,
 {
-    let mut bc = Generator::new(None, &asts.get(AstID::new(0)));
+    let mut bc = Generator::new(None, &asts.read_ast(AstBranchID::new(0)));
     let root_id = asts.root();
 
     let (scope, context) = bc.with_scope(root_id, ContextType::Block, |bc| {
@@ -144,6 +168,7 @@ where
 
 pub struct Bytecode {
     pub code: Vec<Instruction>,
+    pub debug_symbols: Option<DebugSymbols>,
 }
 
 impl fmt::Debug for Bytecode {
@@ -158,11 +183,11 @@ impl fmt::Debug for Bytecode {
 #[derive(Clone)]
 pub struct Instruction {
     pub node_id: NodeID,
-    pub op: OP,
+    pub op: OPCode,
 }
 
 impl Instruction {
-    pub fn new(node_id: NodeID, op: OP) -> Self {
+    pub fn new(node_id: NodeID, op: OPCode) -> Self {
         Self { node_id, op }
     }
 }
@@ -190,7 +215,8 @@ pub enum SFOffset {
 }
 
 #[derive(Debug, Clone)]
-pub enum OP {
+#[non_exhaustive]
+pub enum OPCode {
     AddI,
     SubI,
     MulI,
@@ -203,7 +229,6 @@ pub enum OP {
     SStore(SFOffset),
 
     Branch(OPOffset),
-    BranchIf(OPOffset),
     BranchIfNot(OPOffset),
     PushPc(OPOffset),
     PopPc,
@@ -224,6 +249,7 @@ pub enum OP {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+#[non_exhaustive]
 pub enum Value {
     Unset,
     Int(isize),
@@ -317,7 +343,7 @@ impl StackUsage {
 
 struct Generator<T>
 where
-    T: Debug,
+    T: IsValid,
 {
     procedures: Vec<Vec<Instruction>>,
     procedure_len: usize,
@@ -330,9 +356,9 @@ where
 
 impl<T> Generator<T>
 where
-    T: Linked + TypesInferred + TypesChecked,
+    T: IsLinked + IsTypesInferred + IsTypesChecked,
 {
-    fn new(global_context: Option<Context>, ast: &Ast<T>) -> Self {
+    fn new(global_context: Option<Context>, ast: &AstBranch<T>) -> Self {
         Generator {
             procedure_len: 0,
             procedures: Vec::new(),
@@ -344,7 +370,7 @@ where
         }
     }
 
-    fn evaluate(&mut self, ast: &Ast<T>) -> (Vec<Instruction>, Vec<Instruction>) {
+    fn evaluate(&mut self, ast: &AstBranch<T>) -> (Vec<Instruction>, Vec<Instruction>) {
         let root_id = ast.root();
         let (global_scope, new_context) = self.with_scope(root_id, ContextType::Block, |bc| {
             let node = ast.get_node(root_id);
@@ -368,7 +394,7 @@ where
                 bc.ev_block_allocate_variables(ast, &[import_body, dynamic_body]);
                 let allocations = bc.ev_block_inner(ast, &[import_body, dynamic_body]);
                 if allocations > 0 {
-                    bc.add_op(root_id, OP::PopStack(allocations));
+                    bc.add_op(root_id, OPCode::PopStack(allocations));
                 }
             } else {
                 unreachable!()
@@ -464,7 +490,7 @@ where
         offset
     }
 
-    fn add_var(&mut self, ast: &Ast<T>, var_id: NodeID) {
+    fn add_var(&mut self, ast: &AstBranch<T>, var_id: NodeID) {
         let has_closure_reference = ast.get_node(var_id).has_closure_references();
         let offset = self.new_var_offset(has_closure_reference);
         let context = self.get_context_mut();
@@ -477,7 +503,7 @@ where
 
     fn add_dummy_var(&mut self, has_closure_reference: bool) {
         let offset = self.new_var_offset(has_closure_reference);
-        let node_id = NodeID::new(self.dummy_offset, AstID::new(usize::MAX));
+        let node_id = NodeID::new(self.dummy_offset, AstBranchID::new(usize::MAX));
         self.dummy_offset += 1;
 
         let context = self.get_context_mut();
@@ -495,12 +521,12 @@ where
         proc_id
     }
 
-    fn add_op(&mut self, node_id: NodeID, op: OP) {
+    fn add_op(&mut self, node_id: NodeID, op: OPCode) {
         let instruction = Instruction { node_id, op };
         self.get_scope_mut().instructions.push(instruction);
     }
 
-    fn set_op(&mut self, index: usize, op: OP) {
+    fn set_op(&mut self, index: usize, op: OPCode) {
         self.get_scope_mut().instructions[index].op = op
     }
 
@@ -531,8 +557,8 @@ where
         (scope, context)
     }
 
-    fn ev_node(&mut self, ast: &Ast<T>, node_id: NodeID) -> StackUsage {
-        use crate::ast::nodebody::NodeBody::*;
+    fn ev_node(&mut self, ast: &AstBranch<T>, node_id: NodeID) -> StackUsage {
+        use crate::vm::ast::NodeBody::*;
         let node = ast.get_node(node_id);
         if node.is_dead() {
             return StackUsage::zero();
@@ -577,17 +603,17 @@ where
     fn ev_break(&mut self, node_id: NodeID, loop_id: NodeID) -> StackUsage {
         let allocations = self.get_allocations(loop_id);
         if allocations > 0 {
-            self.add_op(node_id, OP::PopStack(allocations));
+            self.add_op(node_id, OPCode::PopStack(allocations));
         }
         let offset = self.get_loop_break_offset(loop_id);
-        self.add_op(node_id, OP::Branch(offset));
+        self.add_op(node_id, OPCode::Branch(offset));
         StackUsage::new(0, 0)
     }
 
-    fn ev_loop(&mut self, ast: &Ast<T>, node_id: NodeID, body_id: NodeID) -> StackUsage {
-        self.add_op(node_id, OP::Branch(1));
+    fn ev_loop(&mut self, ast: &AstBranch<T>, node_id: NodeID, body_id: NodeID) -> StackUsage {
+        self.add_op(node_id, OPCode::Branch(1));
         let break_inst = self.op_index();
-        self.add_op(node_id, OP::Panic);
+        self.add_op(node_id, OPCode::Panic);
         let start = self.op_index();
         self.with_context(node_id, ContextType::Loop { break_inst }, |bc| {
             let body_node = ast.get_node(body_id);
@@ -605,8 +631,11 @@ where
             };
         });
         let end = self.op_index();
-        self.add_op(node_id, OP::Branch(start as isize - end as isize - 1));
-        self.set_op(break_inst, OP::Branch(end as isize - start as isize + 1));
+        self.add_op(node_id, OPCode::Branch(start as isize - end as isize - 1));
+        self.set_op(
+            break_inst,
+            OPCode::Branch(end as isize - start as isize + 1),
+        );
         StackUsage {
             popped: 0,
             pushed: 0,
@@ -615,7 +644,7 @@ where
 
     fn ev_if(
         &mut self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         node_id: NodeID,
         condition_id: NodeID,
         body_id: NodeID,
@@ -623,7 +652,7 @@ where
         let usage = self.ev_expression(ast, condition_id);
         assert_eq!(usage.pushed - usage.popped, 1);
         let jump_index = self.op_index();
-        self.add_op(node_id, OP::Panic);
+        self.add_op(node_id, OPCode::Panic);
 
         let start = self.op_index();
         let body_node = ast.get_node(body_id);
@@ -640,7 +669,7 @@ where
         }
         let end = self.op_index();
         let end_of_if = (end - start) as isize;
-        self.set_op(jump_index, OP::BranchIfNot(end_of_if));
+        self.set_op(jump_index, OPCode::BranchIfNot(end_of_if));
 
         StackUsage {
             popped: 0,
@@ -650,7 +679,7 @@ where
 
     fn ev_return(
         &mut self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         node_id: NodeID,
         proc_id: NodeID,
         ret_value: Option<NodeID>,
@@ -661,7 +690,7 @@ where
             assert_eq!(usage.popped, 0);
             self.add_op(
                 ret_id,
-                OP::SStore(SFOffset::Stack {
+                OPCode::SStore(SFOffset::Stack {
                     offset: -3,
                     field: None,
                 }),
@@ -669,16 +698,16 @@ where
         }
         let allocations = self.get_allocations(proc_id);
         if allocations > 0 {
-            self.add_op(node_id, OP::PopStack(allocations));
+            self.add_op(node_id, OPCode::PopStack(allocations));
         }
-        self.add_op(node_id, OP::PopStackFrame);
-        self.add_op(node_id, OP::PopPc);
+        self.add_op(node_id, OPCode::PopStackFrame);
+        self.add_op(node_id, OPCode::PopPc);
         StackUsage::new(0, 0)
     }
 
     fn ev_procedure(
         &mut self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         node_id: NodeID,
         args: &[NodeID],
         body_id: NodeID,
@@ -695,7 +724,7 @@ where
                     bc.add_dummy_var(false);
                     bc.add_op(
                         *arg,
-                        OP::SLoad(SFOffset::Stack {
+                        OPCode::SLoad(SFOffset::Stack {
                             offset: i as isize,
                             field: None,
                         }),
@@ -704,10 +733,10 @@ where
                     // We can then create the true variable which we will later look up and copy the
                     // data from the argument, now on top of the stack, to the closure.
                     let offset = bc.new_var_offset(true);
-                    bc.add_op(*arg, OP::PushToClosure(Value::Unset));
+                    bc.add_op(*arg, OPCode::PushToClosure(Value::Unset));
                     bc.add_op(
                         *arg,
-                        OP::SStore(SFOffset::Closure {
+                        OPCode::SStore(SFOffset::Closure {
                             offset,
                             depth: 0,
                             field: None,
@@ -733,13 +762,16 @@ where
             };
         });
         let proc_index = self.add_proc(scope);
-        self.add_op(node_id, OP::PushImmediate(Value::ProcAddress(proc_index)));
+        self.add_op(
+            node_id,
+            OPCode::PushImmediate(Value::ProcAddress(proc_index)),
+        );
         StackUsage::new(0, 1)
     }
 
     fn ev_variable_value(
         &mut self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         node_id: NodeID,
         val_id: NodeID,
         path: &Option<Vec<String>>,
@@ -747,13 +779,13 @@ where
         let index = self.get_field_index(ast, val_id, path);
         let offset = self.get_variable_offset(val_id, index);
 
-        self.add_op(node_id, OP::SLoad(offset));
+        self.add_op(node_id, OPCode::SLoad(offset));
         StackUsage::new(0, 1)
     }
 
     fn get_field_index(
         &self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         var_id: NodeID,
         path: &Option<Vec<String>>,
     ) -> Option<Vec<usize>> {
@@ -790,7 +822,7 @@ where
 
     fn ev_assignment(
         &mut self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         node_id: NodeID,
         var_id: NodeID,
         path: &Option<Vec<String>>,
@@ -800,13 +832,16 @@ where
         assert_eq!(usage.pushed, 1);
 
         let index = self.get_field_index(ast, var_id, path);
-        self.add_op(node_id, OP::SStore(self.get_variable_offset(var_id, index)));
+        self.add_op(
+            node_id,
+            OPCode::SStore(self.get_variable_offset(var_id, index)),
+        );
         StackUsage::new(usage.popped, 0)
     }
 
     fn ev_declaration(
         &mut self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         node_id: NodeID,
         expr: Option<NodeID>,
     ) -> StackUsage {
@@ -819,7 +854,7 @@ where
 
     fn ev_call(
         &mut self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         node_id: NodeID,
         proc_var_id: NodeID,
         args: &[NodeID],
@@ -836,35 +871,35 @@ where
         };
 
         if return_values > 0 {
-            self.add_op(node_id, OP::PushImmediate(Value::Unset));
+            self.add_op(node_id, OPCode::PushImmediate(Value::Unset));
         }
 
         let pc_index = self.op_index();
-        self.add_op(node_id, OP::Panic);
-        self.add_op(node_id, OP::PushStackFrame);
+        self.add_op(node_id, OPCode::Panic);
+        self.add_op(node_id, OPCode::PushStackFrame);
         for arg in args {
             let usage = self.ev_expression(ast, *arg);
             assert_eq!(1, usage.pushed);
             assert_eq!(0, usage.popped);
         }
-        self.add_op(node_id, OP::PrepareStackFrame(args.len()));
+        self.add_op(node_id, OPCode::PrepareStackFrame(args.len()));
         let offset = self.get_variable_offset(proc_var_id, None);
-        self.add_op(node_id, OP::SLoad(offset));
-        self.add_op(node_id, OP::Jump);
+        self.add_op(node_id, OPCode::SLoad(offset));
+        self.add_op(node_id, OPCode::Jump);
         let offset = self.op_index() - pc_index - 1;
-        self.set_op(pc_index, OP::PushPc(offset as isize));
+        self.set_op(pc_index, OPCode::PushPc(offset as isize));
 
         if return_values == 0 {
             StackUsage::zero()
         } else if ignore_return {
-            self.add_op(node_id, OP::PopStack(return_values));
+            self.add_op(node_id, OPCode::PopStack(return_values));
             StackUsage::zero()
         } else {
             StackUsage::new(0, return_values)
         }
     }
 
-    fn ev_block_allocate_variables(&mut self, ast: &Ast<T>, body: &[&[NodeID]]) {
+    fn ev_block_allocate_variables(&mut self, ast: &AstBranch<T>, body: &[&[NodeID]]) {
         for body_part in body.iter() {
             for child_id in (*body_part).iter() {
                 let child_id = *child_id;
@@ -880,7 +915,7 @@ where
                         | NodeBody::StaticDeclaration { .. }
                         | NodeBody::Import { .. } => {
                             self.add_var(ast, child_id);
-                            self.add_op(child_id, OP::PushToClosure(Value::Unset));
+                            self.add_op(child_id, OPCode::PushToClosure(Value::Unset));
                         }
                         _ => (),
                     }
@@ -892,7 +927,7 @@ where
                         | NodeBody::StaticDeclaration { .. }
                         | NodeBody::Import { .. } => {
                             self.add_var(ast, child_id);
-                            self.add_op(child_id, OP::PushImmediate(Value::Unset));
+                            self.add_op(child_id, OPCode::PushImmediate(Value::Unset));
                         }
                         _ => (),
                     }
@@ -901,7 +936,7 @@ where
         }
     }
 
-    fn ev_block_inner(&mut self, ast: &Ast<T>, body: &[&[NodeID]]) -> usize {
+    fn ev_block_inner(&mut self, ast: &AstBranch<T>, body: &[&[NodeID]]) -> usize {
         let mut stack_usage = StackUsage::new(0, 0);
         for body_part in body.iter() {
             for child_id in body_part.iter() {
@@ -916,20 +951,20 @@ where
         self.get_context().local_allocations()
     }
 
-    fn ev_block(&mut self, ast: &Ast<T>, node_id: NodeID, body: &[&[NodeID]]) -> StackUsage {
+    fn ev_block(&mut self, ast: &AstBranch<T>, node_id: NodeID, body: &[&[NodeID]]) -> StackUsage {
         let (_, allocations) = self.with_context(node_id, ContextType::Block, |bc| {
             bc.ev_block_allocate_variables(ast, body);
             bc.ev_block_inner(ast, body)
         });
         if allocations > 0 {
-            self.add_op(node_id, OP::PopStack(allocations));
+            self.add_op(node_id, OPCode::PopStack(allocations));
         }
         return StackUsage::new(0, 0);
     }
 
     fn ev_prefix_operation(
         &mut self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         node_id: NodeID,
         op: ArithmeticOP,
         expr_id: NodeID,
@@ -937,11 +972,11 @@ where
         match op {
             ArithmeticOP::Add => self.ev_expression(ast, expr_id),
             ArithmeticOP::Sub => {
-                self.add_op(node_id, OP::PushImmediate(Value::Int(0)));
+                self.add_op(node_id, OPCode::PushImmediate(Value::Int(0)));
                 let usage = self.ev_expression(ast, expr_id);
                 assert_eq!(1, usage.pushed);
                 assert_eq!(0, usage.popped);
-                self.add_op(node_id, OP::SubI);
+                self.add_op(node_id, OPCode::SubI);
                 StackUsage::new(usage.popped, 1)
             }
             _ => panic!("Invalid prefix operation: {}", op),
@@ -950,7 +985,7 @@ where
 
     fn ev_operation(
         &mut self,
-        ast: &Ast<T>,
+        ast: &AstBranch<T>,
         node_id: NodeID,
         op: ArithmeticOP,
         expr1: NodeID,
@@ -964,19 +999,19 @@ where
         assert_eq!(usage1.popped, 0);
 
         match op {
-            ArithmeticOP::Add => self.add_op(node_id, OP::AddI),
-            ArithmeticOP::Sub => self.add_op(node_id, OP::SubI),
-            ArithmeticOP::Mul => self.add_op(node_id, OP::MulI),
-            ArithmeticOP::Div => self.add_op(node_id, OP::DivI),
-            ArithmeticOP::Eq => self.add_op(node_id, OP::Eq),
-            ArithmeticOP::GEq => self.add_op(node_id, OP::GEq),
-            ArithmeticOP::LEq => self.add_op(node_id, OP::LEq),
+            ArithmeticOP::Add => self.add_op(node_id, OPCode::AddI),
+            ArithmeticOP::Sub => self.add_op(node_id, OPCode::SubI),
+            ArithmeticOP::Mul => self.add_op(node_id, OPCode::MulI),
+            ArithmeticOP::Div => self.add_op(node_id, OPCode::DivI),
+            ArithmeticOP::Eq => self.add_op(node_id, OPCode::Eq),
+            ArithmeticOP::GEq => self.add_op(node_id, OPCode::GEq),
+            ArithmeticOP::LEq => self.add_op(node_id, OPCode::LEq),
         };
         StackUsage::new(usage1.popped + usage2.popped, 1)
     }
 
-    fn ev_expression(&mut self, ast: &Ast<T>, expr_id: NodeID) -> StackUsage {
-        use crate::ast::nodebody::NodeBody::*;
+    fn ev_expression(&mut self, ast: &AstBranch<T>, expr_id: NodeID) -> StackUsage {
+        use crate::vm::ast::NodeBody::*;
         let expr = ast.get_node(expr_id);
         match &expr.body {
             Op { op, lhs, rhs } => self.ev_operation(ast, expr_id, *op, *lhs, *rhs),
@@ -1013,7 +1048,7 @@ where
 
     fn ev_const(&mut self, node_id: NodeID, node_value: &NodeValue<T>) -> StackUsage {
         let value = self.default_value(node_value);
-        self.add_op(node_id, OP::PushImmediate(value));
+        self.add_op(node_id, OPCode::PushImmediate(value));
         StackUsage::new(0, 1)
     }
 }

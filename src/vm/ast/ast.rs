@@ -1,18 +1,32 @@
 use super::Result;
-use crate::ast::nodebody::{NBProcedureDeclaration, NodeBody};
-use crate::ast::{Err, Path, PathKey};
-use crate::token::Token;
+use crate::vm::ast::{Err, IsLinked, IsTypesInferred, IsValid, Valid};
+use crate::vm::ast::{NBProcedureDeclaration, NodeBody};
+use crate::vm::token::Token;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::Duration;
 use std::{fmt, mem};
 
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-pub struct AstID(usize);
+pub struct DebugSymbols {
+    tokens: HashMap<NodeID, Vec<Token>>,
+}
 
-impl AstID {
+impl DebugSymbols {
+    pub fn get_line(&self, node_id: NodeID) -> Option<usize> {
+        self.tokens
+            .get(&node_id)
+            .and_then(|n| n.first())
+            .map(|t| t.line)
+    }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct AstBranchID(usize);
+
+impl AstBranchID {
     pub fn new(id: usize) -> Self {
         Self(id)
     }
@@ -22,15 +36,27 @@ impl AstID {
     }
 }
 
-pub struct AstCollection<T = state::StateAny>
+#[derive(Default, Debug)]
+pub struct AstCollectionDebugInfo {
+    pub build_duration: Duration,
+    pub link_duration: Duration,
+    pub treeshake_duration: Duration,
+    pub type_inference_duration: Duration,
+    pub type_checker_duration: Duration,
+    pub line_count: usize,
+    pub file_count: usize,
+}
+
+pub struct Ast<T = Valid>
 where
     T: Debug,
 {
-    asts: Vec<RwLock<Ast<T>>>,
-    names: HashMap<PathKey, AstID>,
+    asts: Vec<RwLock<AstBranch<T>>>,
+    names: HashMap<PathKey, AstBranchID>,
+    pub debug_info: AstCollectionDebugInfo,
 }
 
-impl<T> Debug for AstCollection<T>
+impl<T> Debug for Ast<T>
 where
     T: Debug,
 {
@@ -51,13 +77,13 @@ where
     }
 }
 
-pub struct AstGuard<'a, T>(NodeID, RwLockReadGuard<'a, Ast<T>>)
+pub struct AstGuard<'a, T>(NodeID, RwLockReadGuard<'a, AstBranch<T>>)
 where
-    T: Debug;
+    T: IsValid;
 
 impl<'a, T> Deref for AstGuard<'a, T>
 where
-    T: Debug,
+    T: IsValid,
 {
     type Target = Node<T>;
 
@@ -66,13 +92,13 @@ where
     }
 }
 
-pub struct AstGuardMut<'a, T>(NodeID, RwLockWriteGuard<'a, Ast<T>>)
+pub struct AstGuardMut<'a, T>(NodeID, RwLockWriteGuard<'a, AstBranch<T>>)
 where
-    T: Debug;
+    T: IsValid;
 
 impl<'a, T> Deref for AstGuardMut<'a, T>
 where
-    T: Debug,
+    T: IsValid,
 {
     type Target = Node<T>;
 
@@ -83,76 +109,62 @@ where
 
 impl<'a, T> DerefMut for AstGuardMut<'a, T>
 where
-    T: Debug,
+    T: IsValid,
 {
     fn deref_mut(&mut self) -> &mut Node<T> {
         self.1.get_node_mut(self.0)
     }
 }
 
-impl<T> AstCollection<T>
+impl<T> Ast<T>
 where
-    T: Debug,
+    T: IsValid,
 {
     pub fn new() -> Self {
         Self {
             asts: vec![],
             names: Default::default(),
+            debug_info: Default::default(),
         }
     }
 
-    pub fn reserve(&mut self) -> AstID {
-        let id = AstID::new(self.asts.len());
+    pub fn reserve(&mut self) -> AstBranchID {
+        let id = AstBranchID::new(self.asts.len());
         self.asts
-            .push(RwLock::new(Ast::new("...".to_string(), id, 0)));
+            .push(RwLock::new(AstBranch::new("...".to_string(), id, 0)));
         id
     }
 
-    pub fn root(&self) -> NodeID {
-        self.asts[0].read().unwrap().root()
+    pub fn debug_symbols(self) -> DebugSymbols {
+        let mut tokens = HashMap::new();
+        for ast in self.asts.into_iter() {
+            let ast = ast.into_inner().unwrap();
+            for node in ast.nodes {
+                tokens.insert(node.id(), node.tokens);
+            }
+        }
+        DebugSymbols { tokens }
     }
 
     pub fn get_node(&self, id: NodeID) -> AstGuard<T> {
-        let ast = self.get(id.ast());
+        let ast = self.read_ast(id.ast());
         AstGuard(id, ast)
     }
 
     pub fn get_node_mut(&mut self, id: NodeID) -> AstGuardMut<T> {
-        let ast = self.get_mut(id.ast());
+        let ast = self.write_ast(id.ast());
         AstGuardMut(id, ast)
     }
 
-    pub fn get(&self, id: AstID) -> RwLockReadGuard<Ast<T>> {
-        self.asts.get(id.index()).unwrap().read().unwrap()
-    }
-
-    pub fn get_mut(&self, id: AstID) -> RwLockWriteGuard<Ast<T>> {
+    pub fn write_ast(&self, id: AstBranchID) -> RwLockWriteGuard<AstBranch<T>> {
         self.asts.get(id.index()).unwrap().write().unwrap()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = RwLockReadGuard<Ast<T>>> + '_ {
-        self.asts.iter().map(|ast| ast.read().unwrap())
-    }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = RwLockWriteGuard<Ast<T>>> + '_ {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = RwLockWriteGuard<AstBranch<T>>> + '_ {
         self.asts.iter().map(|ast| ast.write().unwrap())
     }
 
-    pub fn ids(&self) -> impl Iterator<Item = AstID> + '_ {
-        self.iter().map(|ast| ast.id())
-    }
-
-    pub fn paths(&self) -> impl Iterator<Item = (&PathKey, RwLockReadGuard<Ast<T>>)> + '_ {
-        self.names
-            .iter()
-            .map(|(path, id)| (path, self.asts[id.index()].read().unwrap()))
-    }
-
-    pub fn len(&self) -> usize {
-        self.asts.len()
-    }
-
-    pub fn guarantee_state<D: Debug>(self) -> AstCollection<D> {
+    pub fn guarantee_state<D: Debug>(self) -> Ast<D> {
         unsafe {
             // Safety: safe since D is only used a phantom data
             // and will therefore always be zero sized.
@@ -161,7 +173,7 @@ where
         }
     }
 
-    pub fn add(&mut self, path: Path, ast: Ast<T>) {
+    pub fn add(&mut self, path: Path, ast: AstBranch<T>) {
         let id = ast.id();
         self.names.insert(path.key(), id);
         *self.asts[id.index()].write().unwrap() = ast;
@@ -190,9 +202,39 @@ where
         }
     }
 }
+impl<T> Ast<T>
+where
+    T: Debug,
+{
+    pub fn root(&self) -> NodeID {
+        self.asts[0].read().unwrap().root()
+    }
+
+    pub fn read_ast(&self, id: AstBranchID) -> RwLockReadGuard<AstBranch<T>> {
+        self.asts.get(id.index()).unwrap().read().unwrap()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = RwLockReadGuard<AstBranch<T>>> + '_ {
+        self.asts.iter().map(|ast| ast.read().unwrap())
+    }
+
+    pub fn ids(&self) -> impl Iterator<Item = AstBranchID> + '_ {
+        self.iter().map(|ast| ast.id())
+    }
+
+    pub fn paths(&self) -> impl Iterator<Item = (&PathKey, RwLockReadGuard<AstBranch<T>>)> + '_ {
+        self.names
+            .iter()
+            .map(|(path, id)| (path, self.asts[id.index()].read().unwrap()))
+    }
+
+    pub fn len(&self) -> usize {
+        self.asts.len()
+    }
+}
 
 #[derive(Default, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct NodeID(usize, AstID);
+pub struct NodeID(usize, AstBranchID);
 
 impl Debug for NodeID {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -201,15 +243,15 @@ impl Debug for NodeID {
 }
 
 impl NodeID {
-    pub fn new(id: usize, ast_id: AstID) -> Self {
+    pub fn new(id: usize, ast_id: AstBranchID) -> Self {
         NodeID(id, ast_id)
     }
 
-    pub fn zero(ast_id: AstID) -> Self {
+    pub fn zero(ast_id: AstBranchID) -> Self {
         NodeID(0, ast_id)
     }
 
-    pub fn ast(&self) -> AstID {
+    pub fn ast(&self) -> AstBranchID {
         self.1
     }
 
@@ -229,41 +271,19 @@ impl Deref for ProcedureDeclarationNode {
 }
 
 impl ProcedureDeclarationNode {
-    pub fn try_new(id: NodeID, ast: &Ast) -> Option<Self> {
+    pub fn try_new<T>(id: NodeID, ast: &AstBranch<T>) -> Option<Self>
+    where
+        T: IsValid,
+    {
         match ast.get_node(id).body {
             NodeBody::ProcedureDeclaration(_) => Some(Self(id)),
             _ => None,
         }
     }
-
-    pub fn id(&self) -> NodeID {
-        self.0
-    }
-
-    pub fn args<'a>(&'_ self, ast: &'a Ast) -> &'a [NodeID] {
-        match &ast.get_node(self.id()).body {
-            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { args, .. }) => &args,
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn returns(&self, ast: &Ast) -> Option<NodeID> {
-        match ast.get_node(self.id()).body {
-            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { returns, .. }) => returns,
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn body(&self, ast: &Ast) -> NodeID {
-        match ast.get_node(self.id()).body {
-            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { body, .. }) => body,
-            _ => unreachable!(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
-pub struct Node<T = state::StateAny>
+pub struct Node<T = Valid>
 where
     T: Debug,
 {
@@ -280,18 +300,11 @@ where
 
 impl<T> Node<T>
 where
-    T: TypesInferred,
+    T: IsTypesInferred,
 {
     pub fn tp(&self) -> &NodeType {
         match &self.tp {
             Some(tp) => &tp.tp,
-            None => unreachable!(),
-        }
-    }
-
-    pub fn tp_source(&self) -> NodeTypeSource {
-        match &self.tp {
-            Some(tp) => tp.source,
             None => unreachable!(),
         }
     }
@@ -316,15 +329,11 @@ where
         }
     }
 
-    pub fn maybe_tp_source(&self) -> Option<NodeTypeSource> {
-        match &self.tp {
-            Some(tp) => Some(tp.source),
-            None => None,
+    pub fn is_dead(&self) -> bool {
+        match &self.reference_types {
+            Some(references) => references.is_empty(),
+            None => false,
         }
-    }
-
-    pub fn infer_type(&mut self, itp: InferredType) {
-        self.tp = Some(itp);
     }
 
     pub fn is_closure_boundary(&self) -> bool {
@@ -334,20 +343,13 @@ where
         }
     }
 
-    pub fn is_dead(&self) -> bool {
-        match &self.reference_types {
-            Some(references) => references.is_empty(),
-            None => false,
-        }
-    }
-
     pub fn has_closure_references(&self) -> bool {
         self.referenced_by
             .iter()
             .any(|ref_by| ref_by.ref_loc == NodeReferenceLocation::Closure)
     }
 
-    pub fn child_tokens(&self, ast: &Ast<T>) -> Vec<Token> {
+    pub fn child_tokens(&self, ast: &AstBranch<T>) -> Vec<Token> {
         let mut tokens = Vec::new();
         for child_id in self.body.children() {
             let child = ast.get_node(*child_id);
@@ -360,10 +362,10 @@ where
 
 impl<T> Node<T>
 where
-    T: TypesInferred,
+    T: IsValid,
 {
-    pub fn inferred_tp(&self) -> &InferredType {
-        self.tp.as_ref().unwrap()
+    pub fn infer_type(&mut self, itp: InferredType) {
+        self.tp = Some(itp);
     }
 }
 
@@ -435,25 +437,8 @@ impl SideEffectSet {
         self.0.contains(&side_effect)
     }
 
-    pub fn contains_all(&self, other: SideEffectSet) -> bool {
-        for item in other.0 {
-            if !self.contains(item) {
-                return false;
-            }
-        }
-        true
-    }
-
-    pub fn extend(&mut self, set: SideEffectSet) {
-        self.0.extend(set.0);
-    }
-
     pub fn insert(&mut self, item: SideEffect) {
         self.0.insert(item);
-    }
-
-    pub fn remove(&mut self, item: SideEffect) {
-        self.0.remove(&item);
     }
 }
 
@@ -466,8 +451,6 @@ pub enum NodeReferenceType {
     ExecuteValue,
     GoTo,
     ControlFlow,
-    Body,
-    External,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
@@ -486,20 +469,11 @@ impl InferredType {
     pub fn new(tp: NodeType, source: NodeTypeSource) -> Self {
         Self { tp, source }
     }
-
-    pub fn maybe(tp: Option<NodeType>, source: NodeTypeSource) -> Option<Self> {
-        match tp {
-            Some(tp) => Some(Self::new(tp, source)),
-            None => None,
-        }
-    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum NodeTypeSource {
-    Usage,
     Value,
-    Variable,
     Declared,
 }
 
@@ -509,7 +483,6 @@ pub enum NodeType {
         args: Box<NodeType>,
     },
     Any,
-    NotYetImplemented,
     Void,
     Int,
     Float,
@@ -542,7 +515,6 @@ impl fmt::Display for NodeType {
                 write!(f, "{}...", &**args)
             }
             Any => write!(f, "any"),
-            NotYetImplemented => write!(f, "[NOT YET IMPLEMENTED]"),
             Void => write!(f, "void"),
             Int => write!(f, "int"),
             Float => write!(f, "float"),
@@ -580,7 +552,7 @@ impl fmt::Display for NodeType {
 }
 
 #[derive(Debug)]
-pub enum PartialNodeValue<T = StateAny> {
+pub enum PartialNodeValue<T> {
     Linked(NodeValue<T>),
     Unlinked(String),
     _TP(PhantomData<fn() -> T>),
@@ -603,7 +575,7 @@ impl<T> Clone for PartialNodeValue<T> {
 
 impl<'a, T> Into<&'a NodeValue<T>> for &'a PartialNodeValue<T>
 where
-    T: Linked,
+    T: IsLinked,
 {
     fn into(self) -> &'a NodeValue<T> {
         match self {
@@ -615,7 +587,7 @@ where
 
 impl<T> Into<NodeValue<T>> for PartialNodeValue<T>
 where
-    T: Linked,
+    T: IsLinked,
 {
     fn into(self) -> NodeValue<T> {
         match self {
@@ -626,7 +598,7 @@ where
 }
 
 #[derive(Debug)]
-pub enum NodeValue<T = StateAny> {
+pub enum NodeValue<T> {
     Int(isize),
     Float(f64),
     Bool(bool),
@@ -695,58 +667,21 @@ impl PartialType {
     }
 }
 
-mod state {
-    use std::fmt::Debug;
+use crate::{Path, PathKey};
 
-    pub trait _Any {}
-    pub trait _Linked {}
-    pub trait _TypesInferred {}
-    pub trait _TypesChecked {}
-
-    pub trait Any = _Any + Debug;
-    pub trait Linked = _Linked + Debug;
-    pub trait TypesInferred = _TypesInferred + Debug;
-    pub trait TypesChecked = _TypesChecked + Debug;
-
-    #[derive(Debug, Copy, Clone)]
-    pub struct StateAny {}
-    impl _Any for StateAny {}
-
-    #[derive(Debug, Copy, Clone)]
-    pub struct StateLinked {}
-    impl _Any for StateLinked {}
-    impl _Linked for StateLinked {}
-
-    #[derive(Debug, Copy, Clone)]
-    pub struct StateTypesInferred {}
-    impl _Any for StateTypesInferred {}
-    impl _Linked for StateTypesInferred {}
-    impl _TypesInferred for StateTypesInferred {}
-
-    #[derive(Debug, Copy, Clone)]
-    pub struct StateTypesChecked {}
-    impl _Any for StateTypesChecked {}
-    impl _Linked for StateTypesChecked {}
-    impl _TypesInferred for StateTypesChecked {}
-    impl _TypesChecked for StateTypesChecked {}
-}
-
-pub use state::{Any, Linked, TypesChecked, TypesInferred};
-pub use state::{StateAny, StateLinked, StateTypesChecked, StateTypesInferred};
-
-pub struct Ast<T = state::StateAny>
+pub struct AstBranch<T = Valid>
 where
     T: Debug,
 {
     pub file_name: String,
     pub line_count: usize,
-    ast_id: AstID,
+    ast_id: AstBranchID,
     nodes: Vec<Node<T>>,
     root: NodeID,
     _tp: PhantomData<fn() -> T>,
 }
 
-impl<T> fmt::Debug for Ast<T>
+impl<T> fmt::Debug for AstBranch<T>
 where
     T: Debug,
 {
@@ -756,11 +691,11 @@ where
     }
 }
 
-impl<T> Ast<T>
+impl<T> AstBranch<T>
 where
     T: Debug,
 {
-    pub fn id(&self) -> AstID {
+    pub fn id(&self) -> AstBranchID {
         self.ast_id
     }
 
@@ -779,121 +714,8 @@ where
         }
     }
 
-    pub fn exports(&self) -> HashMap<String, (NodeID, bool)> {
-        let root_id = self.root();
-        let root = self.get_node(root_id);
-        root.body
-            .children()
-            .filter_map(|id| {
-                let child = self.get_node(*id);
-                match &child.body {
-                    NodeBody::StaticDeclaration { ident, .. }
-                    | NodeBody::TypeDeclaration { ident, .. } => {
-                        Some((ident.to_string(), (*id, true)))
-                    }
-                    NodeBody::ConstDeclaration { ident, .. }
-                    | NodeBody::VariableDeclaration { ident, .. } => {
-                        Some((ident.to_string(), (*id, false)))
-                    }
-                    _ => None,
-                }
-            })
-            .collect()
-    }
-
-    pub fn single_error(&self, details: &str, row_details: &str, nodes: Vec<NodeID>) -> Err {
-        // Ugly but it's an error so it's not the happy path!
-        Err::single(details, row_details, nodes)
-    }
-
-    pub fn new(file_name: String, ast_id: AstID, size_hint: usize) -> Self {
-        Self {
-            file_name,
-            ast_id,
-            line_count: 0,
-            root: NodeID::zero(ast_id),
-            nodes: Vec::with_capacity(size_hint),
-            _tp: PhantomData::default(),
-        }
-    }
-
     pub fn nodes(&self) -> &[Node<T>] {
         &self.nodes
-    }
-
-    pub fn add_ref(
-        &mut self,
-        target: (NodeID, NodeReferenceType),
-        referencer: (NodeID, NodeReferenceType),
-        loc: NodeReferenceLocation,
-    ) {
-        let referenced_by = NodeReference::new(referencer.0, referencer.1, loc);
-        let inserted_referenced = self
-            .get_node_mut(target.0)
-            .referenced_by
-            .insert(referenced_by);
-
-        let references = NodeReference::new(target.0, target.1, loc);
-        let inserted_references = self
-            .get_node_mut(referencer.0)
-            .references
-            .insert(references);
-
-        if !(inserted_referenced && inserted_references) {
-            format!("WARNING: inserted already existing reference!");
-        }
-    }
-
-    pub fn remove_ref(
-        &mut self,
-        target_id: NodeID,
-        referencer_id: NodeID,
-        tp: NodeReferenceType,
-        loc: NodeReferenceLocation,
-    ) {
-        let referenced_by = NodeReference::new(referencer_id, tp, loc);
-        let removed_referenced = self
-            .get_node_mut(target_id)
-            .referenced_by
-            .remove(&referenced_by);
-
-        let references = NodeReference::new(target_id, tp, loc);
-        let removed_referencer = self
-            .get_node_mut(referencer_id)
-            .references
-            .remove(&references);
-        if !removed_referenced && !removed_referencer {
-            println!("WARNING: reference missing between target {:?} and referer {:?} during reference removal", target_id, referencer_id);
-        } else if !removed_referenced && removed_referencer {
-            println!("WARNING: reference missing from target {:?} to referer {:?} during reference removal", target_id, referencer_id);
-        } else if removed_referenced && !removed_referencer {
-            println!("WARNING: removed reference missing to target {:?} from referer {:?} during reference removal", target_id, referencer_id);
-        }
-    }
-
-    pub fn add_root_node(&mut self) -> NodeID {
-        self.add_some_node(None)
-    }
-
-    pub fn add_node(&mut self, parent_id: NodeID) -> NodeID {
-        self.add_some_node(Some(parent_id))
-    }
-
-    fn add_some_node(&mut self, parent_id: Option<NodeID>) -> NodeID {
-        let node = Node {
-            id: NodeID::new(self.nodes.len(), self.ast_id),
-            parent_id,
-            referenced_by: Default::default(),
-            references: Default::default(),
-            tp: None,
-            tokens: vec![],
-            body: NodeBody::Empty,
-            reference_types: None,
-            _tp: PhantomData::default(),
-        };
-        let id = node.id;
-        self.nodes.push(node);
-        id
     }
 
     pub fn root(&self) -> NodeID {
@@ -956,6 +778,92 @@ where
             None => panic!("Could not find {:?} in ast", node_id),
         }
     }
+}
+
+impl<T> AstBranch<T>
+where
+    T: IsValid,
+{
+    pub fn exports(&self) -> HashMap<String, (NodeID, bool)> {
+        let root_id = self.root();
+        let root = self.get_node(root_id);
+        root.body
+            .children()
+            .filter_map(|id| {
+                let child = self.get_node(*id);
+                match &child.body {
+                    NodeBody::StaticDeclaration { ident, .. }
+                    | NodeBody::TypeDeclaration { ident, .. } => {
+                        Some((ident.to_string(), (*id, true)))
+                    }
+                    NodeBody::ConstDeclaration { ident, .. }
+                    | NodeBody::VariableDeclaration { ident, .. } => {
+                        Some((ident.to_string(), (*id, false)))
+                    }
+                    _ => None,
+                }
+            })
+            .collect()
+    }
+
+    pub fn new(file_name: String, ast_id: AstBranchID, size_hint: usize) -> Self {
+        Self {
+            file_name,
+            ast_id,
+            line_count: 0,
+            root: NodeID::zero(ast_id),
+            nodes: Vec::with_capacity(size_hint),
+            _tp: PhantomData::default(),
+        }
+    }
+
+    pub fn add_ref(
+        &mut self,
+        target: (NodeID, NodeReferenceType),
+        referencer: (NodeID, NodeReferenceType),
+        loc: NodeReferenceLocation,
+    ) {
+        let referenced_by = NodeReference::new(referencer.0, referencer.1, loc);
+        let inserted_referenced = self
+            .get_node_mut(target.0)
+            .referenced_by
+            .insert(referenced_by);
+
+        let references = NodeReference::new(target.0, target.1, loc);
+        let inserted_references = self
+            .get_node_mut(referencer.0)
+            .references
+            .insert(references);
+
+        if !(inserted_referenced && inserted_references) {
+            format!("WARNING: inserted already existing reference!");
+        }
+    }
+
+    pub fn add_root_node(&mut self) -> NodeID {
+        self.add_some_node(None)
+    }
+
+    pub fn add_node(&mut self, parent_id: NodeID) -> NodeID {
+        self.add_some_node(Some(parent_id))
+    }
+
+    fn add_some_node(&mut self, parent_id: Option<NodeID>) -> NodeID {
+        let node = Node {
+            id: NodeID::new(self.nodes.len(), self.ast_id),
+            parent_id,
+            referenced_by: Default::default(),
+            references: Default::default(),
+            tp: None,
+            tokens: vec![],
+            body: NodeBody::Empty,
+            reference_types: None,
+            _tp: PhantomData::default(),
+        };
+        let id = node.id;
+        self.nodes.push(node);
+        id
+    }
 
     pub fn get_node_and_children(&self, node_id: NodeID) -> Vec<NodeID> {
         let mut nodes = vec![node_id];
@@ -1002,7 +910,7 @@ where
         node_id: NodeID,
         target_ident: &str,
     ) -> Result<Option<(NodeID, NodeReferenceLocation)>> {
-        use crate::ast::nodebody::NodeBody::*;
+        use crate::vm::ast::NodeBody::*;
         self.closest(node_id, |node| {
             let mut closest_id = None;
             for &child_id in node.body.children() {

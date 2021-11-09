@@ -1,5 +1,5 @@
-use leggevm::bytecode::Value::*;
 use leggevm::testing::{bc_test, bc_test_should_fail};
+use leggevm::vm::Value::*;
 
 bc_test! {test_variable {
     a :: 1;

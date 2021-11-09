@@ -1,16 +1,16 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::bytecode::Value;
-use super::run_code;
-use super::LogLevel;
+use crate::vm::Value;
+use crate::LogLevel;
+use crate::{run_code, Path};
 
 pub fn run_test(code: &str, expected_result: Option<Value>) {
     let code = format!("import std.exit;{}", code);
     let result = Rc::new(RefCell::new(None));
     let assign_result = result.clone();
     run_code(
-        ast::Path::new(vec!["test".to_string(), "generated".to_string()]),
+        Path::new(vec!["test".to_string(), "generated".to_string()]),
         code.into(),
         LogLevel::LogNone,
         move |v| {
@@ -49,6 +49,5 @@ macro_rules! bc_test {
     };
 }
 
-use crate::ast;
 pub use bc_test;
 pub use bc_test_should_fail;

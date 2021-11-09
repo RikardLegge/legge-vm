@@ -1,46 +1,56 @@
-use crate::ast::NodeID;
-use crate::bytecode::{Bytecode, SFOffset, OP};
-use crate::runtime::Runtime;
-use crate::{bytecode, LogLevel};
+use crate::vm::ast::{DebugSymbols, NodeID};
+use crate::vm::bytecode::{Bytecode, OPCode, SFOffset};
+use crate::vm::runtime::Runtime;
+use crate::vm::{bytecode, debug};
+use crate::LogLevel;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::fmt::Formatter;
 use std::ops::{Add, Div, Mul, Sub};
 use std::rc::Rc;
+use std::time::Duration;
 use std::{fmt, mem};
 
-#[derive(Debug)]
-pub struct Err {
-    details: String,
+use crate::Err;
+
+pub type Result<V = ()> = crate::Result<V>;
+
+pub struct InterpreterDebugInfo {
+    pub instructions: usize,
+    pub duration: Duration,
 }
 
-impl Err {
-    pub fn new(details: &str) -> Err {
-        Err {
-            details: details.to_string(),
-        }
+impl InterpreterDebugInfo {
+    pub fn instruction_duration(&self) -> Duration {
+        self.duration / self.instructions as u32
     }
 }
-
-pub type Result<V = ()> = std::result::Result<V, Err>;
 
 pub struct Interpreter<'a> {
     pc: Option<usize>,
     pending_frame: Option<StackFrame>,
     frame: StackFrame,
     stack: Vec<Value>,
+    symbols: Option<&'a DebugSymbols>,
     pub runtime: &'a Runtime,
     pub log_level: LogLevel,
     pub stack_max: usize,
-    pub executed_instructions: usize,
     pub interrupt: &'a dyn Fn(bytecode::Value),
-    pub get_line: &'a dyn Fn(NodeID) -> usize,
+    pub debug_info: InterpreterDebugInfo,
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(runtime: &'a Runtime) -> Self {
+    pub fn new(
+        runtime: &'a Runtime,
+        log_level: LogLevel,
+        interrupt: &'a dyn Fn(bytecode::Value),
+    ) -> Self {
         let stack_size = 10000000;
         Interpreter {
+            runtime,
+            log_level,
+            interrupt,
+
             pending_frame: None,
             frame: StackFrame {
                 stack_pointer: 0,
@@ -49,14 +59,14 @@ impl<'a> Interpreter<'a> {
                     stack: Vec::new(),
                 }))),
             },
-            get_line: &|_| 0,
             pc: Some(0),
             stack: Vec::with_capacity(stack_size),
-            runtime,
-            log_level: LogLevel::LogNone,
+            symbols: None,
             stack_max: stack_size,
-            executed_instructions: 0,
-            interrupt: &|_| {},
+            debug_info: InterpreterDebugInfo {
+                instructions: 0,
+                duration: Duration::new(0, 0),
+            },
         }
     }
 
@@ -69,10 +79,10 @@ impl<'a> Interpreter<'a> {
         self.pc = None;
     }
 
-    pub fn execute(&mut self, cmd: &OP, node_id: NodeID) -> Result {
-        self.executed_instructions += 1;
+    pub fn execute(&mut self, cmd: &OPCode, node_id: NodeID) -> Result {
+        self.debug_info.instructions += 1;
         if self.log_level >= LogLevel::LogEval {
-            let line = (self.get_line)(node_id) as usize;
+            let line = self.symbols.and_then(|s| s.get_line(node_id)).unwrap_or(0);
             self.debug_log(
                 LogLevel::LogEval,
                 &format!(
@@ -95,7 +105,9 @@ impl<'a> Interpreter<'a> {
         result
     }
 
-    pub fn run(mut self, code: &Bytecode) -> usize {
+    pub fn run(&mut self, code: &'a Bytecode) {
+        self.symbols = code.debug_symbols.as_ref();
+        let start = debug::start_timer();
         loop {
             if let Some(pc) = self.pc {
                 if let Some(cmd) = code.code.get(pc) {
@@ -110,11 +122,18 @@ impl<'a> Interpreter<'a> {
                 break;
             }
         }
+        self.debug_info.duration = debug::stop_timer(start);
+        self.symbols = None;
         if self.stack.len() > 0 {
             dbg!(&self.stack);
             panic!("Interpreter stopped without an empty stack")
         }
-        self.executed_instructions
+        if self.log_level >= LogLevel::LogTiming {
+            println!(
+                "Avg Instruction: {:?}",
+                self.debug_info.instruction_duration()
+            )
+        }
     }
 }
 
@@ -175,8 +194,8 @@ impl<'a> Interpreter<'a> {
         value
     }
 
-    fn run_command(&mut self, cmd: &OP) -> Result {
-        use self::OP::*;
+    fn run_command(&mut self, cmd: &OPCode) -> Result {
+        use self::OPCode::*;
         match cmd {
             AddI => {
                 let n1 = self.pop_stack()?;
@@ -306,16 +325,6 @@ impl<'a> Interpreter<'a> {
                 let new_pc = (pc as isize + *offset) as usize;
                 self.pc = Some(new_pc);
             }
-            BranchIf(offset) => match self.pop_stack()? {
-                Value::Bool(cond) => {
-                    if cond {
-                        let pc = self.pc.unwrap();
-                        let new_pc = (pc as isize + *offset) as usize;
-                        self.pc = Some(new_pc);
-                    }
-                }
-                _ => unreachable!(),
-            },
             BranchIfNot(offset) => match self.pop_stack()? {
                 Value::Bool(cond) => {
                     if !cond {

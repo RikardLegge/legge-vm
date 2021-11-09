@@ -1,5 +1,5 @@
 use leggevm::LogLevel;
-use leggevm::{ast, run_code};
+use leggevm::{run_code, Path};
 use std::fs::File;
 use std::io::prelude::*;
 use std::process::exit;
@@ -44,11 +44,12 @@ fn main() {
     f.read_to_string(&mut contents)
         .expect("something went wrong reading the file");
 
-    let path = ast::Path::new(vec![filename.trim_end_matches(".bc").to_string()]);
-    let res = run_code(path, contents, log_level, &|v| println!("{:?}", v));
-    if res.is_some() {
-        exit(0);
-    } else {
-        exit(1);
+    let path = Path::new(vec![filename.trim_end_matches(".bc").to_string()]);
+    match run_code(path, contents, log_level, &|v| println!("{:?}", v)) {
+        Ok(()) => exit(0),
+        Err(err) => {
+            println!("{}", err);
+            exit(1)
+        }
     }
 }

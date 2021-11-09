@@ -1,72 +1,84 @@
-use super::{Ast, Node, Result};
-use crate::ast;
-use crate::ast::ast::PartialType::Complete;
-use crate::ast::ast::{AstCollection, StateTypesChecked, TypesInferred};
-use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
-use crate::ast::{Err, ErrPart, NodeID, NodeType};
-use std::result;
+use super::AstTransformation;
+use crate::vm::ast;
+use crate::vm::ast::PartialType::Complete;
+use crate::vm::ast::{transform, AstBranch, Node};
+use crate::vm::ast::{Ast, IsTypesInferred, TypesChecked};
+use crate::vm::ast::{ErrPart, NodeID, NodeType};
+use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody};
 use std::sync::Arc;
 
-pub fn check_types<T: TypesInferred>(
-    asts: AstCollection<T>,
-    runtime: &tokio::runtime::Runtime,
-) -> result::Result<AstCollection<StateTypesChecked>, (AstCollection<T>, Err)>
+pub struct CheckTypesTransformation<'a> {
+    tokio_runtime: &'a tokio::runtime::Runtime,
+}
+
+impl<'a> CheckTypesTransformation<'a> {
+    pub fn new(tokio_runtime: &'a tokio::runtime::Runtime) -> Self {
+        Self { tokio_runtime }
+    }
+}
+
+impl<'a, T> AstTransformation<T, TypesChecked> for CheckTypesTransformation<'a>
 where
-    T: TypesInferred + 'static,
+    T: IsTypesInferred,
 {
-    runtime.block_on(async {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    fn name(&self) -> String {
+        "Check Types".to_string()
+    }
+    fn transform(&self, ast: Ast<T>) -> transform::Result<TypesChecked> {
+        self.tokio_runtime.block_on(async {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let asts = Arc::new(asts);
-        for ast_id in (&asts).ids() {
-            let asts = asts.clone();
-            let tx = tx.clone();
-            tokio::task::spawn_blocking(move || {
-                let ast = asts.get(ast_id);
-                let root_id = ast.root();
-                let checker = Checker::new(&ast, &asts);
+            let asts = Arc::new(ast);
+            for ast_id in (&asts).ids() {
+                let asts = asts.clone();
+                let tx = tx.clone();
+                tokio::task::spawn_blocking(move || {
+                    let ast = asts.read_ast(ast_id);
+                    let root_id = ast.root();
+                    let checker = Checker::new(&ast, &asts);
 
-                let result = checker.check_all_types(root_id);
-                tx.send(result).unwrap();
-            });
-        }
-        drop(tx);
-
-        let mut errors = vec![];
-        while let Some(msg) = rx.recv().await {
-            if let Err(err) = msg {
-                errors.push(err);
+                    let result = checker.check_all_types(root_id);
+                    tx.send(result).unwrap();
+                });
             }
-        }
+            drop(tx);
 
-        let asts = Arc::try_unwrap(asts).unwrap();
+            let mut errors = vec![];
+            while let Some(msg) = rx.recv().await {
+                if let Err(err) = msg {
+                    errors.push(err);
+                }
+            }
 
-        if let Some(err) = errors.pop() {
-            Err((asts, err))
-        } else {
-            Ok(asts.guarantee_state())
-        }
-    })
+            let asts = Arc::try_unwrap(asts).unwrap();
+
+            if let Some(err) = errors.pop() {
+                Err((asts.guarantee_state(), err))
+            } else {
+                Ok(asts.guarantee_state())
+            }
+        })
+    }
 }
 
 pub struct Checker<'a, T>
 where
-    T: TypesInferred,
+    T: IsTypesInferred,
 {
-    ast: &'a Ast<T>,
-    asts: &'a AstCollection<T>,
+    ast: &'a AstBranch<T>,
+    asts: &'a Ast<T>,
 }
 
 impl<'a, T> Checker<'a, T>
 where
-    T: TypesInferred,
+    T: IsTypesInferred,
 {
-    pub fn new(ast: &'a Ast<T>, asts: &'a AstCollection<T>) -> Self {
+    pub fn new(ast: &'a AstBranch<T>, asts: &'a Ast<T>) -> Self {
         Self { ast, asts }
     }
 
-    pub fn check_type(&self, node: &Node<T>) -> Result<()> {
-        use crate::ast::nodebody::NodeBody::*;
+    pub fn check_type(&self, node: &Node<T>) -> ast::Result<()> {
+        use crate::vm::ast::NodeBody::*;
         use NodeType::*;
         match &node.body {
             Reference { node_id } => self.check_type(&*self.asts.get_node(*node_id)),
@@ -325,7 +337,7 @@ where
         shape: &'b Node<T>,
         hole_args: &'b [NodeType],
         shape_args: &'b [NodeType],
-    ) -> Result<Option<&'b NodeType>> {
+    ) -> ast::Result<Option<&'b NodeType>> {
         let invalid_varargs = hole_args.iter().rev().skip(1).position(|a| {
             if let NodeType::VarArg { .. } = a {
                 true
@@ -429,7 +441,7 @@ where
         caller: &Node<T>,
         hole: &NodeType,
         shape: &NodeType,
-    ) -> Result<()> {
+    ) -> ast::Result<()> {
         use NodeType::*;
         match (hole, shape) {
             // Flip shape and hole since we are comparing types now!
@@ -510,7 +522,7 @@ where
         caller: &Node<T>,
         hole: &NodeType,
         shape: &NodeType,
-    ) -> Result<()> {
+    ) -> ast::Result<()> {
         match (hole, shape) {
             (
                 NodeType::Fn {
@@ -577,7 +589,7 @@ where
         caller: &Node<T>,
         hole: &NodeType,
         shape: &NodeType,
-    ) -> Result<()> {
+    ) -> ast::Result<()> {
         use NodeType::*;
         match (hole, shape) {
             (NewType { tp: fields, .. }, Fn { args, returns }) => {
@@ -608,7 +620,7 @@ where
         }
     }
 
-    pub fn check_all_types(&self, root_id: NodeID) -> Result<()> {
+    pub fn check_all_types(&self, root_id: NodeID) -> ast::Result<()> {
         let root = self.ast.get_node(root_id);
         self.check_type(root)?;
         for child_id in root.body.children() {

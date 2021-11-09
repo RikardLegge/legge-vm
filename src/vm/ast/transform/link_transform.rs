@@ -1,17 +1,17 @@
-use super::NodeReferenceType::*;
-use super::{Ast, NodeID};
-use crate::ast::ast::{
-    AstCollection, NodeReferenceLocation, PartialNodeValue, PartialType, StateLinked,
-};
-use crate::ast::nodebody::UnlinkedNodeBody::*;
-use crate::ast::nodebody::{NBCall, NodeBody};
-use crate::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue, PathKey, Result};
-use crate::runtime::{FunctionDefinition, Runtime};
+use super::ast;
+use crate::vm::ast::NodeReferenceType::*;
+use crate::vm::ast::UnlinkedNodeBody::*;
+use crate::vm::ast::{transform, AstBranch, IsValid, NodeID};
+use crate::vm::ast::{Ast, Linked, NodeReferenceLocation, PartialNodeValue, PartialType};
+use crate::vm::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue};
+use crate::vm::ast::{NBCall, NodeBody};
+use crate::vm::runtime::FunctionDefinition;
+use crate::{vm, PathKey};
 use std::borrow::Borrow;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
+use std::mem;
 use std::sync::{Arc, RwLock};
-use std::{mem, result};
 
 #[derive(Debug)]
 struct PendingRef {
@@ -20,80 +20,95 @@ struct PendingRef {
     loc: NodeReferenceLocation,
 }
 
-pub fn link<T>(
-    asts: AstCollection<T>,
-    vm_runtime: &Runtime,
-    runtime: &tokio::runtime::Runtime,
-) -> result::Result<AstCollection<StateLinked>, (AstCollection<T>, Err)>
+pub struct LinkTransformation<'a> {
+    tokio_runtime: &'a tokio::runtime::Runtime,
+    vm_runtime: &'a vm::Runtime,
+}
+
+impl<'a> LinkTransformation<'a> {
+    pub fn new(tokio_runtime: &'a tokio::runtime::Runtime, vm_runtime: &'a vm::Runtime) -> Self {
+        Self {
+            tokio_runtime,
+            vm_runtime,
+        }
+    }
+}
+
+impl<'a, T> transform::AstTransformation<T, Linked> for LinkTransformation<'a>
 where
-    T: Debug + 'static,
+    T: IsValid,
 {
-    runtime.block_on(async {
-        let exports = asts
-            .paths()
-            .map(|(path, ast)| (path.clone(), ast.exports()))
-            .collect::<HashMap<_, _>>();
-        let exports = Arc::new(exports);
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    fn name(&self) -> String {
+        "Link Nodes".to_string()
+    }
+    fn transform(&self, ast: Ast<T>) -> transform::Result<Linked> {
+        self.tokio_runtime.block_on(async {
+            let exports = ast
+                .paths()
+                .map(|(path, ast)| (path.clone(), ast.exports()))
+                .collect::<HashMap<_, _>>();
+            let exports = Arc::new(exports);
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let asts = Arc::new(RwLock::new(asts));
-        for id in asts.read().unwrap().ids() {
-            let vm_runtime = vm_runtime.definitions.clone();
-            let tx = tx.clone();
-            let asts = asts.clone();
-            let exports = exports.clone();
-            tokio::task::spawn_blocking(move || {
-                let asts = asts.read().unwrap();
-                let vm_runtime = vm_runtime.borrow();
-                let mut ast = asts.get_mut(id);
-                let root_id = ast.root();
-                let linker = Linker::new(&mut ast, vm_runtime, &exports);
-                match linker.link(root_id) {
-                    Ok(pending) => tx.send(Ok(pending)).unwrap(),
-                    Err(e) => tx.send(Err(e)).unwrap(),
-                }
-            });
-        }
-
-        drop(tx);
-        let mut pending_refs = Vec::new();
-        let mut errors = Vec::new();
-        while let Some(msg) = rx.recv().await {
-            match msg {
-                Ok(pending) => pending_refs.push(pending),
-                Err(err) => errors.push(err),
+            let asts = Arc::new(RwLock::new(ast));
+            for id in asts.read().unwrap().ids() {
+                let vm_runtime = self.vm_runtime.definitions.clone();
+                let tx = tx.clone();
+                let asts = asts.clone();
+                let exports = exports.clone();
+                tokio::task::spawn_blocking(move || {
+                    let asts = asts.read().unwrap();
+                    let vm_runtime = vm_runtime.borrow();
+                    let mut ast = asts.write_ast(id);
+                    let root_id = ast.root();
+                    let linker = Linker::new(&mut ast, vm_runtime, &exports);
+                    match linker.link(root_id) {
+                        Ok(pending) => tx.send(Ok(pending)).unwrap(),
+                        Err(e) => tx.send(Err(e)).unwrap(),
+                    }
+                });
             }
-        }
 
-        let mut asts = Arc::try_unwrap(asts).unwrap().into_inner().unwrap();
-        if let Some(err) = errors.pop() {
-            Err((asts, err))
-        } else {
-            for outer in pending_refs {
-                for pending in outer {
-                    asts.add_ref(pending.target, pending.referencer, pending.loc);
+            drop(tx);
+            let mut pending_refs = Vec::new();
+            let mut errors = Vec::new();
+            while let Some(msg) = rx.recv().await {
+                match msg {
+                    Ok(pending) => pending_refs.push(pending),
+                    Err(err) => errors.push(err),
                 }
             }
-            Ok(asts.guarantee_state())
-        }
-    })
+
+            let mut asts = Arc::try_unwrap(asts).unwrap().into_inner().unwrap();
+            if let Some(err) = errors.pop() {
+                Err((asts.guarantee_state(), err))
+            } else {
+                for outer in pending_refs {
+                    for pending in outer {
+                        asts.add_ref(pending.target, pending.referencer, pending.loc);
+                    }
+                }
+                Ok(asts.guarantee_state())
+            }
+        })
+    }
 }
 
 struct Linker<'a, 'b, T>
 where
-    T: Debug,
+    T: IsValid,
 {
-    ast: &'a mut Ast<T>,
+    ast: &'a mut AstBranch<T>,
     runtime: &'b Vec<FunctionDefinition>,
     exports: &'b HashMap<PathKey, HashMap<String, (NodeID, bool)>>,
 }
 
 impl<'a, 'b, T> Linker<'a, 'b, T>
 where
-    T: Debug,
+    T: IsValid,
 {
     fn new(
-        ast: &'a mut Ast<T>,
+        ast: &'a mut AstBranch<T>,
         runtime: &'b Vec<FunctionDefinition>,
         exports: &'b HashMap<PathKey, HashMap<String, (NodeID, bool)>>,
     ) -> Self {
@@ -108,14 +123,11 @@ where
         &self,
         node_id: NodeID,
         ident: &str,
-    ) -> Result<Option<(NodeID, NodeReferenceLocation)>> {
-        match self.ast.closest_variable(node_id, ident) {
-            Ok(v) => Ok(v),
-            Err(err) => Err(Err::new(err.details, err.parts)),
-        }
+    ) -> ast::Result<Option<(NodeID, NodeReferenceLocation)>> {
+        self.ast.closest_variable(node_id, ident)
     }
 
-    fn closest_fn(&mut self, node_id: NodeID) -> Result<(NodeID, NodeReferenceLocation)> {
+    fn closest_fn(&mut self, node_id: NodeID) -> ast::Result<(NodeID, NodeReferenceLocation)> {
         match self.ast.closest_fn(node_id) {
             Some(id) => Ok(id),
             _ => Err(Err::single(
@@ -126,7 +138,7 @@ where
         }
     }
 
-    fn closest_loop(&mut self, node_id: NodeID) -> Result<(NodeID, NodeReferenceLocation)> {
+    fn closest_loop(&mut self, node_id: NodeID) -> ast::Result<(NodeID, NodeReferenceLocation)> {
         match self.ast.closest_loop(node_id) {
             Some(id) => Ok(id),
             _ => Err(Err::single(
@@ -141,7 +153,7 @@ where
         &mut self,
         node_id: NodeID,
         value: PartialNodeValue<T>,
-    ) -> Result<PartialNodeValue<T>> {
+    ) -> ast::Result<PartialNodeValue<T>> {
         Ok(match value {
             PartialNodeValue::Linked(value) => match value {
                 NodeValue::Int(_)
@@ -179,14 +191,13 @@ where
         })
     }
 
-    fn resolve_type(&mut self, tp: NodeType, parts: &[NodeID]) -> Result<Option<NodeType>> {
+    fn resolve_type(&mut self, tp: NodeType, parts: &[NodeID]) -> ast::Result<Option<NodeType>> {
         let tp = match tp {
             NodeType::Void
             | NodeType::Int
             | NodeType::Float
             | NodeType::Bool
             | NodeType::Any
-            | NodeType::NotYetImplemented
             | NodeType::String => Some(tp),
 
             NodeType::VarArg { mut args } => match self.resolve_type(*args, parts)? {
@@ -245,7 +256,7 @@ where
         Ok(tp)
     }
 
-    fn link_types(&mut self, node_id: NodeID) -> Result<Option<NodeType>> {
+    fn link_types(&mut self, node_id: NodeID) -> ast::Result<Option<NodeType>> {
         let node = self.ast.get_node(node_id);
         let tp = match &node.body {
             NodeBody::TypeDeclaration { tp, .. } => {
@@ -308,7 +319,7 @@ where
         }
     }
 
-    fn link(mut self, root_id: NodeID) -> Result<Vec<PendingRef>> {
+    fn link(mut self, root_id: NodeID) -> ast::Result<Vec<PendingRef>> {
         let mut pending_refs = Vec::new();
         let mut queue = VecDeque::from(vec![root_id]);
         while let Some(node_id) = queue.pop_front() {

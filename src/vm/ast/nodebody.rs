@@ -1,6 +1,6 @@
-use crate::ast::ast::{PartialNodeValue, PartialType, ProcedureDeclarationNode, StateAny};
-use crate::ast::NodeID;
-use crate::token::ArithmeticOP;
+use crate::vm::ast::{NodeID, PartialNodeValue, PartialType, ProcedureDeclarationNode};
+use std::fmt;
+use std::fmt::Formatter;
 
 #[derive(Debug, Clone)]
 pub struct NBCall {
@@ -16,7 +16,7 @@ pub struct NBProcedureDeclaration {
 }
 
 #[derive(Debug, Clone)]
-pub enum NodeBody<T = StateAny> {
+pub enum NodeBody<T> {
     Empty,
     ConstValue {
         tp: Option<NodeID>,
@@ -116,7 +116,7 @@ impl<T> NodeBody<T> {
 }
 
 #[derive(Debug, Clone)]
-pub enum UnlinkedNodeBody<T = StateAny> {
+pub enum UnlinkedNodeBody<T> {
     VariableAssignment {
         ident: String,
         path: Option<Vec<String>>,
@@ -154,7 +154,7 @@ impl<T> UnlinkedNodeBody<T> {
     }
 }
 
-pub struct NodeBodyIterator<'a, T = StateAny> {
+pub struct NodeBodyIterator<'a, T> {
     index: usize,
     body: &'a NodeBody<T>,
     unlinked: Option<UnlinkedNodeBodyIterator<'a, T>>,
@@ -269,7 +269,7 @@ impl<'a, T> Iterator for NodeBodyIterator<'a, T> {
     }
 }
 
-pub struct UnlinkedNodeBodyIterator<'a, T = StateAny> {
+pub struct UnlinkedNodeBodyIterator<'a, T> {
     index: usize,
     body: &'a UnlinkedNodeBody<T>,
 }
@@ -295,5 +295,31 @@ impl<'a, T> Iterator for UnlinkedNodeBodyIterator<'a, T> {
             self.index += 1;
         }
         option
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ArithmeticOP {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    GEq,
+    LEq,
+}
+
+impl fmt::Display for ArithmeticOP {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use ArithmeticOP::*;
+        match self {
+            Add => write!(f, "+"),
+            Sub => write!(f, "-"),
+            Mul => write!(f, "*"),
+            Div => write!(f, "/"),
+            Eq => write!(f, "=="),
+            GEq => write!(f, ">="),
+            LEq => write!(f, "<="),
+        }
     }
 }

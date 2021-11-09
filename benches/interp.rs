@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use leggevm::{compile, interpreter, runtime, LogLevel, Timing};
+use leggevm::{compile, vm, LogLevel, Timing};
 
 pub fn compare(c: &mut Criterion) {
     c.bench_function("reference", |b| {
@@ -18,7 +18,7 @@ pub fn compare(c: &mut Criterion) {
     });
 
     let mut timing = Timing::default();
-    let runtime = runtime::std();
+    let runtime = vm::Runtime::default();
     let (bytecode, _) = compile(
         &mut timing,
         &runtime,
@@ -43,7 +43,7 @@ pub fn compare(c: &mut Criterion) {
 
     c.bench_function("interpreter", |b| {
         b.iter(|| {
-            let interp = interpreter::Interpreter::new(&runtime);
+            let mut interp = vm::Interpreter::new(&runtime, LogLevel::LogNone, &|_| {});
             interp.run(&bytecode);
         });
     });

@@ -1,42 +1,57 @@
-use super::{Ast, NodeID, Result};
-use crate::ast;
-use crate::ast::ast::{AstCollection, Linked, NodeReference, PartialNodeValue, SideEffect};
-use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody, NodeBodyIterator};
-use crate::ast::{Node, NodeReferenceType, NodeType, NodeValue};
+use crate::vm::ast::{transform, AstBranch, NodeID, Result};
+use crate::vm::ast::{Ast, IsLinked, NodeReference, PartialNodeValue, SideEffect};
+use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody, NodeBodyIterator};
+use crate::vm::ast::{Node, NodeReferenceType, NodeType, NodeValue};
 use std::collections::{HashSet, VecDeque};
-use std::result;
 
-pub fn treeshake<T: Linked>(
-    mut asts: AstCollection<T>,
-) -> result::Result<AstCollection<T>, (AstCollection<T>, ast::Err)> {
-    let mut err = None;
-    for mut ast in asts.iter_mut() {
-        let root_id = ast.root();
-        let shaker = TreeShaker::new(&mut ast);
-        if let Err(e) = shaker.shake(root_id) {
-            err = Some(e);
-            break;
-        }
+pub struct TreeShakeTransformation {}
+
+impl TreeShakeTransformation {
+    pub fn new() -> Self {
+        Self {}
     }
+}
 
-    match err {
-        Some(err) => Err((asts, err)),
-        None => Ok(asts.guarantee_state()),
+impl<T> transform::AstTransformation<T, T> for TreeShakeTransformation
+where
+    T: IsLinked,
+{
+    fn name(&self) -> String {
+        "Tree shaker".to_string()
+    }
+    fn transform(&self, mut ast: Ast<T>) -> transform::Result<T> {
+        if true {
+            return Ok(ast);
+        }
+        let mut err = None;
+        for mut ast in ast.iter_mut() {
+            let root_id = ast.root();
+            let shaker = TreeShaker::new(&mut ast);
+            if let Err(e) = shaker.shake(root_id) {
+                err = Some(e);
+                break;
+            }
+        }
+
+        match err {
+            Some(err) => Err((ast.guarantee_state(), err)),
+            None => Ok(ast),
+        }
     }
 }
 
 struct TreeShaker<'a, T>
 where
-    T: Linked,
+    T: IsLinked,
 {
-    ast: &'a mut Ast<T>,
+    ast: &'a mut AstBranch<T>,
 }
 
 struct Shaker<'a, T>
 where
-    T: Linked,
+    T: IsLinked,
 {
-    ast: &'a mut Ast<T>,
+    ast: &'a mut AstBranch<T>,
     stack: HashSet<NodeID>,
     side_effect_nodes: Vec<(NodeID, SideEffect)>,
     active_roots: Vec<NodeID>,
@@ -44,9 +59,9 @@ where
 
 impl<'a, T> Shaker<'a, T>
 where
-    T: Linked,
+    T: IsLinked,
 {
-    fn new(ast: &'a mut Ast<T>) -> Self {
+    fn new(ast: &'a mut AstBranch<T>) -> Self {
         Self {
             ast,
             stack: Default::default(),
@@ -246,9 +261,9 @@ where
 
 impl<'a, T> TreeShaker<'a, T>
 where
-    T: Linked,
+    T: IsLinked,
 {
-    fn new(ast: &'a mut Ast<T>) -> Self {
+    fn new(ast: &'a mut AstBranch<T>) -> Self {
         Self { ast }
     }
 

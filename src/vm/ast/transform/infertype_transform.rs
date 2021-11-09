@@ -1,10 +1,12 @@
-use crate::ast;
-use crate::ast::ast::{AstCollection, InferredType, Linked, StateTypesInferred};
-use crate::ast::nodebody::{NBCall, NBProcedureDeclaration, NodeBody};
-use crate::ast::typer::TypeInferenceErr::Fail;
-use crate::ast::{Ast, AstID, ErrPart, Node, NodeID, NodeType, NodeTypeSource, NodeValue};
-use crate::runtime::{FunctionDefinition, Runtime};
-use crate::token::ArithmeticOP;
+use crate::vm;
+use crate::vm::ast;
+use crate::vm::ast::transform::{AstTransformation, Result};
+use crate::vm::ast::{
+    Ast, AstBranch, AstBranchID, ErrPart, InferredType, IsLinked, Node, NodeID, NodeType,
+    NodeTypeSource, NodeValue, TypesInferred,
+};
+use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody};
+use crate::vm::runtime::FunctionDefinition;
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
@@ -13,17 +15,26 @@ use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 
 enum TyperState<T>
 where
-    T: Linked + 'static,
+    T: IsLinked,
 {
     TypeCheck(Typer<T>),
-    TypeCheckBlocked(AstID, Typer<T>),
+    TypeCheckBlocked(AstBranchID, Typer<T>),
     Err(ast::Err),
-    Done(AstID),
+    Done(AstBranchID),
+}
+
+enum TyperResult {
+    Complete,
+    BlockedBy {
+        blocked_by: AstBranchID,
+        made_progress: bool,
+    },
+    Failed(ast::Err),
 }
 
 impl<T> Debug for TyperState<T>
 where
-    T: Linked + 'static,
+    T: IsLinked,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -31,129 +42,144 @@ where
             TyperState::TypeCheckBlocked(ast_id, t) => {
                 write!(f, "TypeCheckBlocked({:?}, by: {:?})", t.ast_id, ast_id)
             }
-            TyperState::Err(err) => write!(f, "Err({})", err.details),
+            TyperState::Err(err) => write!(f, "Err({})", err.to_string()),
             TyperState::Done(ast_id) => write!(f, "Done({:?})", ast_id),
         }
     }
 }
 
-pub fn infer_types<T>(
-    asts: AstCollection<T>,
-    vm_runtime: &Runtime,
-    runtime: &tokio::runtime::Runtime,
-) -> result::Result<AstCollection<StateTypesInferred>, (AstCollection<T>, ast::Err)>
-where
-    T: Linked + 'static,
-{
-    runtime.block_on(async {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut n_active = 0;
-        let mut n_blocked = 0;
+pub struct InferTypesTransformation<'a> {
+    tokio_runtime: &'a tokio::runtime::Runtime,
+    vm_runtime: &'a vm::Runtime,
+}
 
-        let asts = Arc::new(asts);
-        for id in (&asts).ids() {
-            let asts = asts.clone();
-            let definitions = vm_runtime.definitions.clone();
-            let typer = Typer::new(id, asts, definitions);
-            tx.send(TyperState::TypeCheck(typer)).unwrap();
-            n_active += 1;
+impl<'a> InferTypesTransformation<'a> {
+    pub fn new(tokio_runtime: &'a tokio::runtime::Runtime, vm_runtime: &'a vm::Runtime) -> Self {
+        Self {
+            tokio_runtime,
+            vm_runtime,
         }
+    }
+}
 
-        let mut blocked_checkers = HashMap::new();
-        let mut completed = HashSet::new();
-        let mut error = None;
+impl<'a, T> AstTransformation<T, TypesInferred> for InferTypesTransformation<'a>
+where
+    T: IsLinked,
+{
+    fn name(&self) -> String {
+        "Infer Types".to_string()
+    }
+    fn transform(&self, ast: Ast<T>) -> Result<TypesInferred> {
+        self.tokio_runtime.block_on(async {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut n_active = 0;
+            let mut n_blocked = 0;
 
-        while let Some(msg) = rx.recv().await {
-            if error.is_some() {
-                n_active -= 1;
-                if n_active == 0 {
-                    drop(blocked_checkers);
-                    let asts = Arc::try_unwrap(asts).unwrap();
-                    let err = std::mem::replace(&mut error, None).unwrap();
-                    return Err((asts, err));
-                }
-                continue
+            let asts = Arc::new(ast);
+            for id in (&asts).ids() {
+                let asts = asts.clone();
+                let definitions = self.vm_runtime.definitions.clone();
+                let typer = Typer::new(id, asts, definitions);
+                tx.send(TyperState::TypeCheck(typer)).unwrap();
+                n_active += 1;
             }
-            match msg {
-                TyperState::TypeCheck(mut typer) => {
-                    let tx = tx.clone();
-                    tokio::task::spawn_blocking(move || {
-                        use TyperResult::*;
-                        match typer.infer_all_types() {
-                            Complete => tx.send(TyperState::Done(typer.ast_id)).unwrap(),
-                            BlockedBy { blocked_by, made_progress} => {
-                                if made_progress {
-                                    tx.send(TyperState::TypeCheckBlocked(blocked_by, typer)).unwrap()
-                                } else {
-                                    tx.send(TyperState::Err(ast::Err::single("Unable to make progress type checking...", "", typer.blocked.values().flatten().cloned().collect()))).unwrap()
-                                }
-                            },
-                            Failed(err) => tx.send(TyperState::Err(err)).unwrap(),
-                        };
-                    });
-                }
-                TyperState::TypeCheckBlocked(by, typer) => {
-                    if completed.contains(&by) {
-                        tx.send(TyperState::TypeCheck(typer)).unwrap();
-                    } else {
-                        if !blocked_checkers.contains_key(&by) {
-                            blocked_checkers.insert(by, vec![]);
-                        }
-                        blocked_checkers.get_mut(&by).unwrap().push(typer);
-                        n_blocked += 1;
+
+            let mut blocked_checkers = HashMap::new();
+            let mut completed = HashSet::new();
+            let mut error = None;
+
+            while let Some(msg) = rx.recv().await {
+                if error.is_some() {
+                    n_active -= 1;
+                    if n_active == 0 {
+                        drop(blocked_checkers);
+                        let asts = Arc::try_unwrap(asts).unwrap();
+                        let err = std::mem::replace(&mut error, None).unwrap();
+                        return Err((asts.guarantee_state(), err));
                     }
+                    continue
                 }
-                TyperState::Err(err) => {
-                    error = Some(err);
-                    n_active -= 1;
-                }
-                TyperState::Done(ast_id) => {
-                    n_active -= 1;
-                    if let Some(blocked) = blocked_checkers.get_mut(&ast_id) {
-                        let blocked = std::mem::replace(blocked, vec![]);
-                        for typer in blocked {
+                match msg {
+                    TyperState::TypeCheck(mut typer) => {
+                        let tx = tx.clone();
+                        tokio::task::spawn_blocking(move || {
+                            use TyperResult::*;
+                            match typer.infer_all_types() {
+                                Complete => tx.send(TyperState::Done(typer.ast_id)).unwrap(),
+                                BlockedBy { blocked_by, made_progress } => {
+                                    if made_progress {
+                                        tx.send(TyperState::TypeCheckBlocked(blocked_by, typer)).unwrap()
+                                    } else {
+                                        tx.send(TyperState::Err(ast::Err::single("Unable to make progress type checking...", "", typer.blocked.values().flatten().cloned().collect()))).unwrap()
+                                    }
+                                },
+                                Failed(err) => tx.send(TyperState::Err(err)).unwrap(),
+                            };
+                        });
+                    }
+                    TyperState::TypeCheckBlocked(by, typer) => {
+                        if completed.contains(&by) {
                             tx.send(TyperState::TypeCheck(typer)).unwrap();
-                            n_blocked -= 1;
+                        } else {
+                            if !blocked_checkers.contains_key(&by) {
+                                blocked_checkers.insert(by, vec![]);
+                            }
+                            blocked_checkers.get_mut(&by).unwrap().push(typer);
+                            n_blocked += 1;
                         }
                     }
-                    completed.insert(ast_id);
+                    TyperState::Err(err) => {
+                        error = Some(err);
+                        n_active -= 1;
+                    }
+                    TyperState::Done(ast_id) => {
+                        n_active -= 1;
+                        if let Some(blocked) = blocked_checkers.get_mut(&ast_id) {
+                            let blocked = std::mem::replace(blocked, vec![]);
+                            for typer in blocked {
+                                tx.send(TyperState::TypeCheck(typer)).unwrap();
+                                n_blocked -= 1;
+                            }
+                        }
+                        completed.insert(ast_id);
+                    }
                 }
-            }
-            if n_active == 0 {
-                if blocked_checkers.values().any(|l|l.len()>0) {
-                    panic!("Not all blockers are dropped")
+                if n_active == 0 {
+                    if blocked_checkers.values().any(|l| l.len() > 0) {
+                        panic!("Not all blockers are dropped")
+                    }
+                    let asts = Arc::try_unwrap(asts).unwrap();
+                    return Ok(asts.guarantee_state());
                 }
-                let asts = Arc::try_unwrap(asts).unwrap();
-                return Ok(asts.guarantee_state());
-            }
-            if n_blocked == n_active {
-                let nodes = blocked_checkers
-                    .into_values()
-                    .map(|typers|typers
-                        .into_iter()
-                        .map(|typer|typer.blocked.values().flatten().cloned().collect::<Vec<NodeID>>())
-                        .reduce(|mut all, mut next|{
+                if n_blocked == n_active {
+                    let nodes = blocked_checkers
+                        .into_values()
+                        .map(|typers| typers
+                            .into_iter()
+                            .map(|typer| typer.blocked.values().flatten().cloned().collect::<Vec<NodeID>>())
+                            .reduce(|mut all, mut next| {
+                                all.append(&mut next);
+                                all
+                            })
+                            .unwrap_or(vec![])
+                        )
+                        .reduce(|mut all, mut next| {
                             all.append(&mut next);
                             all
                         })
-                        .unwrap_or(vec![])
-                    )
-                    .reduce(|mut all, mut next| {
-                        all.append(&mut next);
-                        all
-                    })
-                    .unwrap_or(vec![]);
-                let err = ast::Err::single(
-                    "Failed to complete type check, unable to infer the type of the following expressions",
-                    "unable to infer type",
-                    nodes,
-                );
-                let asts = Arc::try_unwrap(asts).unwrap();
-                return Err((asts, err));
+                        .unwrap_or(vec![]);
+                    let err = ast::Err::single(
+                        "Failed to complete type check, unable to infer the type of the following expressions",
+                        "unable to infer type",
+                        nodes,
+                    );
+                    let asts = Arc::try_unwrap(asts).unwrap();
+                    return Err((asts.guarantee_state(), err));
+                }
             }
-        }
-        unreachable!()
-    })
+            unreachable!()
+        })
+    }
 }
 
 enum TypeInferenceErr {
@@ -165,18 +191,18 @@ type TypeInferenceResult<T = InferredType> = result::Result<T, TypeInferenceErr>
 
 pub struct Typer<T>
 where
-    T: Linked,
+    T: IsLinked,
 {
     queue: VecDeque<NodeID>,
     blocked: HashMap<NodeID, Vec<NodeID>>,
-    ast_id: AstID,
-    asts: Arc<AstCollection<T>>,
+    ast_id: AstBranchID,
+    asts: Arc<Ast<T>>,
     runtime: Arc<Vec<FunctionDefinition>>,
 }
 
 impl<T> Debug for Typer<T>
 where
-    T: Linked,
+    T: IsLinked,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Typer")
@@ -185,14 +211,14 @@ where
 
 impl<T> Typer<T>
 where
-    T: Linked,
+    T: IsLinked,
 {
     pub fn new(
-        ast_id: AstID,
-        asts: Arc<AstCollection<T>>,
+        ast_id: AstBranchID,
+        asts: Arc<Ast<T>>,
         runtime: Arc<Vec<FunctionDefinition>>,
     ) -> Self {
-        let root = asts.get(ast_id).root();
+        let root = asts.read_ast(ast_id).root();
         let queue = VecDeque::from(vec![root]);
         let blocked = HashMap::new();
         Self {
@@ -206,7 +232,7 @@ where
 
     fn coerce_types<'a, 'b: 'a>(
         &self,
-        ast: &'b RwLockReadGuard<Ast<T>>,
+        ast: &'b RwLockReadGuard<AstBranch<T>>,
         lhs: NodeID,
         rhs: NodeID,
     ) -> TypeInferenceResult<&'a NodeType> {
@@ -215,7 +241,7 @@ where
         if lhs_tp == rhs_tp {
             Ok(lhs_tp)
         } else {
-            Err(Fail(ast::Err::single(
+            Err(TypeInferenceErr::Fail(ast::Err::single(
                 "Left and right hand sides do not match",
                 "",
                 vec![lhs, rhs],
@@ -225,11 +251,11 @@ where
 
     fn get_type_node_void<'a, 'b: 'a>(
         &self,
-        ast: &'b RwLockReadGuard<Ast<T>>,
+        ast: &'b RwLockReadGuard<AstBranch<T>>,
         node_id: NodeID,
     ) -> TypeInferenceResult<&'a NodeType> {
         match self.get_type(ast, node_id)? {
-            NodeType::Void => Err(Fail(ast::Err::single(
+            NodeType::Void => Err(TypeInferenceErr::Fail(ast::Err::single(
                 "Did not expect void value here",
                 "value is void",
                 vec![node_id],
@@ -238,17 +264,17 @@ where
         }
     }
 
-    fn ast(&self) -> RwLockReadGuard<Ast<T>> {
-        self.asts.get(self.ast_id)
+    fn ast(&self) -> RwLockReadGuard<AstBranch<T>> {
+        self.asts.read_ast(self.ast_id)
     }
 
-    fn ast_mut(&self) -> RwLockWriteGuard<Ast<T>> {
-        self.asts.get_mut(self.ast_id)
+    fn ast_mut(&self) -> RwLockWriteGuard<AstBranch<T>> {
+        self.asts.write_ast(self.ast_id)
     }
 
     fn get_type<'a, 'b: 'a>(
         &self,
-        ast: &'b RwLockReadGuard<Ast<T>>,
+        ast: &'b RwLockReadGuard<AstBranch<T>>,
         node_id: NodeID,
     ) -> TypeInferenceResult<&'a NodeType> {
         let node_id = node_id;
@@ -285,9 +311,9 @@ where
     }
 
     fn infer_type(&self, node: &Node<T>) -> result::Result<InferredType, TypeInferenceErr> {
-        use super::NodeType::*;
-        use super::NodeTypeSource::*;
-        use crate::ast::nodebody::NodeBody::*;
+        use crate::vm::ast::NodeBody::*;
+        use crate::vm::ast::NodeType::*;
+        use crate::vm::ast::NodeTypeSource::*;
         use TypeInferenceErr::*;
         let ast = self.ast();
         match &node.body {
@@ -322,7 +348,7 @@ where
                 Ok(InferredType::new(tp, Declared))
             }
             Op { op, lhs, rhs } => {
-                use ArithmeticOP::*;
+                use crate::vm::ast::ArithmeticOP::*;
                 match op {
                     GEq | LEq | Eq => Ok(InferredType::new(Bool, Declared)),
                     Add | Sub | Mul | Div => {
@@ -366,11 +392,11 @@ where
                 if let NodeType::NewType { .. } = value_tp {
                     let body = &ast.get_node(*variable).body;
                     match body {
-                            NodeBody::ConstDeclaration{expr, ..}
-                            | NodeBody::StaticDeclaration{expr, ..}=> {
+                            NodeBody::ConstDeclaration { expr, .. }
+                            | NodeBody::StaticDeclaration { expr, .. } => {
                                 value_tp = self.get_type(&ast, *expr)?;
                             }
-                            NodeBody::TypeDeclaration{ ident, ..} => {
+                            NodeBody::TypeDeclaration { ident, .. } => {
                                 Err(Fail(ast::Err::single(
                                     "When instantiating a type, use the default instantiation function by adding ()",
                                     &format!("Replace with {}()", ident),
@@ -446,10 +472,10 @@ where
             Call(NBCall { func, .. }) => {
                 let tp = self.get_type(&ast, *func)?;
                 match tp {
-                    Fn { returns, .. } | NewType { tp: returns, .. } => {
-                        Ok(InferredType::new((**returns).clone(), Value))
-                    }
-                    tp => Err(Fail(ast::Err::new(
+                        Fn { returns, .. } | NewType { tp: returns, .. } => {
+                            Ok(InferredType::new((**returns).clone(), Value))
+                        }
+                        tp => Err(Fail(ast::Err::new(
                             format!(
                                 "It's currently only possible to call functions, tried to call {:?}: {:?}",
                                 *func,
@@ -459,8 +485,8 @@ where
                                 ErrPart::new("Calling non-callable variable".to_string(), vec![node.id()]),
                                 ErrPart::new("Non-callable variable is defined here".to_string(), vec![*func])
                             ]
-                            ))),
-                }
+                        ))),
+                    }
             }
             Empty
             | Break { .. }
@@ -484,7 +510,7 @@ where
         let ast_id = self.ast_id;
         while let Some(node_id) = self.queue.pop_front() {
             let tp = {
-                let ast = self.asts.get(self.ast_id);
+                let ast = self.asts.read_ast(self.ast_id);
                 let node = ast.get_node(node_id);
                 for &child_id in node.body.children() {
                     if let None = ast.get_node(child_id).maybe_tp() {
@@ -540,13 +566,4 @@ where
             ))
         }
     }
-}
-
-enum TyperResult {
-    Complete,
-    BlockedBy {
-        blocked_by: AstID,
-        made_progress: bool,
-    },
-    Failed(ast::Err),
 }
