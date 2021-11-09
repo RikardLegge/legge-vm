@@ -65,97 +65,98 @@ where
             while let Some(task) = rx.recv().await {
                 if error.is_some() {
                     n_completed += 1;
-                    continue;
-                }
-                match task {
-                    ToAstTaskState::New(path, is_retry) => {
-                        if !processed_paths.contains(&path) || is_retry {
-                            processed_paths.insert(path.clone());
-                            if !is_retry {
-                                n_started += 1;
-                            }
+                } else {
+                    match task {
+                        ToAstTaskState::New(path, is_retry) => {
+                            if !processed_paths.contains(&path) || is_retry {
+                                processed_paths.insert(path.clone());
+                                if !is_retry {
+                                    n_started += 1;
+                                }
 
-                            let tx = tx.clone();
-                            open_files += 1;
-                            let file = self.file_store.file(&path);
-                            tokio::task::spawn(async move {
-                                match file.read().await {
-                                    Ok(code) => {
-                                        tx.send(ToAstTaskState::ToTokens(path, code)).unwrap();
-                                    }
-                                    Err(err) => {
-                                        if err.retryable() {
-                                            tx.send(ToAstTaskState::Retry(path, open_files))
-                                                .unwrap();
-                                        } else {
-                                            panic!("{:?}", err);
+                                let tx = tx.clone();
+                                open_files += 1;
+                                let file = self.file_store.file(&path);
+                                tokio::task::spawn(async move {
+                                    match file.read().await {
+                                        Ok(code) => {
+                                            tx.send(ToAstTaskState::ToTokens(path, code)).unwrap();
                                         }
-                                    }
-                                };
+                                        Err(err) => {
+                                            if err.retryable() {
+                                                tx.send(ToAstTaskState::Retry(path, open_files))
+                                                    .unwrap();
+                                            } else {
+                                                panic!("{:?}", err);
+                                            }
+                                        }
+                                    };
+                                });
+                            }
+                        }
+                        ToAstTaskState::Retry(path, error_count) => {
+                            if open_files < error_count {
+                                tx.send(ToAstTaskState::New(path, true)).unwrap();
+                            } else {
+                                pending_files.push(path);
+                            }
+                            open_files -= 1;
+                        }
+                        ToAstTaskState::ToTokens(path, code) => {
+                            open_files -= 1;
+                            if let Some(path) = pending_files.pop() {
+                                tx.send(ToAstTaskState::New(path, true)).unwrap();
+                            }
+                            let tx = tx.clone();
+                            tokio::task::spawn_blocking(move || {
+                                let size = Some(code.len() / 2);
+                                let tokens =
+                                    token::from_chars(code.chars(), size, |import: Vec<String>| {
+                                        if let [module, rest @ .., _] = &import[..] {
+                                            if module == "local" && rest.len() >= 1 {
+                                                let path = Path::new(rest.into());
+                                                tx.send(ToAstTaskState::New(path, false)).unwrap();
+                                            }
+                                        }
+                                    });
+                                tx.send(ToAstTaskState::ToAst(path, tokens)).unwrap();
                             });
                         }
-                    }
-                    ToAstTaskState::Retry(path, error_count) => {
-                        if open_files < error_count {
-                            tx.send(ToAstTaskState::New(path, true)).unwrap();
-                        } else {
-                            pending_files.push(path);
-                        }
-                        open_files -= 1;
-                    }
-                    ToAstTaskState::ToTokens(path, code) => {
-                        open_files -= 1;
-                        if let Some(path) = pending_files.pop() {
-                            tx.send(ToAstTaskState::New(path, true)).unwrap();
-                        }
-                        let tx = tx.clone();
-                        tokio::task::spawn_blocking(move || {
-                            let size = Some(code.len() / 2);
-                            let tokens =
-                                token::from_chars(code.chars(), size, |import: Vec<String>| {
-                                    if let [module, rest @ .., _] = &import[..] {
-                                        if module == "local" && rest.len() >= 1 {
-                                            let path = Path::new(rest.into());
-                                            tx.send(ToAstTaskState::New(path, false)).unwrap();
-                                        }
-                                    }
-                                });
-                            tx.send(ToAstTaskState::ToAst(path, tokens)).unwrap();
-                        });
-                    }
-                    ToAstTaskState::ToAst(path, tokens) => {
-                        let ast_id = asts.reserve();
+                        ToAstTaskState::ToAst(path, tokens) => {
+                            let ast_id = asts.reserve();
 
-                        let tx = tx.clone();
-                        tokio::task::spawn_blocking(move || {
-                            let last_token = tokens.last().cloned();
-                            let size_hint = tokens.len();
-                            let ast = token_to_ast::ast_from_tokens(
-                                path.file(),
-                                ast_id,
-                                tokens.into_iter(),
-                                size_hint,
-                            );
-                            match ast {
-                                Ok(mut ast) => {
-                                    ast.line_count = last_token.map(|t| t.line).unwrap_or(0);
-                                    tx.send(ToAstTaskState::Done(path, ast)).unwrap();
+                            let tx = tx.clone();
+                            tokio::task::spawn_blocking(move || {
+                                let last_token = tokens.last().cloned();
+                                let size_hint = tokens.len();
+                                let ast = token_to_ast::ast_from_tokens(
+                                    path.file(),
+                                    ast_id,
+                                    tokens.into_iter(),
+                                    size_hint,
+                                );
+                                match ast {
+                                    Ok(mut ast) => {
+                                        ast.line_count = last_token.map(|t| t.line).unwrap_or(0);
+                                        tx.send(ToAstTaskState::Done(path, ast)).unwrap();
+                                    }
+                                    Err((ast, err)) => {
+                                        tx.send(ToAstTaskState::Err(path, err, Some(ast))).unwrap();
+                                    }
                                 }
-                                Err((ast, err)) => {
-                                    tx.send(ToAstTaskState::Err(path, err, Some(ast))).unwrap();
-                                }
+                            });
+                        }
+                        ToAstTaskState::Err(path, err, ast) => {
+                            n_completed += 1;
+                            if let Some(ast) = ast {
+                                asts.add(path, ast);
                             }
-                        });
-                    }
-                    ToAstTaskState::Err(path, err, ast) => {
-                        if let Some(ast) = ast {
+                            error = Some(err);
+                        }
+                        ToAstTaskState::Done(path, ast) => {
+                            n_completed += 1;
                             asts.add(path, ast);
                         }
-                        error = Some(err);
-                    }
-                    ToAstTaskState::Done(path, ast) => {
-                        n_completed += 1;
-                        asts.add(path, ast);
                     }
                 }
                 if n_started == n_completed {

@@ -1,8 +1,7 @@
-get :: fn(v: int) {
-  import std.exit;
-  exit(v);
+import std.exit;
+incrementer :: fn() -> Fn() -> int {
+    return fn() -> int {return 1;};
 }
-
-import local.prelude.b;
-
-get(b);
+inc := incrementer();
+val := inc();
+exit(val);
