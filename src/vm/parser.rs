@@ -1,5 +1,6 @@
 use crate::vm::transform;
 use crate::{vm, LogLevel, Path};
+use std::sync::Arc;
 
 pub struct Parser<'a> {
     vm_runtime: &'a vm::Runtime,
@@ -25,7 +26,7 @@ impl<'a> Parser<'a> {
 
     pub fn parse(&self, path: Path) -> crate::Result<vm::Ast> {
         let tokio = self.tokio_runtime;
-        let std = self.vm_runtime;
+        let std = Arc::new(self.vm_runtime.definitions.clone());
         let file_store = self.file_store;
         let mut builder = transform::Builder::new();
         if self.log_level >= LogLevel::LogTiming {
@@ -33,8 +34,8 @@ impl<'a> Parser<'a> {
         }
         let ast = builder
             .transform(&transform::Main::new(tokio, file_store, path))?
-            .transform(&transform::Link::new(tokio, std))?
-            .transform(&transform::InferTypes::new(tokio, std))?
+            .transform(&transform::Link::new(tokio, std.clone()))?
+            .transform(&transform::InferTypes::new(tokio, std.clone()))?
             .transform(&transform::CheckTypes::new(tokio))?
             .transform(&transform::TreeShake::new())?
             .build();

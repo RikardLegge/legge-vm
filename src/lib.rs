@@ -7,22 +7,72 @@ pub mod vm;
 use std::fmt::{Display, Formatter};
 use std::result;
 
-pub type PathKey = Vec<String>;
+pub type Path = Vec1<String>;
+pub type SubPath<'a> = Vec1Ref<'a, String>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Path(Vec<String>);
+pub struct Vec1Ref<'a, T>(&'a [T]);
 
-impl Path {
-    pub fn new(path: Vec<String>) -> Self {
-        Self(path)
+impl<'a, T> Vec1Ref<'a, T> {
+    pub fn first(&self) -> &T {
+        self.0.first().unwrap()
     }
 
-    pub fn file(&self) -> String {
-        format!("{}.bc", self.0[0])
+    pub fn not_first(&self) -> Option<Self> {
+        if self.0.len() > 1 {
+            Some(Self(&self.0[1..]))
+        } else {
+            None
+        }
     }
 
-    pub fn key(self) -> PathKey {
-        self.0
+    pub fn as_ref(&self) -> &[T] {
+        &self.0
+    }
+}
+
+impl<'a, T> Vec1Ref<'a, T>
+where
+    T: Clone,
+{
+    pub fn to_owned(&self) -> Vec1<T> {
+        Vec1::try_new(self.0.into()).unwrap()
+    }
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct Vec1<T>(Vec<T>);
+
+impl<T> Vec1<T> {
+    pub fn single(head: T) -> Self {
+        Self::try_new(vec![head]).unwrap()
+    }
+
+    pub fn try_new(rest: Vec<T>) -> Option<Self> {
+        if rest.len() > 0 {
+            Some(Self(rest))
+        } else {
+            None
+        }
+    }
+
+    pub fn first(&self) -> &T {
+        &self.0[0]
+    }
+
+    pub fn last(&self) -> &T {
+        &self.0[self.0.len() - 1]
+    }
+
+    pub fn not_first(&self) -> Option<Vec1Ref<T>> {
+        if self.0.len() > 1 {
+            Some(Vec1Ref(&self.0[1..]))
+        } else {
+            None
+        }
+    }
+
+    pub fn as_ref(&self) -> Vec1Ref<T> {
+        Vec1Ref(&self.0[..])
     }
 }
 

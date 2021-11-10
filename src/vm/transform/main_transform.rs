@@ -113,9 +113,13 @@ where
                                 let tokens =
                                     token::from_chars(code.chars(), size, |import: Vec<String>| {
                                         if let [module, rest @ .., _] = &import[..] {
-                                            if module == "local" && rest.len() >= 1 {
-                                                let path = Path::new(rest.into());
-                                                tx.send(ToAstTaskState::New(path, false)).unwrap();
+                                            if module == "local" {
+                                                match Path::try_new(rest.into()) {
+                                                    Some(path) => tx
+                                                        .send(ToAstTaskState::New(path, false))
+                                                        .unwrap(),
+                                                    None => (),
+                                                }
                                             }
                                         }
                                     });
@@ -130,7 +134,7 @@ where
                                 let last_token = tokens.last().cloned();
                                 let size_hint = tokens.len();
                                 let ast = token_to_ast::ast_from_tokens(
-                                    path.file(),
+                                    path.first().clone(),
                                     ast_id,
                                     tokens.into_iter(),
                                     size_hint,

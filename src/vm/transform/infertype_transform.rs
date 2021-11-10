@@ -5,9 +5,8 @@ use crate::vm::ast::{
     NodeTypeSource, NodeValue, TypesInferred,
 };
 use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody};
-use crate::vm::runtime::FunctionDefinition;
+use crate::vm::runtime::RuntimeDefinitions;
 use crate::vm::transform::{AstTransformation, Result};
-use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::result;
@@ -82,11 +81,14 @@ enum TyperResult {
 
 pub struct InferTypes<'a> {
     tokio_runtime: &'a tokio::runtime::Runtime,
-    vm_runtime: &'a vm::Runtime,
+    vm_runtime: Arc<RuntimeDefinitions>,
 }
 
 impl<'a> InferTypes<'a> {
-    pub fn new(tokio_runtime: &'a tokio::runtime::Runtime, vm_runtime: &'a vm::Runtime) -> Self {
+    pub fn new(
+        tokio_runtime: &'a tokio::runtime::Runtime,
+        vm_runtime: Arc<RuntimeDefinitions>,
+    ) -> Self {
         Self {
             tokio_runtime,
             vm_runtime,
@@ -110,7 +112,7 @@ where
             let asts = Arc::new(ast);
             for id in (&asts).ids() {
                 let asts = asts.clone();
-                let definitions = self.vm_runtime.definitions.clone();
+                let definitions = self.vm_runtime.clone();
                 n_active += 1;
                 Msg {
                     typer: Typer::new(id, asts, definitions),
@@ -221,7 +223,7 @@ where
     blocked: HashMap<NodeID, Vec<NodeID>>,
     ast_id: AstBranchID,
     asts: Arc<Ast<T>>,
-    runtime: Arc<Vec<FunctionDefinition>>,
+    runtime: Arc<vm::runtime::RuntimeDefinitions>,
 }
 
 impl<T> Debug for Typer<T>
@@ -240,7 +242,7 @@ where
     pub fn new(
         ast_id: AstBranchID,
         asts: Arc<Ast<T>>,
-        runtime: Arc<Vec<FunctionDefinition>>,
+        runtime: Arc<vm::runtime::RuntimeDefinitions>,
     ) -> Self {
         let root = asts.read_ast(ast_id).root();
         let queue = VecDeque::from(vec![root]);
@@ -328,8 +330,9 @@ where
                 }
             }
             NodeValue::RuntimeFn(id) => {
-                let def: &Vec<FunctionDefinition> = &self.runtime.borrow();
-                def[*id].tp.clone()
+                let def = &self.runtime;
+                let path = &def.paths[*id];
+                def.namespace.get_tp(path.as_ref()).unwrap().clone()
             }
         }
     }

@@ -1,4 +1,5 @@
 use crate::vm::ast::{NodeID, PartialNodeValue, PartialType, ProcedureDeclarationNode};
+use crate::Path;
 use std::fmt;
 use std::fmt::Formatter;
 
@@ -54,8 +55,7 @@ pub enum NodeBody<T> {
     Expression(NodeID),
     Comment(String),
     Import {
-        module: String,
-        path: Vec<String>,
+        path: Path,
         expr: NodeID,
     },
 
@@ -140,8 +140,7 @@ pub enum UnlinkedNodeBody<T> {
         args: Vec<NodeID>,
     },
     ImportValue {
-        module: String,
-        path: Vec<String>,
+        path: Path,
     },
 }
 

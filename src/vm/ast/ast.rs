@@ -52,7 +52,7 @@ where
     T: Debug,
 {
     asts: Vec<RwLock<AstBranch<T>>>,
-    names: HashMap<PathKey, AstBranchID>,
+    names: HashMap<Path, AstBranchID>,
     pub debug_info: AstCollectionDebugInfo,
 }
 
@@ -176,7 +176,7 @@ where
 
     pub fn add(&mut self, path: Path, ast: AstBranch<T>) {
         let id = ast.id();
-        self.names.insert(path.key(), id);
+        self.names.insert(path, id);
         *self.asts[id.index()].write().unwrap() = ast;
     }
 
@@ -223,7 +223,7 @@ where
         self.iter().map(|ast| ast.id())
     }
 
-    pub fn paths(&self) -> impl Iterator<Item = (&PathKey, RwLockReadGuard<AstBranch<T>>)> + '_ {
+    pub fn paths(&self) -> impl Iterator<Item = (&Path, RwLockReadGuard<AstBranch<T>>)> + '_ {
         self.names
             .iter()
             .map(|(path, id)| (path, self.asts[id.index()].read().unwrap()))
@@ -668,7 +668,7 @@ impl PartialType {
     }
 }
 
-use crate::{Path, PathKey};
+use crate::Path;
 
 pub struct AstBranch<T = Valid>
 where
@@ -921,7 +921,7 @@ where
                     | ConstDeclaration { ident, .. }
                     | StaticDeclaration { ident, .. }
                     | TypeDeclaration { ident, .. } => ident,
-                    Import { module, path, .. } => path.last().unwrap_or(module),
+                    Import { path, .. } => path.last(),
                     _ => continue,
                 };
                 if ident == target_ident {

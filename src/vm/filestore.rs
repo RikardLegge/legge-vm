@@ -19,7 +19,8 @@ impl SystemFileStore {
 
 impl FileStore for SystemFileStore {
     fn file(&self, path: &Path) -> File {
-        path.clone().into()
+        let content = FileReaderContent::Async(path.clone());
+        File { content }
     }
 }
 
@@ -41,14 +42,14 @@ impl VirtualFileStore {
 
 impl FileStore for VirtualFileStore {
     fn file(&self, path: &Path) -> File {
-        match self.files.get(path) {
-            Some(content) => content.clone().into(),
-            None => Err {
+        let content = match self.files.get(path) {
+            Some(content) => FileReaderContent::Static(content.clone()),
+            None => FileReaderContent::Err(Err {
                 retryable: false,
                 details: format!("File not found: {:?}", path),
-            }
-            .into(),
-        }
+            }),
+        };
+        File { content }
     }
 }
 
@@ -80,58 +81,36 @@ pub struct File {
     content: FileReaderContent,
 }
 
-impl Into<File> for String {
-    fn into(self) -> File {
-        File {
-            content: FileReaderContent::Static(self),
-        }
-    }
-}
-
-impl Into<File> for Err {
-    fn into(self) -> File {
-        File {
-            content: FileReaderContent::Err(self),
-        }
-    }
-}
-
-impl Into<File> for Path {
-    fn into(self) -> File {
-        File {
-            content: FileReaderContent::Async(self),
-        }
-    }
-}
-
 impl File {
     pub async fn read(&self) -> Result {
         match &self.content {
-            FileReaderContent::Async(path) => match tokio::fs::File::open(path.file()).await {
-                Ok(mut file) => {
-                    let mut code = String::new();
-                    file.read_to_string(&mut code)
-                        .await
-                        .expect("something went wrong reading file");
-                    Ok(code)
+            FileReaderContent::Async(path) => {
+                match tokio::fs::File::open(format!("{}.bc", path.first())).await {
+                    Ok(mut file) => {
+                        let mut code = String::new();
+                        file.read_to_string(&mut code)
+                            .await
+                            .expect("something went wrong reading file");
+                        Ok(code)
+                    }
+                    Err(err) => match err.kind() {
+                        ErrorKind::NotFound
+                        | ErrorKind::PermissionDenied
+                        | ErrorKind::BrokenPipe
+                        | ErrorKind::TimedOut
+                        | ErrorKind::Interrupted
+                        | ErrorKind::Unsupported
+                        | ErrorKind::Other => Err(Err {
+                            retryable: false,
+                            details: err.to_string(),
+                        }),
+                        _ => Err(Err {
+                            retryable: true,
+                            details: String::new(),
+                        }),
+                    },
                 }
-                Err(err) => match err.kind() {
-                    ErrorKind::NotFound
-                    | ErrorKind::PermissionDenied
-                    | ErrorKind::BrokenPipe
-                    | ErrorKind::TimedOut
-                    | ErrorKind::Interrupted
-                    | ErrorKind::Unsupported
-                    | ErrorKind::Other => Err(Err {
-                        retryable: false,
-                        details: err.to_string(),
-                    }),
-                    _ => Err(Err {
-                        retryable: true,
-                        details: String::new(),
-                    }),
-                },
-            },
+            }
             FileReaderContent::Static(content) => Ok(content.clone()),
             FileReaderContent::Err(err) => Err(err.clone()),
         }

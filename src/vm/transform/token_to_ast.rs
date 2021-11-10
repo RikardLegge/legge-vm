@@ -9,6 +9,7 @@ use crate::vm::ast::{NBProcedureDeclaration, NodeBody, UnlinkedNodeBody};
 use crate::vm::token::KeyName;
 use crate::vm::token::TokenType::EndStatement;
 use crate::vm::token::{Token, TokenType};
+use crate::Path;
 use colored::Colorize;
 use std::fmt::Debug;
 use std::iter::Peekable;
@@ -561,16 +562,15 @@ where
         match self.next_token(&node).expect(&default_module)? {
             TokenType::Name(module) => {
                 let module = module.clone();
-                let path = self.find_traverse_path(&node)?;
+                let path = vec![module];
+                let path = self.find_traverse_path(&node, path)?;
+                let path = Path::try_new(path).unwrap();
                 let body_node = self.node(node.id);
                 let expr = self.add_node(
                     body_node,
-                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue {
-                        module: module.clone(),
-                        path: path.clone(),
-                    }),
+                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue { path: path.clone() }),
                 );
-                Ok(self.add_node(node, NodeBody::Import { path, module, expr }))
+                Ok(self.add_node(node, NodeBody::Import { path, expr }))
             }
             _ => unimplemented!(),
         }
@@ -1048,12 +1048,15 @@ where
         }
     }
 
-    fn find_traverse_path(&mut self, node: &PendingNode) -> ast::Result<Vec<String>> {
+    fn find_traverse_path(
+        &mut self,
+        node: &PendingNode,
+        mut path: Vec<String>,
+    ) -> ast::Result<Vec<String>> {
         use crate::vm::token::TokenType::{Dot, Name};
         // TODO: this can be constant
         let default_name = Name("part".to_string());
 
-        let mut path = Vec::new();
         loop {
             if self.peek_token().is(&Dot)? {
                 self.eat_token(node);
@@ -1109,7 +1112,7 @@ where
                 Ok(node)
             }
             Dot => {
-                let path = Some(self.find_traverse_path(&node)?);
+                let path = Some(self.find_traverse_path(&node, vec![])?);
                 match self.peek_token().expect(&Assignment)? {
                     Assignment => {
                         self.eat_token(&node);
@@ -1167,7 +1170,7 @@ where
                 Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::VariableValue { ident, path }))
             }
             Dot => {
-                let path = self.find_traverse_path(&node)?;
+                let path = self.find_traverse_path(&node, vec![])?;
                 self.do_expression_symbol(node, ident, Some(path))
             }
             token => {

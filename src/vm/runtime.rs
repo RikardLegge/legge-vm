@@ -1,94 +1,171 @@
-use std::sync::Arc;
+use std::collections::HashMap;
 
 use crate::vm::ast;
-use crate::{vm, Err};
+use crate::{vm, Err, Path, SubPath};
 
 pub type FunctionReturn = crate::Result<Option<vm::Value>>;
 pub type Function = &'static dyn Fn(&mut vm::InterpreterState, Vec<vm::Value>) -> FunctionReturn;
 
+#[derive(Clone)]
+pub struct RuntimeDefinitions {
+    pub namespace: Namespace,
+    pub paths: Vec<Path>,
+}
+
 pub struct Runtime {
-    pub definitions: Arc<Vec<FunctionDefinition>>,
+    pub definitions: RuntimeDefinitions,
     pub functions: Vec<Function>,
 }
 
-#[derive(Debug)]
+impl Runtime {
+    pub fn add(&mut self, path: Path, mut def: FunctionDefinition, f: Function) {
+        let id = self.functions.len();
+        def.id = id;
+
+        let el = NamespaceElement::Value(def);
+        self.definitions.namespace.set(path.as_ref(), el);
+        self.definitions.paths.push(path);
+        self.functions.push(f);
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct FunctionDefinition {
-    pub module: String,
-    pub name: String,
+    pub side_effect: bool,
     pub arguments: Vec<ast::NodeType>,
     pub returns: ast::NodeType,
     pub tp: ast::NodeType,
+    pub id: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum NamespaceElement {
+    Namespace(Namespace),
+    Value(FunctionDefinition),
+}
+
+#[derive(Debug, Clone)]
+pub struct Namespace {
+    pub items: HashMap<String, NamespaceElement>,
+}
+
+impl Namespace {
+    pub fn new() -> Self {
+        Self {
+            items: HashMap::new(),
+        }
+    }
+
+    pub fn set(&mut self, path: SubPath, el: NamespaceElement) {
+        let child = self.items.get_mut(path.first());
+        match child {
+            Some(NamespaceElement::Namespace(ref mut n)) => match path.not_first() {
+                Some(rest) => n.set(rest, el),
+                None => unimplemented!(),
+            },
+            Some(NamespaceElement::Value(_)) => unimplemented!(),
+            None => {
+                let key = path.first().to_string();
+                match path.not_first() {
+                    Some(rest) => {
+                        let mut namespace = Namespace::new();
+                        namespace.set(rest, el);
+                        self.items
+                            .insert(key, NamespaceElement::Namespace(namespace));
+                    }
+                    None => {
+                        self.items.insert(key, el);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn get_tp(&self, path: SubPath) -> Option<&ast::NodeType> {
+        use NamespaceElement::*;
+        match self.get(path) {
+            Some(Value(def)) => Some(&def.tp),
+            _ => None,
+        }
+    }
+
+    pub fn get(&self, path: SubPath) -> Option<&NamespaceElement> {
+        use NamespaceElement::*;
+        let child = self.items.get(path.first());
+        match child {
+            Some(Namespace(n)) => match path.not_first() {
+                Some(rest) => n.get(rest),
+                None => child,
+            },
+            Some(Value(_)) => match path.not_first() {
+                None => child,
+                Some(_) => None,
+            },
+            None => None,
+        }
+    }
+}
+
+macro_rules! func {
+    ($rt:ident ; $effect:expr; $f:ident as [ $($name:expr),* ] => ( $($args:expr),* ) => $ret:path) => {
+        $rt.add(Path::try_new(vec![
+            $($name.to_string(),)*
+        ]).unwrap(), FunctionDefinition {
+            side_effect: $effect,
+            arguments: vec![ $($args),* ],
+            returns: $ret,
+            id: 0,
+            tp: ast::NodeType::Fn {
+                args: vec![$($args),*],
+                returns: Box::new($ret),
+            }
+        }, &$f);
+    };
+    ( $rt:ident effect $f:ident as [ $($name:expr),* ] => ( $($args:expr),* ) => $ret:path) => {
+        func!($rt ;true; $f as [ $($name),* ] => ( $($args),* ) => $ret)
+    };
+
+    ( $rt:ident $f:ident as [ $($name:expr),* ] => ( $($args:expr),* ) => $ret:path) => {
+        func!($rt ;false; $f as [ $($name),* ] => ( $($args),* ) => $ret)
+    };
+
+    ( $rt:ident effect $f:ident as [ $($name:expr),* ] => ( $($args:expr),* ) ) => {
+        func!($rt effect $f as [ $($name),* ] => ( $($args),* ) => Void)
+    };
+
+    ( $rt:ident $f:ident as [ $($name:expr),* ] => ( $($args:expr),* ) ) => {
+        func!($rt $f as [ $($name),* ] => ( $($args),* ) => Void)
+    };
+}
+
+fn var(args: ast::NodeType) -> ast::NodeType {
+    ast::NodeType::VarArg {
+        args: Box::new(args),
+    }
 }
 
 impl Default for Runtime {
     fn default() -> Self {
         use vm::ast::NodeType::*;
-        let mut f = vec![];
-        let mut d = vec![];
-        ff(&mut f, &mut d, "std", "int", vec![Any], Int, &to_int);
-        ff(&mut f, &mut d, "std", "float", vec![Any], Float, &to_float);
-        ff(
-            &mut f,
-            &mut d,
-            "std",
-            "print",
-            vec![VarArg {
-                args: Box::new(Any),
-            }],
-            Void,
-            &print,
-        );
-        ff(
-            &mut f,
-            &mut d,
-            r"std",
-            "assert",
-            vec![Any, Any],
-            Void,
-            &assert,
-        );
-        ff(&mut f, &mut d, "std", "exit", vec![Any], Void, &exit);
-        ff(
-            &mut f,
-            &mut d,
-            "std",
-            "touch",
-            vec![VarArg {
-                args: Box::new(Any),
-            }],
-            Void,
-            &touch,
-        );
-        ff(&mut f, &mut d, "math", "sin", vec![Int], Int, &sin);
-        Runtime {
-            functions: f,
-            definitions: Arc::new(d),
-        }
-    }
-}
+        let mut def = Runtime {
+            definitions: RuntimeDefinitions {
+                namespace: Namespace::new(),
+                paths: vec![],
+            },
+            functions: vec![],
+        };
 
-fn ff(
-    functions: &mut Vec<Function>,
-    definitions: &mut Vec<FunctionDefinition>,
-    namespace: &str,
-    name: &str,
-    arguments: Vec<ast::NodeType>,
-    returns: ast::NodeType,
-    function: Function,
-) {
-    let tp = ast::NodeType::Fn {
-        args: arguments.clone(),
-        returns: Box::new(returns.clone()),
-    };
-    let definition = FunctionDefinition {
-        module: namespace.into(),
-        name: name.into(),
-        arguments,
-        returns,
-        tp,
-    };
-    definitions.push(definition);
-    functions.push(function);
+        func!(def to_int as ["std", "int"] => (Any) => Int);
+        func!(def to_float as ["std", "float"] => (Any) => Float);
+        func!(def effect print as ["std", "print"] => (Any, var(Any)) => Float);
+        func!(def effect assert as ["std", "assert"] => (Any, Any));
+        func!(def effect exit as ["std", "exit"] => (Any));
+        func!(def effect touch as ["std", "touch"] => (Any));
+
+        func!(def sin as ["math", "sin"] => (Int) => Int);
+
+        def
+    }
 }
 
 fn to_int(_: &mut vm::InterpreterState, args: Vec<vm::Value>) -> FunctionReturn {

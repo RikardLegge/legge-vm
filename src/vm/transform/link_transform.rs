@@ -4,10 +4,9 @@ use crate::vm::ast::{Ast, Linked, NodeReferenceLocation, PartialNodeValue, Parti
 use crate::vm::ast::{AstBranch, IsValid, NodeID};
 use crate::vm::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue};
 use crate::vm::ast::{NBCall, NodeBody};
-use crate::vm::runtime::FunctionDefinition;
+use crate::vm::runtime::{NamespaceElement, RuntimeDefinitions};
 use crate::vm::{ast, transform};
-use crate::{vm, PathKey};
-use std::borrow::Borrow;
+use crate::Path;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Debug;
 use std::mem;
@@ -22,11 +21,14 @@ struct PendingRef {
 
 pub struct Link<'a> {
     tokio_runtime: &'a tokio::runtime::Runtime,
-    vm_runtime: &'a vm::Runtime,
+    vm_runtime: Arc<RuntimeDefinitions>,
 }
 
 impl<'a> Link<'a> {
-    pub fn new(tokio_runtime: &'a tokio::runtime::Runtime, vm_runtime: &'a vm::Runtime) -> Self {
+    pub fn new(
+        tokio_runtime: &'a tokio::runtime::Runtime,
+        vm_runtime: Arc<RuntimeDefinitions>,
+    ) -> Self {
         Self {
             tokio_runtime,
             vm_runtime,
@@ -52,13 +54,13 @@ where
 
             let asts = Arc::new(RwLock::new(ast));
             for id in asts.read().unwrap().ids() {
-                let vm_runtime = self.vm_runtime.definitions.clone();
+                let vm_runtime = self.vm_runtime.clone();
                 let tx = tx.clone();
                 let asts = asts.clone();
                 let exports = exports.clone();
                 tokio::task::spawn_blocking(move || {
                     let asts = asts.read().unwrap();
-                    let vm_runtime = vm_runtime.borrow();
+                    let vm_runtime = &vm_runtime;
                     let mut ast = asts.write_ast(id);
                     let root_id = ast.root();
                     let linker = Linker::new(&mut ast, vm_runtime, &exports);
@@ -102,8 +104,8 @@ where
     T: IsValid,
 {
     ast: &'a mut AstBranch<T>,
-    runtime: &'b Vec<FunctionDefinition>,
-    exports: &'b HashMap<PathKey, HashMap<String, (NodeID, bool)>>,
+    runtime: &'b RuntimeDefinitions,
+    exports: &'b HashMap<Path, HashMap<String, (NodeID, bool)>>,
 }
 
 impl<'a, 'b, T> Linker<'a, 'b, T>
@@ -112,8 +114,8 @@ where
 {
     fn new(
         ast: &'a mut AstBranch<T>,
-        runtime: &'b Vec<FunctionDefinition>,
-        exports: &'b HashMap<PathKey, HashMap<String, (NodeID, bool)>>,
+        runtime: &'b RuntimeDefinitions,
+        exports: &'b HashMap<Path, HashMap<String, (NodeID, bool)>>,
     ) -> Self {
         Self {
             ast,
@@ -389,23 +391,26 @@ where
                             .add_ref((func, GoTo), (node_id, ExecuteValue), location);
                         NodeBody::Call(NBCall { func, args })
                     }
-                    ImportValue { path, module } => {
+                    ImportValue { path } => {
                         let mut body = None;
-                        if let [ident] = &path[..] {
-                            for (i, func) in self.runtime.iter().enumerate() {
-                                if func.name == *ident && func.module == module {
-                                    body = Some(NodeBody::ConstValue {
-                                        tp: None,
-                                        value: NodeValue::RuntimeFn(i).into(),
-                                    });
-                                    break;
-                                }
+                        match self.runtime.namespace.get(path.as_ref()) {
+                            Some(NamespaceElement::Namespace(_)) => unimplemented!(),
+                            Some(NamespaceElement::Value(val)) => {
+                                body = Some(NodeBody::ConstValue {
+                                    tp: None,
+                                    value: NodeValue::RuntimeFn(val.id).into(),
+                                });
                             }
+                            None => {}
                         }
                         if let None = body {
-                            if &module == "local" {
-                                if let Some((ident, path)) = path.split_last() {
-                                    if let Some(export) = self.exports.get(path) {
+                            if path.first() == "local" {
+                                if let Some(rest) = path.not_first() {
+                                    let (ident, path) = match rest.as_ref() {
+                                        [ident, path] => (ident, Path::single(path.to_string())),
+                                        _ => unimplemented!(),
+                                    };
+                                    if let Some(export) = self.exports.get(&path) {
                                         if let Some((reference_id, valid)) =
                                             export.get(ident.as_str())
                                         {
