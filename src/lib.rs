@@ -13,6 +13,14 @@ pub type SubPath<'a> = Vec1Ref<'a, String>;
 pub struct Vec1Ref<'a, T>(&'a [T]);
 
 impl<'a, T> Vec1Ref<'a, T> {
+    pub fn try_new(rest: &'a [T]) -> Option<Vec1Ref<'a, T>> {
+        if rest.len() > 0 {
+            Some(Self(rest))
+        } else {
+            None
+        }
+    }
+
     pub fn first(&self) -> &T {
         self.0.first().unwrap()
     }

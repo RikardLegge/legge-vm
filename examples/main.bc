@@ -2,6 +2,8 @@ import std.exit;
 incrementer :: fn() -> Fn() -> int {
     return fn() -> int {return 1;};
 }
+import local.prelude.b;
+
 inc := incrementer();
 val := inc();
-exit(val);
+exit(b);

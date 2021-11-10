@@ -22,7 +22,7 @@ impl Runtime {
         let id = self.functions.len();
         def.id = id;
 
-        let el = NamespaceElement::Value(def);
+        let el = NamespaceElement::BuiltIn(def);
         self.definitions.namespace.set(path.as_ref(), el);
         self.definitions.paths.push(path);
         self.functions.push(f);
@@ -41,7 +41,14 @@ pub struct FunctionDefinition {
 #[derive(Debug, Clone)]
 pub enum NamespaceElement {
     Namespace(Namespace),
-    Value(FunctionDefinition),
+    BuiltIn(FunctionDefinition),
+    Export(AstExport),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct AstExport {
+    pub node_id: ast::NodeID,
+    pub is_static: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -63,7 +70,8 @@ impl Namespace {
                 Some(rest) => n.set(rest, el),
                 None => unimplemented!(),
             },
-            Some(NamespaceElement::Value(_)) => unimplemented!(),
+            Some(NamespaceElement::BuiltIn(_)) => unimplemented!(),
+            Some(NamespaceElement::Export(_)) => unimplemented!(),
             None => {
                 let key = path.first().to_string();
                 match path.not_first() {
@@ -84,7 +92,7 @@ impl Namespace {
     pub fn get_tp(&self, path: SubPath) -> Option<&ast::NodeType> {
         use NamespaceElement::*;
         match self.get(path) {
-            Some(Value(def)) => Some(&def.tp),
+            Some(BuiltIn(def)) => Some(&def.tp),
             _ => None,
         }
     }
@@ -97,7 +105,7 @@ impl Namespace {
                 Some(rest) => n.get(rest),
                 None => child,
             },
-            Some(Value(_)) => match path.not_first() {
+            Some(BuiltIn(_) | Export(_)) => match path.not_first() {
                 None => child,
                 Some(_) => None,
             },

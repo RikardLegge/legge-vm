@@ -668,7 +668,8 @@ impl PartialType {
     }
 }
 
-use crate::Path;
+use crate::vm::runtime::{AstExport, Namespace, NamespaceElement};
+use crate::{Path, SubPath};
 
 pub struct AstBranch<T = Valid>
 where
@@ -785,26 +786,37 @@ impl<T> AstBranch<T>
 where
     T: IsValid,
 {
-    pub fn exports(&self) -> HashMap<String, (NodeID, bool)> {
+    pub fn exports(&self) -> Namespace {
+        let mut namespace = Namespace::new();
         let root_id = self.root();
         let root = self.get_node(root_id);
-        root.body
-            .children()
-            .filter_map(|id| {
-                let child = self.get_node(*id);
-                match &child.body {
-                    NodeBody::StaticDeclaration { ident, .. }
-                    | NodeBody::TypeDeclaration { ident, .. } => {
-                        Some((ident.to_string(), (*id, true)))
-                    }
-                    NodeBody::ConstDeclaration { ident, .. }
-                    | NodeBody::VariableDeclaration { ident, .. } => {
-                        Some((ident.to_string(), (*id, false)))
-                    }
-                    _ => None,
+        for id in root.body.children() {
+            let child = self.get_node(*id);
+            match &child.body {
+                NodeBody::StaticDeclaration { ident, .. }
+                | NodeBody::TypeDeclaration { ident, .. } => {
+                    let name = &[ident.to_string()];
+                    let path = SubPath::try_new(name).unwrap();
+                    let export = AstExport {
+                        node_id: *id,
+                        is_static: true,
+                    };
+                    namespace.set(path, NamespaceElement::Export(export));
                 }
-            })
-            .collect()
+                NodeBody::ConstDeclaration { ident, .. }
+                | NodeBody::VariableDeclaration { ident, .. } => {
+                    let name = &[ident.to_string()];
+                    let path = SubPath::try_new(name).unwrap();
+                    let export = AstExport {
+                        node_id: *id,
+                        is_static: false,
+                    };
+                    namespace.set(path, NamespaceElement::Export(export));
+                }
+                _ => (),
+            }
+        }
+        namespace
     }
 
     pub fn new(file_name: String, ast_id: AstBranchID, size_hint: usize) -> Self {

@@ -4,10 +4,9 @@ use crate::vm::ast::{Ast, Linked, NodeReferenceLocation, PartialNodeValue, Parti
 use crate::vm::ast::{AstBranch, IsValid, NodeID};
 use crate::vm::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue};
 use crate::vm::ast::{NBCall, NodeBody};
-use crate::vm::runtime::{NamespaceElement, RuntimeDefinitions};
+use crate::vm::runtime::{Namespace, NamespaceElement, RuntimeDefinitions};
 use crate::vm::{ast, transform};
-use crate::Path;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::mem;
 use std::sync::{Arc, RwLock};
@@ -45,10 +44,10 @@ where
     }
     fn transform(&self, ast: Ast<T>) -> transform::Result<Linked> {
         self.tokio_runtime.block_on(async {
-            let exports = ast
-                .paths()
-                .map(|(path, ast)| (path.clone(), ast.exports()))
-                .collect::<HashMap<_, _>>();
+            let mut exports = Namespace::new();
+            for (path, ast) in ast.paths() {
+                exports.set(path.as_ref(), NamespaceElement::Namespace(ast.exports()));
+            }
             let exports = Arc::new(exports);
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -105,7 +104,7 @@ where
 {
     ast: &'a mut AstBranch<T>,
     runtime: &'b RuntimeDefinitions,
-    exports: &'b HashMap<Path, HashMap<String, (NodeID, bool)>>,
+    exports: &'b Namespace,
 }
 
 impl<'a, 'b, T> Linker<'a, 'b, T>
@@ -115,7 +114,7 @@ where
     fn new(
         ast: &'a mut AstBranch<T>,
         runtime: &'b RuntimeDefinitions,
-        exports: &'b HashMap<Path, HashMap<String, (NodeID, bool)>>,
+        exports: &'b Namespace,
     ) -> Self {
         Self {
             ast,
@@ -395,7 +394,8 @@ where
                         let mut body = None;
                         match self.runtime.namespace.get(path.as_ref()) {
                             Some(NamespaceElement::Namespace(_)) => unimplemented!(),
-                            Some(NamespaceElement::Value(val)) => {
+                            Some(NamespaceElement::Export(_)) => unimplemented!(),
+                            Some(NamespaceElement::BuiltIn(val)) => {
                                 body = Some(NodeBody::ConstValue {
                                     tp: None,
                                     value: NodeValue::RuntimeFn(val.id).into(),
@@ -405,41 +405,36 @@ where
                         }
                         if let None = body {
                             if path.first() == "local" {
-                                if let Some(rest) = path.not_first() {
-                                    let (ident, path) = match rest.as_ref() {
-                                        [ident, path] => (ident, Path::single(path.to_string())),
-                                        _ => unimplemented!(),
-                                    };
-                                    if let Some(export) = self.exports.get(&path) {
-                                        if let Some((reference_id, valid)) =
-                                            export.get(ident.as_str())
-                                        {
-                                            if *valid {
-                                                body = Some(NodeBody::Reference {
-                                                    node_id: *reference_id,
-                                                });
-                                                pending_refs.push(PendingRef {
-                                                    target: (
-                                                        *reference_id,
-                                                        NodeReferenceType::ReadExternalValue,
-                                                    ),
-                                                    referencer: (
-                                                        node_id,
-                                                        NodeReferenceType::WriteExternalValue,
-                                                    ),
-                                                    loc: self.loc_relative_to_root(node_id),
-                                                });
-                                            } else {
-                                                Err(Err::new(
-                                                    "Invalid import: Only allowed to import static declarations like types, constants or functions".to_string(),
-                                                    vec![
-                                                        ErrPart::new("Imported here".to_string(), vec![node_id]),
-                                                        ErrPart::new("This value is not static".to_string(), vec![*reference_id]),
-                                                    ]
-                                                ))?
-                                            }
+                                match self.exports.get(path.not_first().unwrap()) {
+                                    Some(NamespaceElement::Namespace(_)) => unimplemented!(),
+                                    Some(NamespaceElement::BuiltIn(_)) => unimplemented!(),
+                                    Some(NamespaceElement::Export(export)) => {
+                                        if export.is_static {
+                                            body = Some(NodeBody::Reference {
+                                                node_id: export.node_id,
+                                            });
+                                            pending_refs.push(PendingRef {
+                                                target: (
+                                                    export.node_id,
+                                                    NodeReferenceType::ReadExternalValue,
+                                                ),
+                                                referencer: (
+                                                    node_id,
+                                                    NodeReferenceType::WriteExternalValue,
+                                                ),
+                                                loc: self.loc_relative_to_root(node_id),
+                                            });
+                                        } else {
+                                            Err(Err::new(
+                                                "Invalid import: Only allowed to import static declarations like types, constants or functions".to_string(),
+                                                vec![
+                                                    ErrPart::new("Imported here".to_string(), vec![node_id]),
+                                                    ErrPart::new("This value is not static".to_string(), vec![export.node_id]),
+                                                ]
+                                            ))?
                                         }
                                     }
+                                    None => {}
                                 }
                             }
                         }
