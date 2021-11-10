@@ -229,7 +229,11 @@ impl<'a, T> Iterator for NodeBodyIterator<'a, T> {
                 1 => Some(tp),
                 _ => None,
             },
-            VariableDeclaration { expr: None, tp, .. } => match self.index {
+            VariableDeclaration {
+                expr: Option::None,
+                tp,
+                ..
+            } => match self.index {
                 0 => tp.as_ref(),
                 _ => None,
             },
