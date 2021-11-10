@@ -17,10 +17,10 @@ for i in `seq 0 $count`; do
     echo "
     if(true) {
       import std.touch;
-      import local.test$ii.count;
-      import local.test$i1.count;
-      import local.test$i2.count;
-      import local.test$i3.count;
+      import .test$ii.count;
+      import .test$i1.count;
+      import .test$i2.count;
+      import .test$i3.count;
 
       A -> type {
          value: int
