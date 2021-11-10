@@ -559,6 +559,13 @@ where
         // TODO: this can be constant
         let default_module = TokenType::Name("std".to_string());
 
+        let is_relative = if let TokenType::Dot = self.peek_token().any(Some(&default_module))? {
+            self.eat_token(&node);
+            true
+        } else {
+            false
+        };
+
         match self.next_token(&node).expect(&default_module)? {
             TokenType::Name(module) => {
                 let module = module.clone();
@@ -568,7 +575,10 @@ where
                 let body_node = self.node(node.id);
                 let expr = self.add_node(
                     body_node,
-                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue { path: path.clone() }),
+                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue {
+                        is_relative,
+                        path: path.clone(),
+                    }),
                 );
                 Ok(self.add_node(node, NodeBody::Import { path, expr }))
             }

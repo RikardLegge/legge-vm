@@ -1,12 +1,13 @@
 use crate::Path;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::result;
 use tokio::io::{AsyncReadExt, ErrorKind};
 
 pub type Result = result::Result<String, Err>;
 
 pub trait FileStore {
-    fn file(&self, path: &Path) -> File;
+    fn file(&self, root: PathBuf, path: &Path) -> File;
 }
 
 pub struct SystemFileStore {}
@@ -18,8 +19,8 @@ impl SystemFileStore {
 }
 
 impl FileStore for SystemFileStore {
-    fn file(&self, path: &Path) -> File {
-        let content = FileReaderContent::Async(path.clone());
+    fn file(&self, root: PathBuf, path: &Path) -> File {
+        let content = FileReaderContent::Async(root, path.clone());
         File { content }
     }
 }
@@ -41,7 +42,7 @@ impl VirtualFileStore {
 }
 
 impl FileStore for VirtualFileStore {
-    fn file(&self, path: &Path) -> File {
+    fn file(&self, _: PathBuf, path: &Path) -> File {
         let content = match self.files.get(path) {
             Some(content) => FileReaderContent::Static(content.clone()),
             None => FileReaderContent::Err(Err {
@@ -72,7 +73,7 @@ impl Err {
 }
 
 enum FileReaderContent {
-    Async(Path),
+    Async(PathBuf, Path),
     Static(String),
     Err(Err),
 }
@@ -84,14 +85,27 @@ pub struct File {
 impl File {
     pub async fn read(&self) -> Result {
         match &self.content {
-            FileReaderContent::Async(path) => {
-                match tokio::fs::File::open(format!("{}.bc", path.first())).await {
+            FileReaderContent::Async(root, path) => {
+                let mut file_name = root.clone();
+                for part in path.as_ref().as_ref() {
+                    file_name.push(part.clone());
+                }
+                file_name.set_extension("bc");
+
+                match tokio::fs::File::open(&file_name).await {
                     Ok(mut file) => {
                         let mut code = String::new();
-                        file.read_to_string(&mut code)
-                            .await
-                            .expect("something went wrong reading file");
-                        Ok(code)
+                        match file.read_to_string(&mut code).await {
+                            Ok(_) => Ok(code),
+                            Err(err) => Err(Err {
+                                retryable: false,
+                                details: format!(
+                                    "Failed reading file {}: {}",
+                                    file_name.to_str().unwrap(),
+                                    err
+                                ),
+                            }),
+                        }
                     }
                     Err(err) => match err.kind() {
                         ErrorKind::NotFound
@@ -102,7 +116,11 @@ impl File {
                         | ErrorKind::Unsupported
                         | ErrorKind::Other => Err(Err {
                             retryable: false,
-                            details: err.to_string(),
+                            details: format!(
+                                "Failed reading file {}: {}",
+                                file_name.to_str().unwrap(),
+                                err
+                            ),
                         }),
                         _ => Err(Err {
                             retryable: true,

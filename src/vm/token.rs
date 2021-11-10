@@ -7,7 +7,7 @@ use std::str::Chars;
 pub fn from_chars(
     iter: Chars,
     size_prediction: Option<usize>,
-    new_import: impl Fn(Vec<String>),
+    new_import: impl Fn(Vec<String>, bool),
 ) -> Vec<Token> {
     let mut iter = iter.peekable();
     let mut parser = Tokenizer::new(&mut iter, new_import, size_prediction);
@@ -164,7 +164,7 @@ fn format_number_leading_zeros(
 
 pub struct Tokenizer<'a, F>
 where
-    F: Fn(Vec<String>),
+    F: Fn(Vec<String>, bool),
 {
     iter: &'a mut Peekable<Chars<'a>>,
     new_import: F,
@@ -177,7 +177,7 @@ where
 
 impl<'a, F> Tokenizer<'a, F>
 where
-    F: Fn(Vec<String>),
+    F: Fn(Vec<String>, bool),
 {
     fn new<'b>(
         iter: &'b mut Peekable<Chars<'b>>,
@@ -377,13 +377,20 @@ where
     fn parse_import(&mut self) -> TokenType {
         self.end_token(TokenType::KeyName(KeyName::Import));
         let mut path = Vec::new();
+        // If the first token is a dot, it is a local import
+        let mut is_local = None;
         let tp = loop {
             if let Some(ch) = self.peek_ignore_whitespace() {
                 self.start_token();
                 let tp = self.parse_global(ch);
                 match &tp {
-                    TokenType::Name(part) => path.push(part.to_string()),
-                    TokenType::Dot => {}
+                    TokenType::Name(part) => {
+                        path.push(part.to_string());
+                        is_local.get_or_insert(false);
+                    }
+                    TokenType::Dot => {
+                        is_local.get_or_insert(true);
+                    }
                     _ => break tp,
                 }
                 self.end_token(tp);
@@ -392,7 +399,7 @@ where
             }
         };
         if path.len() > 0 {
-            (self.new_import)(path);
+            (self.new_import)(path, is_local.unwrap());
         }
         tp
     }

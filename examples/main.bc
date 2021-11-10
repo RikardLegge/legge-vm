@@ -2,8 +2,9 @@ import std.exit;
 incrementer :: fn() -> Fn() -> int {
     return fn() -> int {return 1;};
 }
-import local.prelude.b;
+
+import .dir.file.PI;
 
 inc := incrementer();
 val := inc();
-exit(b);
+exit(PI);

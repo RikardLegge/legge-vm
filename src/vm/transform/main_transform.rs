@@ -7,16 +7,17 @@ use crate::vm::{ast, transform};
 use crate::Path;
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 enum ToAstTaskState<T>
 where
     T: IsValid,
 {
-    New(Path, bool),
-    ToTokens(Path, String),
+    New(PathBuf, Path, bool),
+    ToTokens(PathBuf, Path, String),
     ToAst(Path, Vec<Token>),
-    Retry(Path, usize),
+    Retry(PathBuf, Path, usize),
     Err(Path, ast::Err, Option<AstBranch<T>>),
     Done(Path, AstBranch<T>),
 }
@@ -54,7 +55,8 @@ where
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let mut processed_paths = HashSet::new();
 
-            let task = ToAstTaskState::New(self.path.clone(), false);
+            let root = std::env::current_dir().unwrap();
+            let task = ToAstTaskState::New(root, self.path.clone(), false);
             tx.send(task).unwrap();
 
             let mut n_started = 0;
@@ -67,7 +69,7 @@ where
                     n_completed += 1;
                 } else {
                     match task {
-                        ToAstTaskState::New(path, is_retry) => {
+                        ToAstTaskState::New(root, path, is_retry) => {
                             if !processed_paths.contains(&path) || is_retry {
                                 processed_paths.insert(path.clone());
                                 if !is_retry {
@@ -76,16 +78,19 @@ where
 
                                 let tx = tx.clone();
                                 open_files += 1;
-                                let file = self.file_store.file(&path);
+                                let file = self.file_store.file(root.clone(), &path);
                                 tokio::task::spawn(async move {
                                     match file.read().await {
                                         Ok(code) => {
-                                            tx.send(ToAstTaskState::ToTokens(path, code)).unwrap();
+                                            tx.send(ToAstTaskState::ToTokens(root, path, code))
+                                                .unwrap();
                                         }
                                         Err(err) => {
                                             if err.retryable() {
-                                                tx.send(ToAstTaskState::Retry(path, open_files))
-                                                    .unwrap();
+                                                tx.send(ToAstTaskState::Retry(
+                                                    root, path, open_files,
+                                                ))
+                                                .unwrap();
                                             } else {
                                                 panic!("{:?}", err);
                                             }
@@ -94,35 +99,42 @@ where
                                 });
                             }
                         }
-                        ToAstTaskState::Retry(path, error_count) => {
+                        ToAstTaskState::Retry(root, path, error_count) => {
                             if open_files < error_count {
-                                tx.send(ToAstTaskState::New(path, true)).unwrap();
+                                tx.send(ToAstTaskState::New(root, path, true)).unwrap();
                             } else {
-                                pending_files.push(path);
+                                pending_files.push((root, path));
                             }
                             open_files -= 1;
                         }
-                        ToAstTaskState::ToTokens(path, code) => {
+                        ToAstTaskState::ToTokens(root, path, code) => {
                             open_files -= 1;
-                            if let Some(path) = pending_files.pop() {
-                                tx.send(ToAstTaskState::New(path, true)).unwrap();
+                            if let Some((root, path)) = pending_files.pop() {
+                                tx.send(ToAstTaskState::New(root, path, true)).unwrap();
                             }
                             let tx = tx.clone();
                             tokio::task::spawn_blocking(move || {
                                 let size = Some(code.len() / 2);
-                                let tokens =
-                                    token::from_chars(code.chars(), size, |import: Vec<String>| {
-                                        if let [module, rest @ .., _] = &import[..] {
-                                            if module == "local" {
-                                                match Path::try_new(rest.into()) {
-                                                    Some(path) => tx
-                                                        .send(ToAstTaskState::New(path, false))
-                                                        .unwrap(),
-                                                    None => (),
-                                                }
+                                let tokens = token::from_chars(
+                                    code.chars(),
+                                    size,
+                                    |mut import, is_local| {
+                                        if is_local {
+                                            // Remove last path segment from import since it is the variable
+                                            import.pop();
+                                            match Path::try_new(import) {
+                                                Some(path) => tx
+                                                    .send(ToAstTaskState::New(
+                                                        root.clone(),
+                                                        path,
+                                                        false,
+                                                    ))
+                                                    .unwrap(),
+                                                None => (),
                                             }
                                         }
-                                    });
+                                    },
+                                );
                                 tx.send(ToAstTaskState::ToAst(path, tokens)).unwrap();
                             });
                         }

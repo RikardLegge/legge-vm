@@ -390,62 +390,53 @@ where
                             .add_ref((func, GoTo), (node_id, ExecuteValue), location);
                         NodeBody::Call(NBCall { func, args })
                     }
-                    ImportValue { path } => {
-                        let mut body = None;
-                        match self.runtime.namespace.get(path.as_ref()) {
-                            Some(NamespaceElement::Namespace(_)) => unimplemented!(),
-                            Some(NamespaceElement::Export(_)) => unimplemented!(),
-                            Some(NamespaceElement::BuiltIn(val)) => {
-                                body = Some(NodeBody::ConstValue {
+                    ImportValue { is_relative, path } => {
+                        if is_relative {
+                            match self.exports.get(path.as_ref()) {
+                                Some(NamespaceElement::Namespace(_)) => unimplemented!(),
+                                Some(NamespaceElement::BuiltIn(_)) => unimplemented!(),
+                                Some(NamespaceElement::Export(export)) => {
+                                    if export.is_static {
+                                        pending_refs.push(PendingRef {
+                                            target: (
+                                                export.node_id,
+                                                NodeReferenceType::ReadExternalValue,
+                                            ),
+                                            referencer: (
+                                                node_id,
+                                                NodeReferenceType::WriteExternalValue,
+                                            ),
+                                            loc: self.loc_relative_to_root(node_id),
+                                        });
+                                        NodeBody::Reference {
+                                            node_id: export.node_id,
+                                        }
+                                    } else {
+                                        Err(Err::new(
+                                            "Invalid import: Only allowed to import static declarations like types, constants or functions".to_string(),
+                                            vec![
+                                                ErrPart::new("Imported here".to_string(), vec![node_id]),
+                                                ErrPart::new("This value is not static".to_string(), vec![export.node_id]),
+                                            ]
+                                        ))?
+                                    }
+                                }
+                                None => unreachable!("Invalid path {:?}", path),
+                            }
+                        } else {
+                            match self.runtime.namespace.get(path.as_ref()) {
+                                Some(NamespaceElement::Namespace(_)) => unimplemented!(),
+                                Some(NamespaceElement::Export(_)) => unimplemented!(),
+                                Some(NamespaceElement::BuiltIn(val)) => NodeBody::ConstValue {
                                     tp: None,
                                     value: NodeValue::RuntimeFn(val.id).into(),
-                                });
+                                },
+                                None => Err(Err::single(
+                                    "Import not available in the built in runtime",
+                                    "Imported here",
+                                    vec![node_id],
+                                ))?,
                             }
-                            None => {}
-                        }
-                        if let None = body {
-                            if path.first() == "local" {
-                                match self.exports.get(path.not_first().unwrap()) {
-                                    Some(NamespaceElement::Namespace(_)) => unimplemented!(),
-                                    Some(NamespaceElement::BuiltIn(_)) => unimplemented!(),
-                                    Some(NamespaceElement::Export(export)) => {
-                                        if export.is_static {
-                                            body = Some(NodeBody::Reference {
-                                                node_id: export.node_id,
-                                            });
-                                            pending_refs.push(PendingRef {
-                                                target: (
-                                                    export.node_id,
-                                                    NodeReferenceType::ReadExternalValue,
-                                                ),
-                                                referencer: (
-                                                    node_id,
-                                                    NodeReferenceType::WriteExternalValue,
-                                                ),
-                                                loc: self.loc_relative_to_root(node_id),
-                                            });
-                                        } else {
-                                            Err(Err::new(
-                                                "Invalid import: Only allowed to import static declarations like types, constants or functions".to_string(),
-                                                vec![
-                                                    ErrPart::new("Imported here".to_string(), vec![node_id]),
-                                                    ErrPart::new("This value is not static".to_string(), vec![export.node_id]),
-                                                ]
-                                            ))?
-                                        }
-                                    }
-                                    None => {}
-                                }
-                            }
-                        }
-                        if let Some(body) = body {
-                            body
-                        } else {
-                            Err(Err::single(
-                                "Failed to find import",
-                                "import value not found",
-                                vec![node_id],
-                            ))?
                         }
                     }
                     Return { expr, automatic } => {

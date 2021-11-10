@@ -140,6 +140,7 @@ pub enum UnlinkedNodeBody<T> {
         args: Vec<NodeID>,
     },
     ImportValue {
+        is_relative: bool,
         path: Path,
     },
 }
