@@ -158,7 +158,14 @@ impl<'a> BytecodeGenerator<'a> {
             vm::time("De-allocating ast", start, log_level);
 
             if self.log_level >= LogLevel::LogEval {
-                println!("{:?}", code);
+                println!(
+                    "Instructions:\n{}",
+                    code.iter()
+                        .enumerate()
+                        .map(|(i, c)| format!("{:>4}: {:?}", i, c))
+                        .collect::<Vec<String>>()
+                        .join("\n")
+                );
             }
 
             Ok(Bytecode {
@@ -218,14 +225,14 @@ impl Instruction {
 
 impl fmt::Debug for Instruction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{:<50}", format!("{:?}", self.op))?;
+        write!(f, "{:<30}", format!("{:?}", self.op))?;
         write!(f, "    {:?}", self.node_id)
     }
 }
 
 pub type OPOffset = isize;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(PartialEq, Clone)]
 pub enum SFOffset {
     Stack {
         offset: OPOffset,
@@ -236,6 +243,31 @@ pub enum SFOffset {
         depth: usize,
         field: Option<Vec<usize>>,
     },
+}
+
+impl Debug for SFOffset {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            SFOffset::Stack {
+                offset,
+                field: Option::None,
+            } => write!(f, "{}", offset),
+            SFOffset::Stack {
+                offset,
+                field: Option::Some(field),
+            } => write!(f, "{}.{:?}", offset, field),
+            SFOffset::Closure {
+                offset,
+                depth,
+                field: Option::None,
+            } => write!(f, "closure({}) {}", depth, offset),
+            SFOffset::Closure {
+                offset,
+                depth,
+                field: Option::Some(field),
+            } => write!(f, "closure({}) {}.{:?}", depth, offset, field),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

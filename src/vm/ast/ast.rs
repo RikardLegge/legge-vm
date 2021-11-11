@@ -12,14 +12,23 @@ use std::{fmt, mem};
 
 pub struct DebugSymbols {
     tokens: HashMap<NodeID, Vec<Token>>,
+    files: HashMap<AstBranchID, Path>,
 }
 
 impl DebugSymbols {
-    pub fn get_line(&self, node_id: NodeID) -> Option<usize> {
-        self.tokens
+    pub fn get_file_line(&self, node_id: NodeID) -> String {
+        let file = self.files.get(&node_id.ast());
+        let line = self
+            .tokens
             .get(&node_id)
             .and_then(|n| n.first())
-            .map(|t| t.line)
+            .map(|t| t.line);
+        match (file, line) {
+            (Some(file), Some(line)) => format!("{}.bc:{}", file.as_ref().as_ref().join("/"), line),
+            (Some(file), None) => format!("{}.bc", file.as_ref().as_ref().join("/")),
+            (None, Some(line)) => format!("{}", line),
+            (None, None) => format!("Unknown"),
+        }
     }
 }
 
@@ -63,7 +72,7 @@ where
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "AstCollection {{\n")?;
         for (i, (name, ast)) in self.paths().enumerate() {
-            write!(f, "{:?}:\n", name)?;
+            write!(f, "  {:?}:\n", name)?;
             if ast.nodes.len() < 100 {
                 write!(f, "{:?}", ast)?;
             } else {
@@ -147,7 +156,11 @@ where
                 tokens.insert(node.id(), node_tokens);
             }
         }
-        DebugSymbols { tokens }
+        let files = self
+            .iter()
+            .map(|ast| (ast.ast_id, ast.path.clone()))
+            .collect();
+        DebugSymbols { tokens, files }
     }
 
     pub fn get_node(&self, id: NodeID) -> AstGuard<T> {

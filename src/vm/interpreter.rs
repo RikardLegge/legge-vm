@@ -97,23 +97,19 @@ impl<'a> InterpreterState<'a> {
     pub fn execute(&mut self, cmd: &OPCode, node_id: NodeID) -> Result {
         self.executed_instructions += 1;
         if self.interpreter.log_level >= LogLevel::LogEval {
-            let line = self.symbols.and_then(|s| s.get_line(node_id)).unwrap_or(0);
+            let line = self
+                .symbols
+                .map(|s| s.get_file_line(node_id))
+                .unwrap_or(String::new());
+            let pc = self
+                .pc
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "None".to_string());
+            let stack = &self.stack[self.frame.stack_pointer..];
+            let cmd = format!("{:?}", cmd);
             self.debug_log(
                 LogLevel::LogEval,
-                &format!(
-                    "Line: {:>4} PC: {:>4} Inst: {:<40} SP: {:>4} Stack: {:?}",
-                    line,
-                    format!(
-                        "{}",
-                        match self.pc {
-                            Some(pc) => pc.to_string(),
-                            None => "None".into(),
-                        }
-                    ),
-                    format!("{:?}", cmd),
-                    self.frame.stack_pointer,
-                    self.stack
-                ),
+                &format!("{:>4}: {:<30} Stack: {:?} in {}", pc, cmd, stack, line),
             );
         }
         let result = self.run_command(cmd);
@@ -121,6 +117,9 @@ impl<'a> InterpreterState<'a> {
     }
 
     fn run(&mut self, code: &'a Bytecode) {
+        if self.interpreter.log_level >= LogLevel::LogEval {
+            println!("Executed instructions:");
+        }
         if code.code.len() > 0 {
             self.symbols = code.debug_symbols.as_ref();
             loop {

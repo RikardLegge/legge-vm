@@ -39,6 +39,9 @@ impl<'a> Parser<'a> {
             .transform(&transform::CheckTypes::new(tokio))?
             .transform(&transform::TreeShake::new())?
             .build();
+        if self.log_level >= LogLevel::LogEval {
+            println!("{:?}", ast);
+        }
         Ok(ast)
     }
 }
