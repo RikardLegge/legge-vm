@@ -223,6 +223,12 @@ impl<T> Ast<T>
 where
     T: Debug,
 {
+    pub fn clear(&mut self) {
+        self.asts.clear();
+        self.names.clear();
+        self.debug_info = Default::default();
+    }
+
     pub fn root(&self) -> NodeID {
         self.asts[0].read().unwrap().root()
     }

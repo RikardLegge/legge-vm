@@ -42,15 +42,16 @@ impl<'a> Main<'a> {
     }
 }
 
-impl<'a, T> transform::AstTransformation<T, Valid> for Main<'a>
+impl<'a, T> transform::AstTransformation<T, ast::Valid> for Main<'a>
 where
-    T: IsValid,
+    T: ast::IsEmpty,
 {
     fn name(&self) -> String {
         "Read Files".to_string()
     }
 
     fn transform(&self, mut asts: ast::Ast<T>) -> transform::Result<Valid> {
+        asts.clear();
         self.runtime.block_on(async {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let mut processed_paths = HashSet::new();

@@ -2,10 +2,12 @@ use std::fmt::Debug;
 
 pub trait _IsInvalid {}
 pub trait _IsValid {}
+pub trait _IsEmpty {}
 pub trait _IsLinked {}
 pub trait _IsTypesInferred {}
 pub trait _IsTypesChecked {}
 
+pub trait IsEmpty = _IsValid + _IsEmpty + Debug + 'static;
 pub trait IsInvalid = _IsInvalid + Debug + 'static;
 pub trait IsValid = _IsValid + Debug + 'static;
 pub trait IsLinked = _IsValid + _IsLinked + Debug + 'static;
@@ -16,6 +18,11 @@ pub trait IsTypesChecked =
 #[derive(Debug, Copy, Clone)]
 pub struct Invalid {}
 impl _IsInvalid for Invalid {}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Empty {}
+impl _IsValid for Empty {}
+impl _IsEmpty for Empty {}
 
 #[derive(Debug, Copy, Clone)]
 pub struct Valid {}

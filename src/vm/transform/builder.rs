@@ -10,7 +10,7 @@ where
     after_each_fn: &'static dyn Fn(String, time::Duration),
 }
 
-impl Builder<ast::Valid> {
+impl Builder<ast::Empty> {
     pub fn new() -> Self {
         Self {
             asts: ast::Ast::new(),

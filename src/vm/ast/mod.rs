@@ -12,7 +12,7 @@ pub use ast::{
 };
 pub use error::{Err, ErrPart};
 pub use nodebody::*;
-pub use state::{Invalid, Linked, TypesChecked, TypesInferred, Valid};
-pub use state::{IsInvalid, IsLinked, IsTypesChecked, IsTypesInferred, IsValid};
+pub use state::{Empty, Invalid, Linked, TypesChecked, TypesInferred, Valid};
+pub use state::{IsEmpty, IsInvalid, IsLinked, IsTypesChecked, IsTypesInferred, IsValid};
 
 pub type Result<N = NodeID> = result::Result<N, Err>;
