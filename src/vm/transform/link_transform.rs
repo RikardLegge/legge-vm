@@ -392,7 +392,14 @@ where
                     }
                     ImportValue { is_relative, path } => {
                         if is_relative {
-                            match self.exports.get(path.as_ref()) {
+                            let parent = match self.ast.path.not_last() {
+                                Some(parent_path) => match self.exports.get(parent_path) {
+                                    Some(NamespaceElement::Namespace(n)) => n,
+                                    _ => unimplemented!(),
+                                },
+                                None => self.exports,
+                            };
+                            match parent.get(path.as_ref()) {
                                 Some(NamespaceElement::Namespace(_)) => unimplemented!(),
                                 Some(NamespaceElement::BuiltIn(_)) => unimplemented!(),
                                 Some(NamespaceElement::Export(export)) => {
@@ -427,10 +434,7 @@ where
                             match self.runtime.namespace.get(path.as_ref()) {
                                 Some(NamespaceElement::Namespace(_)) => unimplemented!(),
                                 Some(NamespaceElement::Export(_)) => unimplemented!(),
-                                Some(NamespaceElement::BuiltIn(val)) => NodeBody::ConstValue {
-                                    tp: None,
-                                    value: NodeValue::RuntimeFn(val.id).into(),
-                                },
+                                Some(NamespaceElement::BuiltIn(built_in)) => built_in.body(),
                                 None => Err(Err::single(
                                     "Import not available in the built in runtime",
                                     "Imported here",

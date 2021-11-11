@@ -130,8 +130,11 @@ where
 
     pub fn reserve(&mut self) -> AstBranchID {
         let id = AstBranchID::new(self.asts.len());
-        self.asts
-            .push(RwLock::new(AstBranch::new("...".to_string(), id, 0)));
+        self.asts.push(RwLock::new(AstBranch::new(
+            Path::single("RESERVED".to_string()),
+            id,
+            0,
+        )));
         id
     }
 
@@ -675,7 +678,7 @@ pub struct AstBranch<T = Valid>
 where
     T: Debug,
 {
-    pub file_name: String,
+    pub path: Path,
     pub line_count: usize,
     ast_id: AstBranchID,
     nodes: Vec<Node<T>>,
@@ -819,9 +822,9 @@ where
         namespace
     }
 
-    pub fn new(file_name: String, ast_id: AstBranchID, size_hint: usize) -> Self {
+    pub fn new(path: Path, ast_id: AstBranchID, size_hint: usize) -> Self {
         Self {
-            file_name,
+            path,
             ast_id,
             line_count: 0,
             root: NodeID::zero(ast_id),

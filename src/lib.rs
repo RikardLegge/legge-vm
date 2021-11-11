@@ -79,8 +79,21 @@ impl<T> Vec1<T> {
         }
     }
 
+    pub fn not_last(&self) -> Option<Vec1Ref<T>> {
+        if self.0.len() > 1 {
+            let last = self.0.len() - 1;
+            Some(Vec1Ref(&self.0[..last]))
+        } else {
+            None
+        }
+    }
+
     pub fn as_ref(&self) -> Vec1Ref<T> {
         Vec1Ref(&self.0[..])
+    }
+
+    pub fn into_vec(self) -> Vec<T> {
+        self.0
     }
 }
 

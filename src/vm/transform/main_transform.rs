@@ -122,7 +122,11 @@ where
                                         if is_local {
                                             // Remove last path segment from import since it is the variable
                                             import.pop();
-                                            match Path::try_new(import) {
+                                            // Remove last path segment from parent path since it is the file name
+                                            let mut abs_import = path.clone().into_vec();
+                                            abs_import.pop();
+                                            abs_import.append(&mut import);
+                                            match Path::try_new(abs_import) {
                                                 Some(path) => tx
                                                     .send(ToAstTaskState::New(
                                                         root.clone(),
@@ -146,7 +150,7 @@ where
                                 let last_token = tokens.last().cloned();
                                 let size_hint = tokens.len();
                                 let ast = token_to_ast::ast_from_tokens(
-                                    path.first().clone(),
+                                    path.clone(),
                                     ast_id,
                                     tokens.into_iter(),
                                     size_hint,

@@ -124,16 +124,16 @@ impl Err {
         }
 
         let mut curr_ast = token_parts[0].1.nodes[0].ast();
-        let file_name = &asts.read_ast(curr_ast).file_name;
+        let file_name = &asts.read_ast(curr_ast).path.as_ref().as_ref().join("/");
         builder.push(format!("\n"));
-        builder.push(format!(" {} \n", file_name));
+        builder.push(format!(" {}.bc \n", file_name));
         builder.push(format!("{}\n", "‾".repeat(file_name.len() + 2)));
 
         for (tokens, part) in token_parts {
             let i_ast = part.nodes[0].ast();
             if curr_ast != i_ast {
                 curr_ast = i_ast;
-                let file_name = &asts.read_ast(curr_ast).file_name;
+                let file_name = &asts.read_ast(curr_ast).path.as_ref().as_ref().join("/");
                 builder.push(format!(" {} \n", file_name));
                 builder.push(format!("{}\n", "‾".repeat(file_name.len() + 2)));
             }

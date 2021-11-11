@@ -18,14 +18,19 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub fn add(&mut self, path: Path, mut def: FunctionDefinition, f: Function) {
+    pub fn add_fn(&mut self, path: Path, mut def: FunctionDefinition, f: Function) {
         let id = self.functions.len();
         def.id = id;
 
-        let el = NamespaceElement::BuiltIn(def);
+        let el = NamespaceElement::BuiltIn(BuiltInDefinition::Fn(def));
         self.definitions.namespace.set(path.as_ref(), el);
         self.definitions.paths.push(path);
         self.functions.push(f);
+    }
+
+    pub fn add_const(&mut self, path: Path, def: ConstDefinition) {
+        let el = NamespaceElement::BuiltIn(BuiltInDefinition::Const(def));
+        self.definitions.namespace.set(path.as_ref(), el);
     }
 }
 
@@ -39,9 +44,40 @@ pub struct FunctionDefinition {
 }
 
 #[derive(Debug, Clone)]
+pub struct ConstDefinition {
+    pub tp: ast::NodeType,
+    pub val: ast::NodeValue<()>,
+}
+
+#[derive(Debug, Clone)]
+pub enum BuiltInDefinition {
+    Fn(FunctionDefinition),
+    Const(ConstDefinition),
+}
+
+impl BuiltInDefinition {
+    pub fn body<T>(&self) -> ast::NodeBody<T> {
+        match self {
+            BuiltInDefinition::Fn(def) => ast::NodeBody::ConstValue {
+                tp: None,
+                value: ast::NodeValue::RuntimeFn(def.id).into(),
+            },
+            BuiltInDefinition::Const(_) => unimplemented!(),
+        }
+    }
+
+    pub fn tp(&self) -> &ast::NodeType {
+        match self {
+            BuiltInDefinition::Fn(def) => &def.tp,
+            BuiltInDefinition::Const(_) => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum NamespaceElement {
     Namespace(Namespace),
-    BuiltIn(FunctionDefinition),
+    BuiltIn(BuiltInDefinition),
     Export(AstExport),
 }
 
@@ -92,7 +128,7 @@ impl Namespace {
     pub fn get_tp(&self, path: SubPath) -> Option<&ast::NodeType> {
         use NamespaceElement::*;
         match self.get(path) {
-            Some(BuiltIn(def)) => Some(&def.tp),
+            Some(BuiltIn(def)) => Some(def.tp()),
             _ => None,
         }
     }
@@ -116,7 +152,7 @@ impl Namespace {
 
 macro_rules! func {
     ($rt:ident ; $effect:expr; $f:ident as [ $($name:expr),* ] => ( $($args:expr),* ) => $ret:path) => {
-        $rt.add(Path::try_new(vec![
+        $rt.add_fn(Path::try_new(vec![
             $($name.to_string(),)*
         ]).unwrap(), FunctionDefinition {
             side_effect: $effect,

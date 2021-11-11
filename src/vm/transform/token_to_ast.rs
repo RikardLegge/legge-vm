@@ -16,7 +16,7 @@ use std::iter::Peekable;
 use std::result;
 
 pub fn ast_from_tokens<I, T>(
-    file_name: String,
+    path: Path,
     ast_id: AstBranchID,
     iter: I,
     size_hint: usize,
@@ -25,7 +25,7 @@ where
     I: Iterator<Item = Token>,
     T: IsValid,
 {
-    let mut parser = Parser::new(file_name, ast_id, iter, size_hint);
+    let mut parser = Parser::new(path, ast_id, iter, size_hint);
     match parser.parse() {
         Ok(()) => Ok(parser.ast),
         Err(err) => Err((parser.ast, err)),
@@ -204,8 +204,8 @@ where
     I: Iterator<Item = Token>,
     T: IsValid,
 {
-    fn new(file_name: String, ast_id: AstBranchID, iter: I, size_hint: usize) -> Self {
-        let ast = AstBranch::new(file_name, ast_id, size_hint);
+    fn new(path: Path, ast_id: AstBranchID, iter: I, size_hint: usize) -> Self {
+        let ast = AstBranch::new(path, ast_id, size_hint);
 
         Self {
             ast,
