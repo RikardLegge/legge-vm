@@ -1073,7 +1073,7 @@ where
         match &*expr.body {
             Op { op, lhs, rhs } => self.ev_operation(ast, expr_id, *op, *lhs, *rhs),
             PrefixOp { op, rhs } => self.ev_prefix_operation(ast, expr_id, *op, *rhs),
-            ConstValue { value, .. } => self.ev_const(expr_id, value.into()),
+            ConstValue { value, .. } => self.ev_const(expr_id, &*value),
             ProcedureDeclaration(NBProcedureDeclaration { args, body, .. }) => {
                 self.ev_procedure(ast, expr_id, args, *body)
             }
@@ -1095,11 +1095,9 @@ where
             Bool(val) => Value::Bool(*val),
             String(val) => Value::String(val.clone()),
             RuntimeFn(id) => Value::RuntimeFn(*id),
-            Struct(val) => Value::Struct(
-                val.iter()
-                    .map(|(_, v)| self.default_value(v.into()))
-                    .collect(),
-            ),
+            Struct(val) => {
+                Value::Struct(val.iter().map(|(_, v)| self.default_value(&*v)).collect())
+            }
         }
     }
 

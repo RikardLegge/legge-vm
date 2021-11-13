@@ -72,34 +72,32 @@ where
     }
 
     // Safety: the referenced_by field is not allowed to be modified during the lifetime 'b.
-    unsafe fn node_referenced_by<'b>(&'a self, node_id: &'b NodeID) -> &'b HashSet<NodeReference> {
+    unsafe fn node_referenced_by<'b>(&'a self, node_id: &NodeID) -> &'b HashSet<NodeReference> {
         let r = &self.ast.get_node(*node_id).referenced_by;
         let raw = r as *const HashSet<NodeReference>;
         unsafe { &*raw }
     }
 
     // Safety: the references field is not allowed to be modified during the lifetime 'b.
-    unsafe fn node_references<'b>(&'a self, node_id: &'b NodeID) -> &'b HashSet<NodeReference> {
+    unsafe fn node_references<'b>(&'a self, node_id: &NodeID) -> &'b HashSet<NodeReference> {
         let r = &self.ast.get_node(*node_id).references;
         let raw = r as *const HashSet<NodeReference>;
         unsafe { &*raw }
     }
 
     // Safety: the list of node children is not allowed to be modified during the lifetime 'b.
-    unsafe fn node_children<'b>(&'a self, node_id: &'b NodeID) -> LinkedNodeBodyIterator<'b, T> {
+    unsafe fn node_children<'b>(&'a self, node_id: &NodeID) -> LinkedNodeBodyIterator<'b, T> {
         let body = &*self.ast.get_node(*node_id).body;
         let raw = body as *const LinkedNodeBody<T>;
         unsafe { (&*raw).children() }
     }
 
     fn child_dependent_on_parent(&self, node: &Node<T>) -> Option<NodeID> {
+        use LinkedNodeBody::*;
         if let Some(parent_id) = node.parent_id {
             let parent = self.ast.get_node(parent_id);
             match &*parent.body {
-                LinkedNodeBody::Comment(_)
-                | LinkedNodeBody::TypeDeclaration { .. }
-                | LinkedNodeBody::Return { .. }
-                | LinkedNodeBody::Break { .. } => None,
+                Comment(_) | TypeDeclaration { .. } | Return { .. } | Break { .. } => None,
                 _ => Some(parent_id),
             }
         } else {

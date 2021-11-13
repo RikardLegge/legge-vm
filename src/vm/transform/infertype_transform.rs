@@ -321,7 +321,7 @@ where
                 let field_types = fields
                     .iter()
                     .map(|(name, value)| {
-                        let tp = self.node_value_type(value.into());
+                        let tp = self.node_value_type(&*value);
                         (name.clone(), tp)
                     })
                     .collect();
@@ -370,7 +370,7 @@ where
                 };
                 let tp = match tp {
                     Some(tp) => tp,
-                    None => self.node_value_type(value.into()),
+                    None => self.node_value_type(&*value),
                 };
                 Ok(InferredType::new(tp, Declared))
             }

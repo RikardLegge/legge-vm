@@ -600,25 +600,16 @@ impl<T> Clone for PartialNodeValue<T> {
     }
 }
 
-impl<'a, T> Into<&'a NodeValue<T>> for &'a PartialNodeValue<T>
+impl<T> Deref for PartialNodeValue<T>
 where
     T: IsLinked,
 {
-    fn into(self) -> &'a NodeValue<T> {
-        match self {
-            PartialNodeValue::Linked(v) => v,
-            _ => unreachable!(),
-        }
-    }
-}
+    type Target = ast::NodeValue<T>;
 
-impl<T> Into<NodeValue<T>> for PartialNodeValue<T>
-where
-    T: IsLinked,
-{
-    fn into(self) -> NodeValue<T> {
-        match self {
-            PartialNodeValue::Linked(v) => v,
+    fn deref(&self) -> &Self::Target {
+        use PartialNodeValue::*;
+        match &self {
+            Linked(value) => value,
             _ => unreachable!(),
         }
     }
