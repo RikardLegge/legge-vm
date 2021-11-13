@@ -1,11 +1,11 @@
 use crate::vm::ast;
-use crate::vm::ast::ArithmeticOP;
 use crate::vm::ast::Err;
 use crate::vm::ast::NodeType;
 use crate::vm::ast::ProcedureDeclarationNode;
+use crate::vm::ast::{ArithmeticOP, LinkedNodeBody};
 use crate::vm::ast::{AstBranch, IsValid, NodeID, NodeValue};
 use crate::vm::ast::{AstBranchID, PartialNodeValue, PartialType};
-use crate::vm::ast::{NBProcedureDeclaration, NodeBody, UnlinkedNodeBody};
+use crate::vm::ast::{NBProcedureDeclaration, PartialNodeBody, UnlinkedNodeBody};
 use crate::vm::token::KeyName;
 use crate::vm::token::TokenType::EndStatement;
 use crate::vm::token::{Token, TokenType};
@@ -222,17 +222,19 @@ where
         let mut dynamic_statements = Vec::new();
         while self.peek_token().any(None).is_ok() {
             let statement = self.do_statement(node.id)?;
-            match self.ast.get_node(statement).body {
-                NodeBody::TypeDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
-                    static_statements.push(statement)
-                }
-                NodeBody::Import { .. } => import_statements.push(statement),
+            match &self.ast.get_node(statement).body {
+                PartialNodeBody::Linked(body) => match body {
+                    LinkedNodeBody::TypeDeclaration { .. }
+                    | LinkedNodeBody::StaticDeclaration { .. } => static_statements.push(statement),
+                    LinkedNodeBody::Import { .. } => import_statements.push(statement),
+                    _ => dynamic_statements.push(statement),
+                },
                 _ => dynamic_statements.push(statement),
             }
         }
-        self.add_node(
+        self.add_complete_node(
             node,
-            NodeBody::Block {
+            LinkedNodeBody::Block {
                 static_body: static_statements,
                 import_body: import_statements,
                 dynamic_body: dynamic_statements,
@@ -294,34 +296,47 @@ where
         return PendingNode { id };
     }
 
-    fn add_node(&mut self, pending_node: PendingNode, body: NodeBody<T>) -> NodeID {
-        let node = self.ast.get_node_mut(pending_node.id);
+    fn add_node(&mut self, pending: PendingNode, body: PartialNodeBody<T>) -> NodeID {
+        let node = self.ast.get_node_mut(pending.id);
         node.body = body;
-        pending_node.id
-    }
-
-    fn add_uncomplete_node(&mut self, pending: PendingNode, body: UnlinkedNodeBody<T>) -> NodeID {
-        self.ast.get_node_mut(pending.id).body = NodeBody::Unlinked(body);
         pending.id
     }
 
-    fn should_terminate_statement(&mut self, node: NodeID) -> bool {
-        use crate::vm::ast::NodeBody::*;
+    fn add_complete_node(&mut self, pending: PendingNode, body: LinkedNodeBody<T>) -> NodeID {
+        self.add_node(pending, PartialNodeBody::Linked(body))
+    }
 
-        match self.ast.get_node(node).body {
-            TypeDeclaration { constructor, .. } => self.should_terminate_statement(*constructor),
-            ConstDeclaration { expr, .. }
-            | StaticDeclaration { expr, .. }
-            | VariableDeclaration {
-                expr: Some(expr), ..
-            } => self.should_terminate_statement(expr),
-            Block { .. }
-            | ProcedureDeclaration(NBProcedureDeclaration { .. })
-            | If { .. }
-            | Loop { .. }
-            | Comment { .. }
-            | Empty => false,
-            _ => true,
+    fn add_uncomplete_node(&mut self, pending: PendingNode, body: UnlinkedNodeBody<T>) -> NodeID {
+        self.add_node(pending, PartialNodeBody::Unlinked(body))
+    }
+
+    fn should_terminate_statement(&mut self, node: NodeID) -> bool {
+        use crate::vm::ast::LinkedNodeBody::*;
+        use crate::vm::ast::PartialNodeBody::*;
+
+        match &self.ast.get_node(node).body {
+            Linked(body) => match body {
+                TypeDeclaration { constructor, .. } => {
+                    let constructor = **constructor;
+                    self.should_terminate_statement(constructor)
+                }
+                ConstDeclaration { expr, .. }
+                | StaticDeclaration { expr, .. }
+                | VariableDeclaration {
+                    expr: Some(expr), ..
+                } => {
+                    let expr = *expr;
+                    self.should_terminate_statement(expr)
+                }
+                Block { .. }
+                | ProcedureDeclaration(NBProcedureDeclaration { .. })
+                | If { .. }
+                | Loop { .. }
+                | Comment { .. } => false,
+                _ => true,
+            },
+            Unlinked(_) => true,
+            Empty => true,
         }
     }
 
@@ -331,18 +346,20 @@ where
         let mut dynamic_statements = Vec::new();
         while self.peek_token().not(&TokenType::RightCurlyBrace)? {
             let statement = self.do_statement(node.id)?;
-            match self.ast.get_node(statement).body {
-                NodeBody::TypeDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
-                    static_statements.push(statement)
-                }
-                NodeBody::Import { .. } => import_statements.push(statement),
+            match &self.ast.get_node(statement).body {
+                PartialNodeBody::Linked(body) => match body {
+                    LinkedNodeBody::TypeDeclaration { .. }
+                    | LinkedNodeBody::StaticDeclaration { .. } => static_statements.push(statement),
+                    LinkedNodeBody::Import { .. } => import_statements.push(statement),
+                    _ => dynamic_statements.push(statement),
+                },
                 _ => dynamic_statements.push(statement),
             }
         }
         self.next_token(&node).expect(&TokenType::RightCurlyBrace)?;
-        Ok(self.add_node(
+        Ok(self.add_complete_node(
             node,
-            NodeBody::Block {
+            LinkedNodeBody::Block {
                 static_body: static_statements,
                 import_body: import_statements,
                 dynamic_body: dynamic_statements,
@@ -360,9 +377,9 @@ where
         let node = match self.next_token(&node).any(None)? {
             Int(int, _) => {
                 let int = *int;
-                Ok(self.add_node(
+                Ok(self.add_complete_node(
                     node,
-                    NodeBody::ConstValue {
+                    LinkedNodeBody::ConstValue {
                         tp: None,
                         value: NodeValue::Int(int).into(),
                     },
@@ -370,9 +387,9 @@ where
             }
             Float(float, _, _) => {
                 let float = *float;
-                Ok(self.add_node(
+                Ok(self.add_complete_node(
                     node,
-                    NodeBody::ConstValue {
+                    LinkedNodeBody::ConstValue {
                         tp: None,
                         value: NodeValue::Float(float).into(),
                     },
@@ -387,7 +404,7 @@ where
                 self.do_statement_symbol(node, symbol)
             }
             LeftCurlyBrace => self.do_block(node),
-            EndStatement => Ok(self.add_node(node, NodeBody::Empty)),
+            EndStatement => Ok(self.add_node(node, PartialNodeBody::Empty)),
             KeyName(Return) => self.do_return(node),
             KeyName(If) => self.do_if(node),
             KeyName(Loop) => self.do_loop(node),
@@ -405,7 +422,7 @@ where
             }
             Comment(comment) => {
                 let comment = comment.clone();
-                Ok(self.add_node(node, NodeBody::Comment(comment)))
+                Ok(self.add_complete_node(node, LinkedNodeBody::Comment(comment)))
             }
             token => {
                 let token = token.clone();
@@ -442,9 +459,9 @@ where
         let node = match self.next_token(&node).any(Some(&Int(1, 0)))? {
             Int(int, _) => {
                 let int = *int;
-                self.add_node(
+                self.add_complete_node(
                     node,
-                    NodeBody::ConstValue {
+                    LinkedNodeBody::ConstValue {
                         tp: None,
                         value: NodeValue::Int(int).into(),
                     },
@@ -452,9 +469,9 @@ where
             }
             Float(float, _, _) => {
                 let float = *float;
-                self.add_node(
+                self.add_complete_node(
                     node,
-                    NodeBody::ConstValue {
+                    LinkedNodeBody::ConstValue {
                         tp: None,
                         value: NodeValue::Float(float).into(),
                     },
@@ -462,9 +479,9 @@ where
             }
             String(value) => {
                 let value = value.clone();
-                self.add_node(
+                self.add_complete_node(
                     node,
-                    NodeBody::ConstValue {
+                    LinkedNodeBody::ConstValue {
                         tp: None,
                         value: NodeValue::String(value).into(),
                     },
@@ -495,7 +512,7 @@ where
                 if self.peek_token().not(&RightBrace)? {
                     let expr_node = self.do_expression(node.id)?;
                     self.next_token(&node).expect(&RightBrace)?;
-                    self.add_node(node, NodeBody::Expression(expr_node))
+                    self.add_complete_node(node, LinkedNodeBody::Expression(expr_node))
                 } else {
                     let left = node;
                     let right = self.node(left.id);
@@ -552,7 +569,7 @@ where
         self.next_token(&body_node)
             .expect(&TokenType::LeftCurlyBrace)?;
         let body = self.do_block(body_node)?;
-        Ok(self.add_node(node, NodeBody::If { condition, body }))
+        Ok(self.add_complete_node(node, LinkedNodeBody::If { condition, body }))
     }
 
     fn do_import(&mut self, node: PendingNode) -> ast::Result {
@@ -573,23 +590,23 @@ where
                 let path = self.find_traverse_path(&node, path)?;
                 let path = Path::try_new(path).unwrap();
                 let body_node = self.node(node.id);
-                let expr = self.add_node(
+                let expr = self.add_uncomplete_node(
                     body_node,
-                    NodeBody::Unlinked(UnlinkedNodeBody::ImportValue {
+                    UnlinkedNodeBody::ImportValue {
                         is_relative,
                         path: path.clone(),
-                    }),
+                    },
                 );
-                Ok(self.add_node(node, NodeBody::Import { path, expr }))
+                Ok(self.add_complete_node(node, LinkedNodeBody::Import { path, expr }))
             }
             _ => unimplemented!(),
         }
     }
 
     fn do_bool(&mut self, node: PendingNode, value: bool) -> ast::Result {
-        Ok(self.add_node(
+        Ok(self.add_complete_node(
             node,
-            NodeBody::ConstValue {
+            LinkedNodeBody::ConstValue {
                 tp: None,
                 value: NodeValue::Bool(value).into(),
             },
@@ -601,7 +618,7 @@ where
         self.next_token(&body_node)
             .expect(&TokenType::LeftCurlyBrace)?;
         let body = self.do_block(body_node)?;
-        Ok(self.add_node(node, NodeBody::Loop { body }))
+        Ok(self.add_complete_node(node, LinkedNodeBody::Loop { body }))
     }
 
     fn do_break(&mut self, node: PendingNode) -> ast::Result {
@@ -634,7 +651,7 @@ where
                 let lhs_precedence = Self::op_precedence(op);
                 let rhs_precedence = Self::token_precedence(next_token);
                 if lhs_precedence >= rhs_precedence {
-                    NodeBody::Op { op, lhs, rhs }
+                    LinkedNodeBody::Op { op, lhs, rhs }
                 } else {
                     let node = self.node(parent_id);
                     let id = node.id;
@@ -648,14 +665,14 @@ where
                         }
                         _ => unreachable!(),
                     };
-                    NodeBody::Op { op, lhs, rhs }
+                    LinkedNodeBody::Op { op, lhs, rhs }
                 }
             } else {
                 match op {
                     ArithmeticOP::Add | ArithmeticOP::Sub => {
                         // Prefix operation of single node
                         let rhs = self.do_expression(node.id)?;
-                        NodeBody::PrefixOp { op, rhs }
+                        LinkedNodeBody::PrefixOp { op, rhs }
                     }
                     _ => Err(Err::single(
                         &format!("Can only use prefix operations for addition and subtraction"),
@@ -665,7 +682,7 @@ where
                 }
             }
         };
-        Ok(self.add_node(node, body))
+        Ok(self.add_complete_node(node, body))
     }
 
     fn do_type(&mut self, parent: &PendingNode) -> ast::Result<(NodeID, &PartialType)> {
@@ -728,15 +745,15 @@ where
                     } else {
                         let tp_ref = Complete(NodeType::Void);
                         let ret = self.node(node.id);
-                        let ret_id = self.add_node(
+                        let ret_id = self.add_complete_node(
                             ret,
-                            NodeBody::PartialType {
+                            LinkedNodeBody::PartialType {
                                 parts: vec![],
                                 tp: tp_ref,
                             },
                         );
                         let tp_ref = match &self.ast.get_node(ret_id).body {
-                            NodeBody::PartialType { tp, .. } => tp,
+                            PartialNodeBody::Linked(LinkedNodeBody::PartialType { tp, .. }) => tp,
                             _ => unreachable!(),
                         };
                         parts.push(ret_id);
@@ -757,9 +774,9 @@ where
             },
             _ => unreachable!(),
         };
-        let node_id = self.add_node(node, NodeBody::PartialType { parts, tp });
+        let node_id = self.add_complete_node(node, LinkedNodeBody::PartialType { parts, tp });
         let tp_ref = match &self.ast.get_node(node_id).body {
-            NodeBody::PartialType { tp, .. } => tp,
+            PartialNodeBody::Linked(LinkedNodeBody::PartialType { tp, .. }) => tp,
             _ => unreachable!(),
         };
         Ok((node_id, tp_ref))
@@ -846,7 +863,7 @@ where
         );
         let tp = {
             let tp = self.node(node.id);
-            self.add_node(tp, NodeBody::PartialType { parts, tp: tp_ref })
+            self.add_complete_node(tp, LinkedNodeBody::PartialType { parts, tp: tp_ref })
         };
         let mut default_value = None;
         let constructor = {
@@ -865,13 +882,13 @@ where
                             default_value = Some(value.clone());
                             let tp = {
                                 let node = self.node(node.id);
-                                self.add_node(node, NodeBody::TypeReference { tp })
+                                self.add_complete_node(node, LinkedNodeBody::TypeReference { tp })
                             };
-                            let value = NodeBody::ConstValue {
+                            let value = LinkedNodeBody::ConstValue {
                                 tp: Some(tp),
                                 value,
                             };
-                            self.add_node(node, value)
+                            self.add_complete_node(node, value)
                         } else {
                             let value = UnlinkedNodeBody::Value {
                                 tp: Some(tp),
@@ -881,40 +898,41 @@ where
                         }
                     };
 
-                    let ret = NodeBody::Unlinked(UnlinkedNodeBody::Return {
+                    let ret = UnlinkedNodeBody::Return {
                         expr: Some(value_id),
                         automatic: true,
-                    });
-                    self.add_node(node, ret)
+                    };
+                    self.add_uncomplete_node(node, ret)
                 };
 
-                let body = NodeBody::Block {
+                let body = LinkedNodeBody::Block {
                     static_body: vec![],
                     import_body: vec![],
                     dynamic_body: vec![ret_id],
                 };
-                self.add_node(node, body)
+                self.add_complete_node(node, body)
             };
 
             let tp = {
                 let node = self.node(node.id);
-                self.add_node(node, NodeBody::TypeReference { tp })
+                self.add_complete_node(node, LinkedNodeBody::TypeReference { tp })
             };
-            let constructor = NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
+            let constructor = LinkedNodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                 args: Vec::new(),
                 returns: Some(tp),
                 body,
             });
-            ProcedureDeclarationNode::try_new(self.add_node(node, constructor), &self.ast).unwrap()
+            ProcedureDeclarationNode::try_new(self.add_complete_node(node, constructor), &self.ast)
+                .unwrap()
         };
 
-        let body = NodeBody::TypeDeclaration {
+        let body = LinkedNodeBody::TypeDeclaration {
             ident,
             tp,
             constructor,
             default_value,
         };
-        let node_id = self.add_node(node, body);
+        let node_id = self.add_complete_node(node, body);
         Ok(node_id)
     }
 
@@ -939,8 +957,8 @@ where
                         _ => unreachable!(),
                     };
                     let expr = None;
-                    let body = NodeBody::VariableDeclaration { ident, tp, expr };
-                    self.add_node(arg_node, body);
+                    let body = LinkedNodeBody::VariableDeclaration { ident, tp, expr };
+                    self.add_complete_node(arg_node, body);
                 }
                 _ => unreachable!(),
             }
@@ -980,8 +998,8 @@ where
                 let last = self.ast.get_node(*last_id);
                 match last.body {
                     // Ignore comments when searching for last statement
-                    NodeBody::Comment(..) => continue,
-                    NodeBody::Unlinked(UnlinkedNodeBody::Return { .. }) => {
+                    PartialNodeBody::Linked(LinkedNodeBody::Comment(..)) => continue,
+                    PartialNodeBody::Unlinked(UnlinkedNodeBody::Return { .. }) => {
                         has_return = true;
                         break;
                     }
@@ -1000,15 +1018,15 @@ where
                 },
             );
             match &mut self.ast.get_node_mut(body).body {
-                NodeBody::Block { dynamic_body, .. } => {
+                PartialNodeBody::Linked(LinkedNodeBody::Block { dynamic_body, .. }) => {
                     dynamic_body.push(ret_node);
                 }
                 _ => unreachable!(),
             }
         }
-        Ok(self.add_node(
+        Ok(self.add_complete_node(
             node,
-            NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
+            LinkedNodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                 args,
                 returns,
                 body,
@@ -1033,9 +1051,9 @@ where
                         self.do_variable_or_assignment(node, ident, Some(tp))
                     }
                     EndStatement => {
-                        let node = self.add_node(
+                        let node = self.add_complete_node(
                             node,
-                            NodeBody::VariableDeclaration {
+                            LinkedNodeBody::VariableDeclaration {
                                 ident,
                                 tp: Some(tp),
                                 expr: None,
@@ -1101,12 +1119,22 @@ where
             ConstDeclaration => {
                 self.eat_token(&node);
                 let expr = self.do_expression(node.id)?;
-                let node = match self.ast.get_node(expr).body {
-                    NodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. })
-                    | NodeBody::ConstValue { .. } => {
-                        self.add_node(node, NodeBody::StaticDeclaration { ident, tp, expr })
-                    }
-                    _ => self.add_node(node, NodeBody::ConstDeclaration { ident, tp, expr }),
+                let node = match &self.ast.get_node(expr).body {
+                    PartialNodeBody::Linked(body) => match body {
+                        LinkedNodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. })
+                        | LinkedNodeBody::ConstValue { .. } => self.add_complete_node(
+                            node,
+                            LinkedNodeBody::StaticDeclaration { ident, tp, expr },
+                        ),
+                        _ => self.add_complete_node(
+                            node,
+                            LinkedNodeBody::ConstDeclaration { ident, tp, expr },
+                        ),
+                    },
+                    _ => self.add_complete_node(
+                        node,
+                        LinkedNodeBody::ConstDeclaration { ident, tp, expr },
+                    ),
                 };
                 Ok(node)
             }
@@ -1162,7 +1190,10 @@ where
     ) -> ast::Result {
         self.eat_token(&node);
         let expr = Some(self.do_expression(node.id)?);
-        let node = self.add_node(node, NodeBody::VariableDeclaration { ident, tp, expr });
+        let node = self.add_complete_node(
+            node,
+            LinkedNodeBody::VariableDeclaration { ident, tp, expr },
+        );
         Ok(node)
     }
 

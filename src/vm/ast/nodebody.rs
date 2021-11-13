@@ -1,7 +1,10 @@
+use crate::vm::ast;
 use crate::vm::ast::{NodeID, PartialNodeValue, PartialType, ProcedureDeclarationNode};
 use crate::Path;
+use std::borrow::BorrowMut;
 use std::fmt;
 use std::fmt::Formatter;
+use std::ops::{Deref, DerefMut};
 
 #[derive(Debug, Clone)]
 pub struct NBCall {
@@ -17,8 +20,53 @@ pub struct NBProcedureDeclaration {
 }
 
 #[derive(Debug, Clone)]
-pub enum NodeBody<T> {
+pub enum PartialNodeBody<T> {
     Empty,
+    Linked(LinkedNodeBody<T>),
+    Unlinked(UnlinkedNodeBody<T>),
+}
+
+impl<T> PartialNodeBody<T> {
+    pub fn children(&self) -> NodeBodyIterator<T> {
+        NodeBodyIterator {
+            body: self,
+            linked: None,
+            unlinked: None,
+        }
+    }
+}
+
+impl<T> Deref for PartialNodeBody<T>
+where
+    T: ast::IsLinked,
+{
+    type Target = LinkedNodeBody<T>;
+
+    fn deref(&self) -> &Self::Target {
+        use PartialNodeBody::*;
+        match &self {
+            Linked(body) => body,
+            Unlinked(_) => unreachable!(),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<T> DerefMut for PartialNodeBody<T>
+where
+    T: ast::IsLinked,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        use PartialNodeBody::*;
+        match self.borrow_mut() {
+            Linked(body) => body,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum LinkedNodeBody<T> {
     ConstValue {
         tp: Option<NodeID>,
         value: PartialNodeValue<T>,
@@ -101,16 +149,13 @@ pub enum NodeBody<T> {
         r#loop: NodeID,
     },
     Call(NBCall),
-
-    Unlinked(UnlinkedNodeBody<T>),
 }
 
-impl<T> NodeBody<T> {
-    pub fn children(&self) -> NodeBodyIterator<T> {
-        NodeBodyIterator {
+impl<T> LinkedNodeBody<T> {
+    pub fn children(&self) -> LinkedNodeBodyIterator<T> {
+        LinkedNodeBodyIterator {
             index: 0,
             body: self,
-            unlinked: None,
         }
     }
 }
@@ -155,16 +200,50 @@ impl<T> UnlinkedNodeBody<T> {
 }
 
 pub struct NodeBodyIterator<'a, T> {
-    index: usize,
-    body: &'a NodeBody<T>,
+    body: &'a PartialNodeBody<T>,
+    linked: Option<LinkedNodeBodyIterator<'a, T>>,
     unlinked: Option<UnlinkedNodeBodyIterator<'a, T>>,
 }
 
 impl<'a, T> Iterator for NodeBodyIterator<'a, T> {
     type Item = &'a NodeID;
 
+    fn next(&mut self) -> Option<Self::Item> {
+        use PartialNodeBody::*;
+        match &self.body {
+            Linked(body) => {
+                if let None = self.linked {
+                    self.linked = Some(body.children());
+                }
+                match &mut self.linked {
+                    Some(iter) => iter.next(),
+                    None => unreachable!(),
+                }
+            }
+            Unlinked(body) => {
+                if let None = self.unlinked {
+                    self.unlinked = Some(body.children());
+                }
+                match &mut self.unlinked {
+                    Some(iter) => iter.next(),
+                    None => unreachable!(),
+                }
+            }
+            Empty => None,
+        }
+    }
+}
+
+pub struct LinkedNodeBodyIterator<'a, T> {
+    index: usize,
+    body: &'a LinkedNodeBody<T>,
+}
+
+impl<'a, T> Iterator for LinkedNodeBodyIterator<'a, T> {
+    type Item = &'a NodeID;
+
     fn next(&mut self) -> Option<&'a NodeID> {
-        use NodeBody::*;
+        use LinkedNodeBody::*;
         let option = match self.body {
             Reference { .. } => None,
             Op { lhs, rhs, .. } => match self.index {
@@ -253,18 +332,7 @@ impl<'a, T> Iterator for NodeBodyIterator<'a, T> {
                 0 => tp.as_ref(),
                 _ => None,
             },
-            TypeReference { .. } | VariableValue { .. } | Comment { .. } | Break { .. } | Empty => {
-                None
-            }
-            Unlinked(body) => {
-                if let None = self.unlinked {
-                    self.unlinked = Some(body.children());
-                }
-                match &mut self.unlinked {
-                    Some(iter) => iter.next(),
-                    None => unreachable!(),
-                }
-            }
+            TypeReference { .. } | VariableValue { .. } | Comment { .. } | Break { .. } => None,
         };
         if option.is_some() {
             self.index += 1;

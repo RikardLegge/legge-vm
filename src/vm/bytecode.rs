@@ -1,6 +1,6 @@
 use crate::vm::ast::{
     ArithmeticOP, Ast, AstBranch, AstBranchID, DebugSymbols, IsLinked, IsTypesChecked,
-    IsTypesInferred, IsValid, NBCall, NBProcedureDeclaration, NodeBody, NodeID, NodeType,
+    IsTypesInferred, IsValid, LinkedNodeBody, NBCall, NBProcedureDeclaration, NodeID, NodeType,
     NodeValue,
 };
 use crate::{vm, LogLevel};
@@ -187,7 +187,7 @@ where
         for ast in asts.iter() {
             let root_id = ast.root();
             let node = asts.get_node(root_id);
-            if let NodeBody::Block { static_body, .. } = &node.body {
+            if let LinkedNodeBody::Block { static_body, .. } = &*node.body {
                 bc.ev_block_allocate_variables(&ast, &[static_body]);
             } else {
                 unreachable!()
@@ -431,7 +431,7 @@ where
         let root_id = ast.root();
         let (global_scope, new_context) = self.with_scope(root_id, ContextType::Block, |bc| {
             let node = ast.get_node(root_id);
-            if let NodeBody::Block { static_body, .. } = &node.body {
+            if let LinkedNodeBody::Block { static_body, .. } = &*node.body {
                 bc.ev_block_inner(ast, &[static_body]);
             } else {
                 unreachable!()
@@ -442,11 +442,11 @@ where
 
         let (ast_scope, _) = self.with_scope(root_id, ContextType::Block, |bc| {
             let node = ast.get_node(root_id);
-            if let NodeBody::Block {
+            if let LinkedNodeBody::Block {
                 import_body,
                 dynamic_body,
                 ..
-            } = &node.body
+            } = &*node.body
             {
                 bc.ev_block_allocate_variables(ast, &[import_body, dynamic_body]);
                 let allocations = bc.ev_block_inner(ast, &[import_body, dynamic_body]);
@@ -615,13 +615,13 @@ where
     }
 
     fn ev_node(&mut self, ast: &AstBranch<T>, node_id: NodeID) -> StackUsage {
-        use crate::vm::ast::NodeBody::*;
+        use crate::vm::ast::LinkedNodeBody::*;
         let node = ast.get_node(node_id);
         if node.is_dead() {
             return StackUsage::zero();
         }
 
-        match &node.body {
+        match &*node.body {
             Op { op, lhs, rhs } => self.ev_operation(ast, node_id, *op, *lhs, *rhs),
             PrefixOp { op, rhs } => self.ev_prefix_operation(ast, node_id, *op, *rhs),
             Block {
@@ -652,7 +652,7 @@ where
             If { condition, body } => self.ev_if(ast, node_id, *condition, *body),
             Loop { body } => self.ev_loop(ast, node_id, *body),
             Break { r#loop } => self.ev_break(node_id, *r#loop),
-            Comment(_) | Empty => StackUsage::zero(),
+            Comment(_) => StackUsage::zero(),
             _ => panic!("Unsupported node here {:?}", node_id),
         }
     }
@@ -674,8 +674,8 @@ where
         let start = self.op_index();
         self.with_context(node_id, ContextType::Loop { break_inst }, |bc| {
             let body_node = ast.get_node(body_id);
-            match &body_node.body {
-                NodeBody::Block {
+            match &*body_node.body {
+                LinkedNodeBody::Block {
                     static_body,
                     import_body,
                     dynamic_body,
@@ -713,8 +713,8 @@ where
 
         let start = self.op_index();
         let body_node = ast.get_node(body_id);
-        match &body_node.body {
-            NodeBody::Block {
+        match &*body_node.body {
+            LinkedNodeBody::Block {
                 static_body,
                 import_body,
                 dynamic_body,
@@ -805,8 +805,8 @@ where
                 }
             }
             let body_node = ast.get_node(body_id);
-            match &body_node.body {
-                NodeBody::Block {
+            match &*body_node.body {
+                LinkedNodeBody::Block {
                     static_body,
                     import_body,
                     dynamic_body,
@@ -965,24 +965,24 @@ where
                     continue;
                 }
                 if node.has_closure_references() {
-                    match &node.body {
-                        NodeBody::VariableDeclaration { .. }
-                        | NodeBody::ConstDeclaration { .. }
-                        | NodeBody::TypeDeclaration { .. }
-                        | NodeBody::StaticDeclaration { .. }
-                        | NodeBody::Import { .. } => {
+                    match &*node.body {
+                        LinkedNodeBody::VariableDeclaration { .. }
+                        | LinkedNodeBody::ConstDeclaration { .. }
+                        | LinkedNodeBody::TypeDeclaration { .. }
+                        | LinkedNodeBody::StaticDeclaration { .. }
+                        | LinkedNodeBody::Import { .. } => {
                             self.add_var(ast, child_id);
                             self.add_op(child_id, OPCode::PushToClosure(Value::Unset));
                         }
                         _ => (),
                     }
                 } else {
-                    match &node.body {
-                        NodeBody::VariableDeclaration { .. }
-                        | NodeBody::ConstDeclaration { .. }
-                        | NodeBody::TypeDeclaration { .. }
-                        | NodeBody::StaticDeclaration { .. }
-                        | NodeBody::Import { .. } => {
+                    match &*node.body {
+                        LinkedNodeBody::VariableDeclaration { .. }
+                        | LinkedNodeBody::ConstDeclaration { .. }
+                        | LinkedNodeBody::TypeDeclaration { .. }
+                        | LinkedNodeBody::StaticDeclaration { .. }
+                        | LinkedNodeBody::Import { .. } => {
                             self.add_var(ast, child_id);
                             self.add_op(child_id, OPCode::PushImmediate(Value::Unset));
                         }
@@ -1068,9 +1068,9 @@ where
     }
 
     fn ev_expression(&mut self, ast: &AstBranch<T>, expr_id: NodeID) -> StackUsage {
-        use crate::vm::ast::NodeBody::*;
+        use crate::vm::ast::LinkedNodeBody::*;
         let expr = ast.get_node(expr_id);
-        match &expr.body {
+        match &*expr.body {
             Op { op, lhs, rhs } => self.ev_operation(ast, expr_id, *op, *lhs, *rhs),
             PrefixOp { op, rhs } => self.ev_prefix_operation(ast, expr_id, *op, *rhs),
             ConstValue { value, .. } => self.ev_const(expr_id, value.into()),

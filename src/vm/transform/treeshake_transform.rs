@@ -1,6 +1,6 @@
-use crate::vm::ast::{Ast, IsLinked, NodeReference, PartialNodeValue, SideEffect};
+use crate::vm::ast::{Ast, IsLinked, LinkedNodeBody, NodeReference, PartialNodeValue, SideEffect};
 use crate::vm::ast::{AstBranch, NodeID, Result};
-use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody, NodeBodyIterator};
+use crate::vm::ast::{LinkedNodeBodyIterator, NBCall, NBProcedureDeclaration};
 use crate::vm::ast::{Node, NodeReferenceType, NodeType, NodeValue};
 use crate::vm::transform;
 use std::collections::{HashSet, VecDeque};
@@ -86,21 +86,20 @@ where
     }
 
     // Safety: the list of node children is not allowed to be modified during the lifetime 'b.
-    unsafe fn node_children<'b>(&'a self, node_id: &'b NodeID) -> NodeBodyIterator<'b, T> {
-        let body = &self.ast.get_node(*node_id).body;
-        let raw = body as *const NodeBody<T>;
+    unsafe fn node_children<'b>(&'a self, node_id: &'b NodeID) -> LinkedNodeBodyIterator<'b, T> {
+        let body = &*self.ast.get_node(*node_id).body;
+        let raw = body as *const LinkedNodeBody<T>;
         unsafe { (&*raw).children() }
     }
 
     fn child_dependent_on_parent(&self, node: &Node<T>) -> Option<NodeID> {
         if let Some(parent_id) = node.parent_id {
             let parent = self.ast.get_node(parent_id);
-            match parent.body {
-                NodeBody::Empty
-                | NodeBody::Comment(_)
-                | NodeBody::TypeDeclaration { .. }
-                | NodeBody::Return { .. }
-                | NodeBody::Break { .. } => None,
+            match &*parent.body {
+                LinkedNodeBody::Comment(_)
+                | LinkedNodeBody::TypeDeclaration { .. }
+                | LinkedNodeBody::Return { .. }
+                | LinkedNodeBody::Break { .. } => None,
                 _ => Some(parent_id),
             }
         } else {
@@ -119,8 +118,8 @@ where
                 .insert(effect.clone());
 
             let node = self.ast.get_node(node_id);
-            match node.body {
-                NodeBody::Block { .. } => {}
+            match &*node.body {
+                LinkedNodeBody::Block { .. } => {}
                 _ => {
                     // Safety: the child ids of the node is not updated in mark_dependencies_as_active.
                     let children = unsafe { self.node_children(&node_id) };
@@ -133,17 +132,17 @@ where
             }
 
             let node = self.ast.get_node(node_id);
-            match node.body {
-                NodeBody::VariableValue { variable, .. } => {
-                    self.side_effect_nodes.push((variable, SideEffect::Write))
+            match &*node.body {
+                LinkedNodeBody::VariableValue { variable, .. } => {
+                    self.side_effect_nodes.push((*variable, SideEffect::Write))
                 }
-                NodeBody::Loop { .. } => {
+                LinkedNodeBody::Loop { .. } => {
                     for reference in &node.referenced_by {
                         self.side_effect_nodes
                             .push((reference.id, SideEffect::GoTo(node_id)))
                     }
                 }
-                NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
+                LinkedNodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                     ref args,
                     ref returns,
                     ..
@@ -215,8 +214,8 @@ where
             self.stack.insert(node_id);
 
             let node = self.ast.get_node(node_id);
-            match node.body {
-                NodeBody::Call(NBCall { .. }) => {
+            match &*node.body {
+                LinkedNodeBody::Call(NBCall { .. }) => {
                     if let SideEffect::Execute = effect {
                         self.active_roots.push(node_id);
                     } else if let SideEffect::WhenThen(when_then) = effect {
@@ -228,16 +227,16 @@ where
                         }
                     }
                 }
-                NodeBody::VariableAssignment { .. } if effect == &SideEffect::Write => {
+                LinkedNodeBody::VariableAssignment { .. } if effect == &SideEffect::Write => {
                     self.active_roots.push(node_id);
                 }
-                NodeBody::VariableValue { .. } if effect == &SideEffect::Read => {
+                LinkedNodeBody::VariableValue { .. } if effect == &SideEffect::Read => {
                     self.active_roots.push(node_id);
                 }
-                NodeBody::Break { r#loop } if effect == &SideEffect::GoTo(r#loop) => {
+                LinkedNodeBody::Break { r#loop } if effect == &SideEffect::GoTo(*r#loop) => {
                     self.active_roots.push(node_id);
                 }
-                NodeBody::Return { func, .. } if effect == &SideEffect::GoTo(func) => {
+                LinkedNodeBody::Return { func, .. } if effect == &SideEffect::GoTo(*func) => {
                     self.active_roots.push(node_id);
                 }
                 _ => {}
@@ -270,8 +269,8 @@ where
 
     fn has_side_effect(&self, node_id: NodeID) -> Option<SideEffect> {
         let node = self.ast.get_node(node_id);
-        match node.body {
-            NodeBody::ConstValue {
+        match &*node.body {
+            LinkedNodeBody::ConstValue {
                 value: PartialNodeValue::Linked(NodeValue::RuntimeFn(_)),
                 ..
             } => Some(SideEffect::Execute),

@@ -1,9 +1,9 @@
 use super::AstTransformation;
 use crate::vm::ast::PartialType::Complete;
-use crate::vm::ast::{Ast, IsTypesInferred, TypesChecked};
+use crate::vm::ast::{Ast, IsTypesInferred, LinkedNodeBody, TypesChecked};
 use crate::vm::ast::{AstBranch, Node};
 use crate::vm::ast::{ErrPart, NodeID, NodeType};
-use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody};
+use crate::vm::ast::{NBCall, NBProcedureDeclaration};
 use crate::vm::{ast, transform};
 use std::sync::Arc;
 
@@ -78,12 +78,11 @@ where
     }
 
     pub fn check_type(&self, node: &Node<T>) -> ast::Result<()> {
-        use crate::vm::ast::NodeBody::*;
+        use crate::vm::ast::LinkedNodeBody::*;
         use NodeType::*;
-        match &node.body {
+        match &*node.body {
             Reference { node_id } => self.check_type(&*self.asts.get_node(*node_id)),
-            Empty
-            | Break { .. }
+            Break { .. }
             | Comment { .. }
             | ConstValue { .. }
             | PrefixOp { .. }
@@ -117,14 +116,13 @@ where
                 expr,
             } => {
                 let variable_node = self.ast.get_node(*variable);
-                match variable_node.body {
-                    NodeBody::ConstDeclaration { .. } | NodeBody::StaticDeclaration { .. } => {
-                        Err(ast::Err::single(
-                            "Not allowed to assign to constant value",
-                            "Assignment to constant value",
-                            vec![node.id()],
-                        ))?
-                    }
+                match &*variable_node.body {
+                    LinkedNodeBody::ConstDeclaration { .. }
+                    | LinkedNodeBody::StaticDeclaration { .. } => Err(ast::Err::single(
+                        "Not allowed to assign to constant value",
+                        "Assignment to constant value",
+                        vec![node.id()],
+                    ))?,
                     _ => (),
                 }
                 let mut variable_tp = variable_node.tp();
@@ -285,14 +283,16 @@ where
                                     "Wrong return type for function".into(),
                                     self.ast.get_node_and_children(*ret_id),
                                 )];
-                                if let NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
-                                    returns: Some(return_id),
-                                    ..
-                                }) = func.body
+                                if let LinkedNodeBody::ProcedureDeclaration(
+                                    NBProcedureDeclaration {
+                                        returns: Some(return_id),
+                                        ..
+                                    },
+                                ) = &*func.body
                                 {
                                     parts.push(ErrPart::new(
                                         "Expected return type".into(),
-                                        self.ast.get_node_and_children(return_id),
+                                        self.ast.get_node_and_children(*return_id),
                                     ));
                                 };
                                 let details = format!("Return statement does not return the right type, {:?} expected, {:?} provided", func.tp(), ret);
@@ -323,11 +323,6 @@ where
                 self.fits_function_call(func, caller, func_tp, &call)?;
                 Ok(())
             }
-            Unlinked { .. } => Err(ast::Err::single(
-                "Encountered a node with unlinked type",
-                "expression with unlinked type",
-                vec![node.id()],
-            )),
         }
     }
 
@@ -411,24 +406,25 @@ where
 
     fn get_function_trace(&self, referer: NodeID, depth: usize) -> Vec<NodeID> {
         let mut trace = vec![referer];
-        match &self.asts.get_node(referer).body {
-            NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
-                returns: Some(id), ..
+        match &*self.asts.get_node(referer).body {
+            LinkedNodeBody::ProcedureDeclaration(NBProcedureDeclaration {
+                returns: Some(id),
+                ..
             }) => {
                 if depth > 0 {
                     trace = self.get_function_trace(*id, depth - 1);
                 }
             }
-            NodeBody::Call(NBCall { func: child, .. }) => {
+            LinkedNodeBody::Call(NBCall { func: child, .. }) => {
                 trace.append(&mut self.get_function_trace(*child, depth + 1))
             }
-            NodeBody::StaticDeclaration { expr: child, .. } => {
+            LinkedNodeBody::StaticDeclaration { expr: child, .. } => {
                 trace.append(&mut self.get_function_trace(*child, depth))
             }
-            NodeBody::Reference { node_id: child, .. } => {
+            LinkedNodeBody::Reference { node_id: child, .. } => {
                 trace.append(&mut self.get_function_trace(*child, depth))
             }
-            NodeBody::PartialType { .. } => {}
+            LinkedNodeBody::PartialType { .. } => {}
             body => unimplemented!("{:?}", body),
         };
         trace
@@ -459,17 +455,17 @@ where
                     vec![ErrPart::new("Provided argument".into(), vec![caller.id()])];
 
                 for func_id in trace_ids {
-                    match &self.asts.get_node(func_id).body {
-                        NodeBody::Call(_) => error_parts.push(ErrPart::new(
+                    match &*self.asts.get_node(func_id).body {
+                        LinkedNodeBody::Call(_) => error_parts.push(ErrPart::new(
                             "From return value of function".into(),
                             vec![func_id],
                         )),
 
-                        NodeBody::Reference { .. } => {
+                        LinkedNodeBody::Reference { .. } => {
                             error_parts.push(ErrPart::new("Imported here".into(), vec![func_id]))
                         }
 
-                        NodeBody::ProcedureDeclaration(NBProcedureDeclaration {
+                        LinkedNodeBody::ProcedureDeclaration(NBProcedureDeclaration {
                             args,
                             returns,
                             ..
@@ -485,7 +481,7 @@ where
                             },
                         }),
 
-                        NodeBody::PartialType {
+                        LinkedNodeBody::PartialType {
                             tp: Complete(Fn { returns, .. }),
                             parts,
                         } => error_parts.push(match arg_i {

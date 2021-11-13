@@ -1,9 +1,11 @@
 use crate::vm::ast::NodeReferenceType::*;
 use crate::vm::ast::UnlinkedNodeBody::*;
-use crate::vm::ast::{Ast, Linked, NodeReferenceLocation, PartialNodeValue, PartialType};
+use crate::vm::ast::{
+    Ast, Linked, LinkedNodeBody, NodeReferenceLocation, PartialNodeValue, PartialType,
+};
 use crate::vm::ast::{AstBranch, IsValid, NodeID};
 use crate::vm::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue};
-use crate::vm::ast::{NBCall, NodeBody};
+use crate::vm::ast::{NBCall, PartialNodeBody};
 use crate::vm::runtime::{Namespace, NamespaceElement, RuntimeDefinitions};
 use crate::vm::{ast, transform};
 use std::collections::VecDeque;
@@ -184,7 +186,10 @@ where
                     ))?,
                 };
                 match &self.ast.get_node(target_id).body {
-                    NodeBody::TypeDeclaration { default_value, .. } => match default_value {
+                    PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration {
+                        default_value,
+                        ..
+                    }) => match default_value {
                         Some(default_value) => (*default_value).clone(),
                         None => unreachable!(),
                     },
@@ -263,46 +268,52 @@ where
     fn link_types(&mut self, node_id: NodeID) -> ast::Result<Option<NodeType>> {
         let node = self.ast.get_node(node_id);
         let tp = match &node.body {
-            NodeBody::TypeDeclaration { tp, .. } => {
-                let tp = *tp;
-                self.link_types(tp)?
-            }
-            NodeBody::PartialType { tp, parts } => match tp {
-                PartialType::Complete(tp) => Some(tp.clone()),
-                PartialType::Uncomplete(NodeType::Unknown { ident }) => {
-                    let (target_id, _) = match self.closest_variable(node_id, &ident)? {
-                        Some(target) => target,
-                        None => Err(Err::single(
-                            "Failed to find type",
-                            "unknown type",
-                            vec![node_id],
-                        ))?,
-                    };
-                    match self.ast.partial_type(target_id) {
-                        Some((tp_id, tp)) => {
-                            let tp = tp.clone();
-                            let node = self.ast.get_node_mut(node_id);
-                            node.body = NodeBody::TypeReference { tp: tp_id };
-                            Some(tp)
-                        }
-                        None => None,
-                    }
+            PartialNodeBody::Linked(body) => match body {
+                LinkedNodeBody::TypeDeclaration { tp, .. } => {
+                    let tp = *tp;
+                    self.link_types(tp)?
                 }
-                PartialType::Uncomplete(tp) => {
-                    let tp = tp.clone();
-                    let parts = parts.clone();
-                    match self.resolve_type(tp, &parts)? {
-                        Some(tp) => {
-                            let node = self.ast.get_node_mut(node_id);
-                            node.body = NodeBody::PartialType {
-                                tp: PartialType::Complete(tp.clone()),
-                                parts,
-                            };
-                            Some(tp)
+                LinkedNodeBody::PartialType { tp, parts } => match tp {
+                    PartialType::Complete(tp) => Some(tp.clone()),
+                    PartialType::Uncomplete(NodeType::Unknown { ident }) => {
+                        let (target_id, _) = match self.closest_variable(node_id, &ident)? {
+                            Some(target) => target,
+                            None => Err(Err::single(
+                                "Failed to find type",
+                                "unknown type",
+                                vec![node_id],
+                            ))?,
+                        };
+                        match self.ast.partial_type(target_id) {
+                            Some((tp_id, tp)) => {
+                                let tp = tp.clone();
+                                let node = self.ast.get_node_mut(node_id);
+                                node.body =
+                                    PartialNodeBody::Linked(LinkedNodeBody::TypeReference {
+                                        tp: tp_id,
+                                    });
+                                Some(tp)
+                            }
+                            None => None,
                         }
-                        None => None,
                     }
-                }
+                    PartialType::Uncomplete(tp) => {
+                        let tp = tp.clone();
+                        let parts = parts.clone();
+                        match self.resolve_type(tp, &parts)? {
+                            Some(tp) => {
+                                let node = self.ast.get_node_mut(node_id);
+                                node.body = PartialNodeBody::Linked(LinkedNodeBody::PartialType {
+                                    tp: PartialType::Complete(tp.clone()),
+                                    parts,
+                                });
+                                Some(tp)
+                            }
+                            None => None,
+                        }
+                    }
+                },
+                _ => None,
             },
             _ => None,
         };
@@ -331,11 +342,11 @@ where
             for &child in node.body.children() {
                 queue.push_back(child);
             }
-            let unlinked_body = if let NodeBody::Unlinked(_) = node.body {
+            let unlinked_body = if let PartialNodeBody::Unlinked(_) = node.body {
                 let node = self.ast.get_node_mut(node_id);
-                let body = mem::replace(&mut node.body, NodeBody::Empty);
+                let body = mem::replace(&mut node.body, PartialNodeBody::Empty);
                 match body {
-                    NodeBody::Unlinked(unlinked_body) => Some(unlinked_body),
+                    PartialNodeBody::Unlinked(unlinked_body) => Some(unlinked_body),
                     _ => unreachable!(),
                 }
             } else {
@@ -354,7 +365,7 @@ where
                         };
                         self.ast
                             .add_ref((variable, WriteValue), (expr, ReadValue), location);
-                        NodeBody::VariableAssignment {
+                        LinkedNodeBody::VariableAssignment {
                             variable,
                             path,
                             expr,
@@ -362,7 +373,7 @@ where
                     }
                     Value { value, tp } => {
                         let value = self.resolve_value(node_id, value)?;
-                        NodeBody::ConstValue { tp, value }
+                        LinkedNodeBody::ConstValue { tp, value }
                     }
                     VariableValue { ident, path } => {
                         let (variable, location) = match self.closest_variable(node_id, &ident)? {
@@ -375,7 +386,7 @@ where
                         };
                         self.ast
                             .add_ref((variable, ReadValue), (node_id, WriteValue), location);
-                        NodeBody::VariableValue { variable, path }
+                        LinkedNodeBody::VariableValue { variable, path }
                     }
                     Call { ident, args } => {
                         let (func, location) = match self.closest_variable(node_id, &ident)? {
@@ -388,7 +399,7 @@ where
                         };
                         self.ast
                             .add_ref((func, GoTo), (node_id, ExecuteValue), location);
-                        NodeBody::Call(NBCall { func, args })
+                        LinkedNodeBody::Call(NBCall { func, args })
                     }
                     ImportValue { is_relative, path } => {
                         if is_relative {
@@ -415,7 +426,7 @@ where
                                             ),
                                             loc: self.loc_relative_to_root(node_id),
                                         });
-                                        NodeBody::Reference {
+                                        LinkedNodeBody::Reference {
                                             node_id: export.node_id,
                                         }
                                     } else {
@@ -447,7 +458,7 @@ where
                         let (func, location) = self.closest_fn(node_id)?;
                         self.ast
                             .add_ref((func, GoTo), (node_id, ControlFlow), location);
-                        NodeBody::Return {
+                        LinkedNodeBody::Return {
                             func,
                             expr,
                             automatic,
@@ -457,11 +468,11 @@ where
                         let (r#loop, location) = self.closest_loop(node_id)?;
                         self.ast
                             .add_ref((r#loop, GoTo), (node_id, ControlFlow), location);
-                        NodeBody::Break { r#loop }
+                        LinkedNodeBody::Break { r#loop }
                     }
                 };
                 let node = self.ast.get_node_mut(node_id);
-                node.body = linked_body;
+                node.body = PartialNodeBody::Linked(linked_body);
             }
 
             let node = self.ast.get_node(node_id);

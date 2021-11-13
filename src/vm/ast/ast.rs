@@ -1,6 +1,6 @@
 use super::Result;
-use crate::vm::ast::{Err, IsLinked, IsTypesInferred, IsValid, Valid};
-use crate::vm::ast::{NBProcedureDeclaration, NodeBody};
+use crate::vm::ast::{Err, IsLinked, IsTypesInferred, IsValid, LinkedNodeBody, Valid};
+use crate::vm::ast::{NBProcedureDeclaration, PartialNodeBody};
 use crate::vm::token::Token;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
@@ -294,12 +294,14 @@ impl Deref for ProcedureDeclarationNode {
 }
 
 impl ProcedureDeclarationNode {
-    pub fn try_new<T>(id: NodeID, ast: &AstBranch<T>) -> Option<Self>
+    pub fn try_new<T>(id: NodeID, branch: &AstBranch<T>) -> Option<Self>
     where
         T: IsValid,
     {
-        match ast.get_node(id).body {
-            NodeBody::ProcedureDeclaration(_) => Some(Self(id)),
+        match branch.get_node(id).body {
+            ast::PartialNodeBody::Linked(ast::LinkedNodeBody::ProcedureDeclaration(_)) => {
+                Some(Self(id))
+            }
             _ => None,
         }
     }
@@ -313,7 +315,7 @@ where
     id: NodeID,
     pub tokens: Vec<Token>,
     tp: Option<InferredType>,
-    pub body: NodeBody<T>,
+    pub body: PartialNodeBody<T>,
     pub parent_id: Option<NodeID>,
     pub referenced_by: HashSet<NodeReference>,
     pub references: HashSet<NodeReference>,
@@ -360,8 +362,10 @@ where
     }
 
     pub fn is_closure_boundary(&self) -> bool {
+        use LinkedNodeBody::*;
+        use PartialNodeBody::*;
         match self.body {
-            NodeBody::ProcedureDeclaration(NBProcedureDeclaration { .. }) => true,
+            Linked(ProcedureDeclaration(NBProcedureDeclaration { .. })) => true,
             _ => false,
         }
     }
@@ -690,6 +694,7 @@ impl PartialType {
     }
 }
 
+use crate::vm::ast;
 use crate::vm::runtime::{AstExport, Namespace, NamespaceElement};
 use crate::{Path, SubPath};
 
@@ -779,7 +784,7 @@ where
             write!(f, " [\n")?;
             for &child in children {
                 match &self.get_node(child).body {
-                    NodeBody::Comment(..) => continue,
+                    PartialNodeBody::Linked(LinkedNodeBody::Comment(..)) => continue,
                     _ => (),
                 }
                 self.fmt_debug_node(f, level + 1, child)?;
@@ -815,26 +820,29 @@ where
         for id in root.body.children() {
             let child = self.get_node(*id);
             match &child.body {
-                NodeBody::StaticDeclaration { ident, .. }
-                | NodeBody::TypeDeclaration { ident, .. } => {
-                    let name = &[ident.to_string()];
-                    let path = SubPath::try_new(name).unwrap();
-                    let export = AstExport {
-                        node_id: *id,
-                        is_static: true,
-                    };
-                    namespace.set(path, NamespaceElement::Export(export));
-                }
-                NodeBody::ConstDeclaration { ident, .. }
-                | NodeBody::VariableDeclaration { ident, .. } => {
-                    let name = &[ident.to_string()];
-                    let path = SubPath::try_new(name).unwrap();
-                    let export = AstExport {
-                        node_id: *id,
-                        is_static: false,
-                    };
-                    namespace.set(path, NamespaceElement::Export(export));
-                }
+                PartialNodeBody::Linked(body) => match body {
+                    LinkedNodeBody::StaticDeclaration { ident, .. }
+                    | LinkedNodeBody::TypeDeclaration { ident, .. } => {
+                        let name = &[ident.to_string()];
+                        let path = SubPath::try_new(name).unwrap();
+                        let export = AstExport {
+                            node_id: *id,
+                            is_static: true,
+                        };
+                        namespace.set(path, NamespaceElement::Export(export));
+                    }
+                    LinkedNodeBody::ConstDeclaration { ident, .. }
+                    | LinkedNodeBody::VariableDeclaration { ident, .. } => {
+                        let name = &[ident.to_string()];
+                        let path = SubPath::try_new(name).unwrap();
+                        let export = AstExport {
+                            node_id: *id,
+                            is_static: false,
+                        };
+                        namespace.set(path, NamespaceElement::Export(export));
+                    }
+                    _ => (),
+                },
                 _ => (),
             }
         }
@@ -891,7 +899,7 @@ where
             references: Default::default(),
             tp: None,
             tokens: vec![],
-            body: NodeBody::Empty,
+            body: PartialNodeBody::Empty,
             reference_types: None,
             _tp: PhantomData::default(),
         };
@@ -923,7 +931,7 @@ where
     pub fn closest_fn(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
-                NodeBody::ProcedureDeclaration(_) => Some(node.id),
+                PartialNodeBody::Linked(LinkedNodeBody::ProcedureDeclaration(_)) => Some(node.id),
                 _ => None,
             })
         })
@@ -933,7 +941,7 @@ where
     pub fn closest_loop(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
-                NodeBody::Loop { .. } => Some(node.id),
+                PartialNodeBody::Linked(LinkedNodeBody::Loop { .. }) => Some(node.id),
                 _ => None,
             })
         })
@@ -945,17 +953,20 @@ where
         node_id: NodeID,
         target_ident: &str,
     ) -> Result<Option<(NodeID, NodeReferenceLocation)>> {
-        use crate::vm::ast::NodeBody::*;
+        use crate::vm::ast::LinkedNodeBody::*;
         self.closest(node_id, |node| {
             let mut closest_id = None;
             for &child_id in node.body.children() {
                 let child = self.get_node(child_id);
                 let ident = match &child.body {
-                    VariableDeclaration { ident, .. }
-                    | ConstDeclaration { ident, .. }
-                    | StaticDeclaration { ident, .. }
-                    | TypeDeclaration { ident, .. } => ident,
-                    Import { path, .. } => path.last(),
+                    PartialNodeBody::Linked(body) => match body {
+                        VariableDeclaration { ident, .. }
+                        | ConstDeclaration { ident, .. }
+                        | StaticDeclaration { ident, .. }
+                        | TypeDeclaration { ident, .. } => ident,
+                        Import { path, .. } => path.last(),
+                        _ => continue,
+                    },
                     _ => continue,
                 };
                 if ident == target_ident {
@@ -1007,16 +1018,18 @@ where
     pub fn partial_type<'a, 'b: 'a>(&'b self, node_id: NodeID) -> Option<(NodeID, &'a NodeType)> {
         let node = self.get_node(node_id);
         match &node.body {
-            NodeBody::TypeDeclaration { tp, .. } | NodeBody::TypeReference { tp } => {
-                self.partial_type(*tp)
-            }
-            NodeBody::PartialType { tp, .. } => {
-                let tp = match tp.tp() {
-                    NodeType::NewType { tp, .. } => tp,
-                    tp => tp,
-                };
-                Some((node_id, tp))
-            }
+            PartialNodeBody::Linked(body) => match body {
+                LinkedNodeBody::TypeDeclaration { tp, .. }
+                | LinkedNodeBody::TypeReference { tp } => self.partial_type(*tp),
+                LinkedNodeBody::PartialType { tp, .. } => {
+                    let tp = match tp.tp() {
+                        NodeType::NewType { tp, .. } => tp,
+                        tp => tp,
+                    };
+                    Some((node_id, tp))
+                }
+                _ => None,
+            },
             _ => None,
         }
     }

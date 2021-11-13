@@ -56,9 +56,9 @@ pub enum BuiltInDefinition {
 }
 
 impl BuiltInDefinition {
-    pub fn body<T>(&self) -> ast::NodeBody<T> {
+    pub fn body<T>(&self) -> ast::LinkedNodeBody<T> {
         match self {
-            BuiltInDefinition::Fn(def) => ast::NodeBody::ConstValue {
+            BuiltInDefinition::Fn(def) => ast::LinkedNodeBody::ConstValue {
                 tp: None,
                 value: ast::NodeValue::RuntimeFn(def.id).into(),
             },

@@ -1,10 +1,10 @@
 use crate::vm;
 use crate::vm::ast;
 use crate::vm::ast::{
-    Ast, AstBranch, AstBranchID, ErrPart, InferredType, IsLinked, Node, NodeID, NodeType,
-    NodeTypeSource, NodeValue, TypesInferred,
+    Ast, AstBranch, AstBranchID, ErrPart, InferredType, IsLinked, LinkedNodeBody, Node, NodeID,
+    NodeType, NodeTypeSource, NodeValue, TypesInferred,
 };
-use crate::vm::ast::{NBCall, NBProcedureDeclaration, NodeBody};
+use crate::vm::ast::{NBCall, NBProcedureDeclaration};
 use crate::vm::runtime::RuntimeDefinitions;
 use crate::vm::transform::{AstTransformation, Result};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -338,12 +338,12 @@ where
     }
 
     fn infer_type(&self, node: &Node<T>) -> result::Result<InferredType, TypeInferenceErr> {
-        use crate::vm::ast::NodeBody::*;
+        use crate::vm::ast::LinkedNodeBody::*;
         use crate::vm::ast::NodeType::*;
         use crate::vm::ast::NodeTypeSource::*;
         use TypeInferenceErr::*;
         let ast = self.ast();
-        match &node.body {
+        match &*node.body {
             TypeReference { tp } => match ast.partial_type(*tp) {
                 Some((_, tp)) => Ok(InferredType::new(tp.clone(), NodeTypeSource::Declared)),
                 None => Err(Fail(ast::Err::single(
@@ -417,13 +417,13 @@ where
             VariableValue { variable, path } => {
                 let mut value_tp = self.get_type(&ast, *variable)?;
                 if let NodeType::NewType { .. } = value_tp {
-                    let body = &ast.get_node(*variable).body;
+                    let body = &*ast.get_node(*variable).body;
                     match body {
-                            NodeBody::ConstDeclaration { expr, .. }
-                            | NodeBody::StaticDeclaration { expr, .. } => {
+                            LinkedNodeBody::ConstDeclaration { expr, .. }
+                            | LinkedNodeBody::StaticDeclaration { expr, .. } => {
                                 value_tp = self.get_type(&ast, *expr)?;
                             }
-                            NodeBody::TypeDeclaration { ident, .. } => {
+                            LinkedNodeBody::TypeDeclaration { ident, .. } => {
                                 Err(Fail(ast::Err::single(
                                     "When instantiating a type, use the default instantiation function by adding ()",
                                     &format!("Replace with {}()", ident),
@@ -515,14 +515,9 @@ where
                         ))),
                     }
             }
-            Empty
-            | Break { .. }
-            | Return { .. }
-            | Block { .. }
-            | If { .. }
-            | Loop { .. }
-            | Comment(..) => Ok(InferredType::new(Void, Declared)),
-            Unlinked(_) => unreachable!(),
+            Break { .. } | Return { .. } | Block { .. } | If { .. } | Loop { .. } | Comment(..) => {
+                Ok(InferredType::new(Void, Declared))
+            }
         }
     }
 
