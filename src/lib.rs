@@ -132,7 +132,7 @@ pub fn run_code<F>(
     path: Path,
     log_level: LogLevel,
     leak_memory: bool,
-    _: F,
+    interrupt: F,
 ) -> crate::Result<()>
 where
     F: Fn(vm::Value),
@@ -145,8 +145,8 @@ where
     let bytecode = compiler.compile(path, leak_memory)?;
     vm::time("Total compile time", start, log_level);
 
-    // let mut interpreter = vm::Interpreter::new(&vm_runtime, log_level, &interrupt);
-    // interpreter.run(&bytecode);
+    let mut interpreter = vm::Interpreter::new(&vm_runtime, log_level, &interrupt);
+    interpreter.run(&bytecode);
 
     if leak_memory {
         Box::leak(Box::new(bytecode));
