@@ -1,7 +1,7 @@
 use super::Result;
 use crate::vm::ast::{Err, IsLinked, IsTypesInferred, IsValid, LinkedNodeBody, Valid};
 use crate::vm::ast::{NBProcedureDeclaration, PartialNodeBody};
-use crate::vm::token::Token;
+use crate::vm::token::{Token, TokenSourceInfo};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
@@ -11,18 +11,18 @@ use std::time::Duration;
 use std::{fmt, mem};
 
 pub struct DebugSymbols {
-    tokens: HashMap<NodeID, Vec<Token>>,
-    files: HashMap<AstBranchID, Path>,
+    pub file_info: Vec<Vec<(TokenSourceInfo, TokenSourceInfo)>>,
+    pub files: Vec<Path>,
 }
 
 impl DebugSymbols {
     pub fn get_file_line(&self, node_id: NodeID) -> String {
-        let file = self.files.get(&node_id.ast());
+        let file = self.files.get(node_id.ast().index());
         let line = self
-            .tokens
-            .get(&node_id)
-            .and_then(|n| n.first())
-            .map(|t| t.line);
+            .file_info
+            .get(node_id.ast().index())
+            .map(|ast| ast[node_id.index()])
+            .map(|(start, _)| start.line);
         match (file, line) {
             (Some(file), Some(line)) => format!("{}.bc:{}", file.as_ref().as_ref().join("/"), line),
             (Some(file), None) => format!("{}.bc", file.as_ref().as_ref().join("/")),
@@ -147,22 +147,6 @@ where
         id
     }
 
-    pub fn debug_symbols(&mut self) -> DebugSymbols {
-        let nodes = self.iter().map(|ast| ast.nodes.len()).sum();
-        let mut tokens = HashMap::with_capacity(nodes);
-        for mut ast in self.iter_mut() {
-            for node in &mut ast.nodes {
-                let node_tokens = std::mem::replace(&mut node.tokens, vec![]);
-                tokens.insert(node.id(), node_tokens);
-            }
-        }
-        let files = self
-            .iter()
-            .map(|ast| (ast.ast_id, ast.path.clone()))
-            .collect();
-        DebugSymbols { tokens, files }
-    }
-
     pub fn get_node(&self, id: NodeID) -> AstGuard<T> {
         let ast = self.read_ast(id.ast());
         AstGuard(id, ast)
@@ -207,16 +191,14 @@ where
             .get_node_mut(target.0)
             .referenced_by
             .insert(referenced_by);
+        assert!(inserted_referenced);
 
         let references = NodeReference::new(target.0, target.1, loc);
         let inserted_references = self
             .get_node_mut(referencer.0)
             .references
             .insert(references);
-
-        if !(inserted_referenced && inserted_references) {
-            format!("WARNING: inserted already existing reference!");
-        }
+        assert!(inserted_references);
     }
 }
 impl<T> Ast<T>
@@ -278,7 +260,7 @@ impl NodeID {
         self.1
     }
 
-    fn index(&self) -> usize {
+    pub fn index(&self) -> usize {
         self.0
     }
 }
@@ -862,16 +844,14 @@ where
             .get_node_mut(target.0)
             .referenced_by
             .insert(referenced_by);
+        assert!(inserted_referenced);
 
         let references = NodeReference::new(target.0, target.1, loc);
         let inserted_references = self
             .get_node_mut(referencer.0)
             .references
             .insert(references);
-
-        if !(inserted_referenced && inserted_references) {
-            format!("WARNING: inserted already existing reference!");
-        }
+        assert!(inserted_references);
     }
 
     pub fn add_root_node(&mut self) -> NodeID {

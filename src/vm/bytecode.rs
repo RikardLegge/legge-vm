@@ -3,6 +3,7 @@ use crate::vm::ast::{
     IsTypesInferred, IsValid, LinkedNodeBody, NBCall, NBProcedureDeclaration, NodeID, NodeType,
     NodeValue,
 };
+use crate::vm::token::TokenSourceInfo;
 use crate::{vm, LogLevel};
 use std::collections::HashMap;
 use std::fmt;
@@ -24,7 +25,7 @@ impl<'a> BytecodeGenerator<'a> {
         }
     }
 
-    pub fn generate(&self, asts: vm::Ast, leak_ast: bool) -> crate::Result<vm::Bytecode> {
+    pub fn generate(&self, asts: vm::Ast, leak_memory: bool) -> crate::Result<vm::Bytecode> {
         self.tokio_runtime.block_on(async {
             let log_level = self.log_level;
             let asts = Arc::new(asts);
@@ -131,26 +132,72 @@ impl<'a> BytecodeGenerator<'a> {
             }
             let start = vm::time("Bytecode patch allocations", start, log_level);
 
-            let mut code = Vec::with_capacity(n_insturctions);
-            code.append(&mut init_instructions);
-            for mut i in global_instructions {
-                code.append(&mut i);
-            }
-            for mut i in instructions {
-                code.append(&mut i);
-            }
-            code.append(&mut halt_instructions);
-            for proc in proc_instructions {
-                for mut p in proc {
-                    code.append(&mut p);
+            let bytecode_task = tokio::task::spawn_blocking(move || {
+                let mut code = Vec::with_capacity(n_insturctions);
+                code.append(&mut init_instructions);
+                for mut i in global_instructions {
+                    code.append(&mut i);
                 }
-            }
-            let start = vm::time("Bytecode output", start, log_level);
+                for mut i in instructions {
+                    code.append(&mut i);
+                }
+                code.append(&mut halt_instructions);
+                for proc in proc_instructions {
+                    for mut p in proc {
+                        code.append(&mut p);
+                    }
+                }
+                vm::time("Bytecode output", start, log_level);
+                code
+            });
 
-            let mut asts = Arc::try_unwrap(asts).expect("Single instance of ast in bytecode");
-            let debug_symbols = Some(asts.debug_symbols());
-            let start = vm::time("Bytecode debug symbols", start, log_level);
-            if leak_ast {
+            let symbol_task = {
+                let asts = asts.clone();
+                tokio::task::spawn(async move {
+                    let tasks = asts.ids().map(|ast_id| {
+                        let asts = asts.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let ast = asts.read_ast(ast_id);
+                            let default_token = TokenSourceInfo::default();
+                            ast.nodes()
+                                .iter()
+                                .enumerate()
+                                .map(|(i, node)| {
+                                    assert_eq!(i, node.id().index());
+                                    let start = node
+                                        .tokens
+                                        .first()
+                                        .map(|t| t.source)
+                                        .unwrap_or(default_token);
+                                    let end = node
+                                        .tokens
+                                        .last()
+                                        .map(|t| t.source)
+                                        .unwrap_or(default_token);
+                                    (start, end)
+                                })
+                                .collect::<Vec<(TokenSourceInfo, TokenSourceInfo)>>()
+                        })
+                    });
+                    let file_info = futures::future::try_join_all(tasks).await.unwrap();
+                    let files = asts
+                        .iter()
+                        .enumerate()
+                        .map(|(i, ast)| {
+                            assert_eq!(i, ast.id().index());
+                            ast.path.clone()
+                        })
+                        .collect();
+
+                    vm::time("Bytecode debug symbols", start, log_level);
+                    Some(DebugSymbols { file_info, files })
+                })
+            };
+
+            let (code, debug_symbols) = tokio::try_join!(bytecode_task, symbol_task).unwrap();
+            let start = vm::start_timer();
+            let asts = Arc::try_unwrap(asts).expect("Single instance of ast in bytecode");
+            if leak_memory {
                 Box::leak(Box::new(asts));
             } else {
                 drop(asts);

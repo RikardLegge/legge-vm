@@ -1,3 +1,4 @@
-shell_scripts/tmp
+tmp
 /target
 **/*.rs.bk
+*.stacks

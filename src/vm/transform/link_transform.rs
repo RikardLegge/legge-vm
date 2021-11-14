@@ -11,7 +11,7 @@ use crate::vm::{ast, transform};
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::mem;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 #[derive(Debug)]
 struct PendingRef {
@@ -50,52 +50,42 @@ where
             for (path, ast) in ast.paths() {
                 exports.set(path.as_ref(), NamespaceElement::Namespace(ast.exports()));
             }
-            let exports = Arc::new(exports);
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-            let asts = Arc::new(RwLock::new(ast));
-            for id in asts.read().unwrap().ids() {
+            let exports = Arc::new(exports);
+            let asts = Arc::new(ast);
+
+            let tasks = asts.ids().map(|id| {
                 let vm_runtime = self.vm_runtime.clone();
-                let tx = tx.clone();
                 let asts = asts.clone();
                 let exports = exports.clone();
                 tokio::task::spawn_blocking(move || {
-                    let asts = asts.read().unwrap();
                     let vm_runtime = &vm_runtime;
                     let mut ast = asts.write_ast(id);
                     let root_id = ast.root();
                     let linker = Linker::new(&mut ast, vm_runtime, &exports);
                     match linker.link(root_id) {
-                        Ok(pending) => tx.send(Ok(pending)).unwrap(),
-                        Err(e) => tx.send(Err(e)).unwrap(),
+                        Ok(pending) => Ok(pending),
+                        Err(e) => Err(e),
                     }
-                });
-            }
+                })
+            });
 
-            drop(tx);
-            let mut pending_refs = Vec::new();
-            let mut errors = Vec::new();
-            while let Some(msg) = rx.recv().await {
-                match msg {
-                    Ok(pending) => pending_refs.push(pending),
-                    Err(err) => errors.push(err),
+            let mut pending_refs = Vec::with_capacity(asts.len());
+            let task_results = futures::future::try_join_all(tasks).await.unwrap();
+            let mut asts = Arc::try_unwrap(asts).expect("Single instance of ast in link transform");
+            for res in task_results {
+                match res {
+                    Ok(refs) => pending_refs.push(refs),
+                    Err(err) => return Err((asts.guarantee_state(), err)),
                 }
             }
 
-            let mut asts = Arc::try_unwrap(asts)
-                .unwrap()
-                .into_inner()
-                .expect("Single instance of ast in link transform");
-            if let Some(err) = errors.pop() {
-                Err((asts.guarantee_state(), err))
-            } else {
-                for outer in pending_refs {
-                    for pending in outer {
-                        asts.add_ref(pending.target, pending.referencer, pending.loc);
-                    }
+            for outer in pending_refs {
+                for pending in outer {
+                    asts.add_ref(pending.target, pending.referencer, pending.loc);
                 }
-                Ok(asts.guarantee_state())
             }
+            Ok(asts.guarantee_state())
         })
     }
 }

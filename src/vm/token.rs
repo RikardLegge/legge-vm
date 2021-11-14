@@ -20,20 +20,25 @@ pub fn from_chars(
     parser.tokens
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Hash, Eq)]
 pub struct TokenID(usize);
 impl TokenID {
-    fn new(id: usize) -> Self {
+    pub(crate) fn new(id: usize) -> Self {
         Self(id)
     }
+}
+
+#[derive(Default, Debug, Copy, Clone, PartialEq)]
+pub struct TokenSourceInfo {
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub id: TokenID,
-    pub line: usize,
-    pub start: usize,
-    pub end: usize,
+    pub source: TokenSourceInfo,
     pub tp: TokenType,
 }
 
@@ -239,9 +244,7 @@ where
         let id = TokenID::new(self.last_id);
         let token = Token {
             id,
-            line,
-            start,
-            end,
+            source: TokenSourceInfo { line, start, end },
             tp,
         };
         self.tokens.push(token);
@@ -250,7 +253,7 @@ where
     fn undo_token(&mut self) -> TokenType {
         let token = self.tokens.pop().unwrap();
 
-        self.start = token.start;
+        self.start = token.source.start;
         self.last_id -= 1;
 
         token.tp

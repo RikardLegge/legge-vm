@@ -2,8 +2,8 @@
 cd "$(dirname "$0")"
 set -e
 
-mkdir -p tmp
-rm -rf ./tmp/*
+mkdir -p ../tmp
+rm -rf ../tmp/*
 
 count=300;
 

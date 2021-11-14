@@ -158,7 +158,8 @@ where
                                 );
                                 match ast {
                                     Ok(mut ast) => {
-                                        ast.line_count = last_token.map(|t| t.line).unwrap_or(0);
+                                        ast.line_count =
+                                            last_token.map(|t| t.source.line).unwrap_or(0);
                                         tx.send(ToAstTaskState::Done(path, ast)).unwrap();
                                     }
                                     Err((ast, err)) => {
