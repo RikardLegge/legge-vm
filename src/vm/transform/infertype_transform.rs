@@ -1,5 +1,6 @@
 use crate::vm;
 use crate::vm::ast;
+use crate::vm::ast::UnlinkedNodeBody::VariableAssignment;
 use crate::vm::ast::{
     Ast, AstBranch, AstBranchID, ErrPart, InferredType, IsLinked, LinkedNodeBody, Node, NodeID,
     NodeType, NodeTypeSource, NodeValue, TypesInferred,
@@ -496,6 +497,7 @@ where
                 Ok(InferredType::new(tp.clone(), Value))
             }
             VariableAssignment { .. } => Ok(InferredType::new(Void, Declared)),
+            ConstAssignment { .. } => Ok(InferredType::new(Void, Declared)),
             Call(NBCall { func, .. }) => {
                 let tp = self.get_type(&ast, *func)?;
                 match tp {

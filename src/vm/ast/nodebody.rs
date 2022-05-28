@@ -131,6 +131,11 @@ pub enum LinkedNodeBody<T> {
         constructor: ProcedureDeclarationNode,
         default_value: Option<PartialNodeValue<T>>,
     },
+    ConstAssignment {
+        ident: NodeID,
+        path: Option<Vec<String>>,
+        expr: NodeID,
+    },
     VariableAssignment {
         variable: NodeID,
         path: Option<Vec<String>>,
@@ -162,6 +167,11 @@ impl<T> LinkedNodeBody<T> {
 
 #[derive(Debug, Clone)]
 pub enum UnlinkedNodeBody<T> {
+    StaticAssignment {
+        ident: String,
+        path: Option<Vec<String>>,
+        expr: NodeID,
+    },
     VariableAssignment {
         ident: String,
         path: Option<Vec<String>>,
@@ -298,6 +308,7 @@ impl<'a, T> Iterator for LinkedNodeBodyIterator<'a, T> {
             | Loop { body: value }
             | Expression(value)
             | VariableAssignment { expr: value, .. }
+            | ConstAssignment { expr: value, .. }
             | Import { expr: value, .. } => match self.index {
                 0 => Some(value),
                 _ => None,
@@ -352,7 +363,7 @@ impl<'a, T> Iterator for UnlinkedNodeBodyIterator<'a, T> {
     fn next(&mut self) -> Option<&'a NodeID> {
         use UnlinkedNodeBody::*;
         let option = match self.body {
-            VariableAssignment { expr, .. } => match self.index {
+            StaticAssignment { expr, .. } | VariableAssignment { expr, .. } => match self.index {
                 0 => Some(expr),
                 _ => None,
             },

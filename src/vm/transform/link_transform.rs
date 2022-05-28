@@ -361,6 +361,23 @@ where
                             expr,
                         }
                     }
+                    StaticAssignment { ident, path, expr } => {
+                        let (variable, location) = match self.closest_variable(node_id, &ident)? {
+                            Some(node_id) => node_id,
+                            None => Err(Err::single(
+                                "Failed to find type to assign to",
+                                "type not found",
+                                vec![node_id],
+                            ))?,
+                        };
+                        self.ast
+                            .add_ref((variable, WriteValue), (expr, ReadValue), location);
+                        LinkedNodeBody::ConstAssignment {
+                            ident: variable,
+                            path,
+                            expr,
+                        }
+                    }
                     Value { value, tp } => {
                         let value = self.resolve_value(node_id, value)?;
                         LinkedNodeBody::ConstValue { tp, value }

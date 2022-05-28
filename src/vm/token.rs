@@ -353,7 +353,7 @@ where
 
     fn parse_lesser(&mut self) -> TokenType {
         assert_eq!(self.next().unwrap(), '<');
-        match self.peek() {
+        match self.peek_ignore_whitespace() {
             Some('=') => {
                 self.next().unwrap();
                 TokenType::Op(ArithmeticOP::LEq)
@@ -364,7 +364,7 @@ where
 
     fn parse_declaration_or_type(&mut self) -> TokenType {
         assert_eq!(self.next().unwrap(), ':');
-        match self.peek() {
+        match self.peek_ignore_whitespace() {
             Some(':') => {
                 self.next().unwrap();
                 TokenType::ConstDeclaration

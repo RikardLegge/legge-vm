@@ -110,6 +110,18 @@ where
                     ))
                 }
             }
+            ConstAssignment { ident, path, expr } => {
+                let ident_node = self.ast.get_node(*ident);
+                match &*ident_node.body {
+                    LinkedNodeBody::TypeDeclaration { .. } => (),
+                    _ => Err(ast::Err::single(
+                        "Not allowed to assign constant value to non type",
+                        "Assignment of constant value",
+                        vec![node.id()],
+                    ))?,
+                }
+                unimplemented!()
+            }
             VariableAssignment {
                 variable,
                 path,

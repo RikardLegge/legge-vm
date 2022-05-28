@@ -1151,9 +1151,8 @@ where
             }
             Dot => {
                 let path = Some(self.find_traverse_path(&node, vec![])?);
-                match self.peek_token().expect(&Assignment)? {
+                match self.next_token(&node).any(Some(&Assignment))? {
                     Assignment => {
-                        self.eat_token(&node);
                         let expr = self.do_expression(node.id)?;
                         let node = self.add_uncomplete_node(
                             node,
@@ -1161,7 +1160,23 @@ where
                         );
                         Ok(node)
                     }
-                    _ => unimplemented!(),
+                    ConstDeclaration => {
+                        let expr = self.do_expression(node.id)?;
+                        let node = self.add_uncomplete_node(
+                            node,
+                            UnlinkedNodeBody::StaticAssignment { ident, path, expr },
+                        );
+                        Ok(node)
+                    }
+                    token => {
+                        let token = token.clone();
+                        Err(wrong_token_error(
+                            &self.ast,
+                            node.id,
+                            &token,
+                            &[&Assignment, &ConstDeclaration],
+                        ))
+                    }
                 }
             }
             token => {
@@ -1207,7 +1222,7 @@ where
 
         match self.peek_token().any(Some(&EndStatement))? {
             LeftBrace => self.do_function_call(node, ident),
-            Op(_) | RightBrace | EndStatement | ListSeparator => {
+            ConstDeclaration | Op(_) | RightBrace | EndStatement | ListSeparator => {
                 Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::VariableValue { ident, path }))
             }
             Dot => {
@@ -1222,6 +1237,7 @@ where
                     &token,
                     &[
                         &LeftBrace,
+                        &ConstDeclaration,
                         &RightBrace,
                         &EndStatement,
                         &ListSeparator,

@@ -269,6 +269,37 @@ bc_test! {test_custom_type_nested_returned_by_fn {
     exit(new(42));
 } == Struct(vec![Struct(vec![Int(42)])]) }
 
+bc_test! {test_associated_function {
+    A -> type {
+       value: int
+    }
+
+    A.double :: (self: A) -> A {
+        self.value = self.value * 2;
+        return self
+    }
+
+    a := A();
+    a.value = 21
+    b :: A.double()
+    exit(b);
+} == Struct(vec![Int(42)]) }
+
+bc_test! {test_static_associated_function {
+    A -> type {
+       value: int
+    }
+
+    A.magic :: fn() -> A {
+        a := A();
+        a.value = 42
+        return a;
+    }
+
+    a := A::magic();
+    exit(a);
+} == Struct(vec![Int(42)]) }
+
 bc_test_should_fail! {test_var_assign_other_type {
     a := 1;
     a = true;

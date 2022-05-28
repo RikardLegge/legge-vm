@@ -18,4 +18,5 @@ name = "interp"
 harness = false
 
 [profile.release]
+panic = "abort"
 debug = true

@@ -10,6 +10,7 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::AddAssign;
+use std::panic::catch_unwind;
 use std::sync::Arc;
 
 pub struct BytecodeGenerator<'a> {
