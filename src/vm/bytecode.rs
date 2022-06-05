@@ -1,7 +1,7 @@
 use crate::vm::ast::{
     ArithmeticOP, Ast, AstBranch, AstBranchID, DebugSymbols, IsLinked, IsTypesChecked,
-    IsTypesInferred, IsValid, LinkedNodeBody, NBCall, NBProcedureDeclaration, NodeID, NodeType,
-    NodeValue,
+    IsTypesInferred, IsValid, LNBTypeDeclaration, LinkedNodeBody, NBCall, NBProcedureDeclaration,
+    NodeID, NodeType, NodeValue,
 };
 use crate::vm::token::TokenSourceInfo;
 use crate::{vm, LogLevel};
@@ -10,7 +10,6 @@ use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::AddAssign;
-use std::panic::catch_unwind;
 use std::sync::Arc;
 
 pub struct BytecodeGenerator<'a> {
@@ -681,7 +680,7 @@ where
             VariableValue { variable, path } => {
                 self.ev_variable_value(ast, node_id, *variable, path)
             }
-            TypeDeclaration { constructor, .. } => {
+            TypeDeclaration(LNBTypeDeclaration { constructor, .. }) => {
                 self.ev_declaration(ast, node_id, Some(**constructor))
             }
             ConstDeclaration { expr, .. }
@@ -1016,7 +1015,7 @@ where
                     match &*node.body {
                         LinkedNodeBody::VariableDeclaration { .. }
                         | LinkedNodeBody::ConstDeclaration { .. }
-                        | LinkedNodeBody::TypeDeclaration { .. }
+                        | LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { .. })
                         | LinkedNodeBody::StaticDeclaration { .. }
                         | LinkedNodeBody::Import { .. } => {
                             self.add_var(ast, child_id);
@@ -1028,7 +1027,7 @@ where
                     match &*node.body {
                         LinkedNodeBody::VariableDeclaration { .. }
                         | LinkedNodeBody::ConstDeclaration { .. }
-                        | LinkedNodeBody::TypeDeclaration { .. }
+                        | LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { .. })
                         | LinkedNodeBody::StaticDeclaration { .. }
                         | LinkedNodeBody::Import { .. } => {
                             self.add_var(ast, child_id);

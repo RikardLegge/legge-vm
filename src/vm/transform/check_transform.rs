@@ -1,6 +1,6 @@
 use super::AstTransformation;
 use crate::vm::ast::PartialType::Complete;
-use crate::vm::ast::{Ast, IsTypesInferred, LinkedNodeBody, TypesChecked};
+use crate::vm::ast::{Ast, IsTypesInferred, LNBTypeDeclaration, LinkedNodeBody, TypesChecked};
 use crate::vm::ast::{AstBranch, Node};
 use crate::vm::ast::{ErrPart, NodeID, NodeType};
 use crate::vm::ast::{NBCall, NBProcedureDeclaration};
@@ -29,10 +29,11 @@ where
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
             let asts = Arc::new(ast);
+            let mut tasks = Vec::new();
             for ast_id in (&asts).ids() {
                 let asts = asts.clone();
                 let tx = tx.clone();
-                tokio::task::spawn_blocking(move || {
+                let task = tokio::task::spawn_blocking(move || {
                     let ast = asts.read_ast(ast_id);
                     let root_id = ast.root();
                     let checker = Checker::new(&ast, &asts);
@@ -40,6 +41,7 @@ where
                     let result = checker.check_all_types(root_id);
                     tx.send(result).unwrap();
                 });
+                tasks.push(task);
             }
             drop(tx);
 
@@ -47,6 +49,12 @@ where
             while let Some(msg) = rx.recv().await {
                 if let Err(err) = msg {
                     errors.push(err);
+                }
+            }
+
+            for task in tasks.into_iter() {
+                if task.await.is_err() {
+                    unimplemented!()
                 }
             }
 
@@ -109,18 +117,6 @@ where
                         vec![node.id(), *lhs, *rhs],
                     ))
                 }
-            }
-            ConstAssignment { ident, path, expr } => {
-                let ident_node = self.ast.get_node(*ident);
-                match &*ident_node.body {
-                    LinkedNodeBody::TypeDeclaration { .. } => (),
-                    _ => Err(ast::Err::single(
-                        "Not allowed to assign constant value to non type",
-                        "Assignment of constant value",
-                        vec![node.id()],
-                    ))?,
-                }
-                unimplemented!()
             }
             VariableAssignment {
                 variable,
@@ -203,7 +199,7 @@ where
                 }
                 Ok(())
             }
-            TypeDeclaration { constructor, .. } => {
+            TypeDeclaration(LNBTypeDeclaration { constructor, .. }) => {
                 let lhs = node.tp();
                 let rhs = self.ast.get_node(**constructor).tp();
                 match (lhs, rhs) {
@@ -335,6 +331,7 @@ where
                 self.fits_function_call(func, caller, func_tp, &call)?;
                 Ok(())
             }
+            ConstAssignment { .. } => unimplemented!(),
         }
     }
 

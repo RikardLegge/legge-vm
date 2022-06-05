@@ -2,6 +2,7 @@ use crate::vm::ast;
 use crate::vm::ast::{NodeID, PartialNodeValue, PartialType, ProcedureDeclarationNode};
 use crate::Path;
 use std::borrow::BorrowMut;
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
 use std::ops::{Deref, DerefMut};
@@ -66,6 +67,15 @@ where
 }
 
 #[derive(Debug, Clone)]
+pub struct LNBTypeDeclaration<T> {
+    pub ident: String,
+    pub tp: NodeID,
+    pub constructor: ProcedureDeclarationNode,
+    pub methods: HashMap<String, NodeID>,
+    pub default_value: Option<PartialNodeValue<T>>,
+}
+
+#[derive(Debug, Clone)]
 pub enum LinkedNodeBody<T> {
     ConstValue {
         tp: Option<NodeID>,
@@ -125,12 +135,7 @@ pub enum LinkedNodeBody<T> {
     Reference {
         node_id: NodeID,
     },
-    TypeDeclaration {
-        ident: String,
-        tp: NodeID,
-        constructor: ProcedureDeclarationNode,
-        default_value: Option<PartialNodeValue<T>>,
-    },
+    TypeDeclaration(LNBTypeDeclaration<T>),
     ConstAssignment {
         ident: NodeID,
         path: Option<Vec<String>>,
@@ -192,6 +197,7 @@ pub enum UnlinkedNodeBody<T> {
     Break,
     Call {
         ident: String,
+        path: Option<Vec<String>>,
         args: Vec<NodeID>,
     },
     ImportValue {
@@ -313,12 +319,15 @@ impl<'a, T> Iterator for LinkedNodeBodyIterator<'a, T> {
                 0 => Some(value),
                 _ => None,
             },
-            TypeDeclaration {
-                constructor, tp, ..
-            } => match self.index {
+            TypeDeclaration(LNBTypeDeclaration {
+                constructor,
+                tp,
+                methods,
+                ..
+            }) => match self.index {
                 0 => Some(&**constructor),
                 1 => Some(tp),
-                _ => None,
+                i => methods.values().skip(i - 2).next(),
             },
             VariableDeclaration {
                 expr: Option::None,

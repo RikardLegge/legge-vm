@@ -1,9 +1,8 @@
 use crate::vm;
 use crate::vm::ast;
-use crate::vm::ast::UnlinkedNodeBody::VariableAssignment;
 use crate::vm::ast::{
-    Ast, AstBranch, AstBranchID, ErrPart, InferredType, IsLinked, LinkedNodeBody, Node, NodeID,
-    NodeType, NodeTypeSource, NodeValue, TypesInferred,
+    Ast, AstBranch, AstBranchID, ErrPart, InferredType, IsLinked, LNBTypeDeclaration,
+    LinkedNodeBody, Node, NodeID, NodeType, NodeTypeSource, NodeValue, TypesInferred,
 };
 use crate::vm::ast::{NBCall, NBProcedureDeclaration};
 use crate::vm::runtime::RuntimeDefinitions;
@@ -424,7 +423,7 @@ where
                             | LinkedNodeBody::StaticDeclaration { expr, .. } => {
                                 value_tp = self.get_type(&ast, *expr)?;
                             }
-                            LinkedNodeBody::TypeDeclaration { ident, .. } => {
+                            LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { ident, .. }) => {
                                 Err(Fail(ast::Err::single(
                                     "When instantiating a type, use the default instantiation function by adding ()",
                                     &format!("Replace with {}()", ident),
@@ -488,7 +487,7 @@ where
                     Ok(InferredType::new(tp.clone(), Value))
                 }
             }
-            TypeDeclaration { tp, .. } => match ast.get_node_type(*tp) {
+            TypeDeclaration(LNBTypeDeclaration { tp, .. }) => match ast.get_node_type(*tp) {
                 Some(tp) => Ok(InferredType::new(tp.clone(), Declared)),
                 None => Err(BlockedBy(*tp)),
             },

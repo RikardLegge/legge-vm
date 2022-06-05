@@ -1,16 +1,17 @@
 use crate::vm::ast;
-use crate::vm::ast::Err;
 use crate::vm::ast::NodeType;
 use crate::vm::ast::ProcedureDeclarationNode;
 use crate::vm::ast::{ArithmeticOP, LinkedNodeBody};
 use crate::vm::ast::{AstBranch, IsValid, NodeID, NodeValue};
 use crate::vm::ast::{AstBranchID, PartialNodeValue, PartialType};
+use crate::vm::ast::{Err, LNBTypeDeclaration};
 use crate::vm::ast::{NBProcedureDeclaration, PartialNodeBody, UnlinkedNodeBody};
 use crate::vm::token::KeyName;
 use crate::vm::token::TokenType::EndStatement;
 use crate::vm::token::{Token, TokenType};
 use crate::Path;
 use colored::Colorize;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::Peekable;
 use std::result;
@@ -224,7 +225,7 @@ where
             let statement = self.do_statement(node.id)?;
             match &self.ast.get_node(statement).body {
                 PartialNodeBody::Linked(body) => match body {
-                    LinkedNodeBody::TypeDeclaration { .. }
+                    LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { .. })
                     | LinkedNodeBody::StaticDeclaration { .. } => static_statements.push(statement),
                     LinkedNodeBody::Import { .. } => import_statements.push(statement),
                     _ => dynamic_statements.push(statement),
@@ -316,7 +317,7 @@ where
 
         match &self.ast.get_node(node).body {
             Linked(body) => match body {
-                TypeDeclaration { constructor, .. } => {
+                TypeDeclaration(LNBTypeDeclaration { constructor, .. }) => {
                     let constructor = **constructor;
                     self.should_terminate_statement(constructor)
                 }
@@ -348,7 +349,7 @@ where
             let statement = self.do_statement(node.id)?;
             match &self.ast.get_node(statement).body {
                 PartialNodeBody::Linked(body) => match body {
-                    LinkedNodeBody::TypeDeclaration { .. }
+                    LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { .. })
                     | LinkedNodeBody::StaticDeclaration { .. } => static_statements.push(statement),
                     LinkedNodeBody::Import { .. } => import_statements.push(statement),
                     _ => dynamic_statements.push(statement),
@@ -926,12 +927,13 @@ where
                 .unwrap()
         };
 
-        let body = LinkedNodeBody::TypeDeclaration {
+        let body = LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration {
             ident,
             tp,
             constructor,
+            methods: HashMap::new(),
             default_value,
-        };
+        });
         let node_id = self.add_complete_node(node, body);
         Ok(node_id)
     }
@@ -1038,7 +1040,7 @@ where
         use crate::vm::token::TokenType::*;
 
         match self.peek_token().any(Some(&ConstDeclaration))? {
-            LeftBrace => self.do_function_call(node, ident),
+            LeftBrace => self.do_function_call(node, ident, None),
             TypeDeclaration => {
                 self.eat_token(&node);
                 if self.peek_token().is(&Assignment)? {
@@ -1221,7 +1223,7 @@ where
         use crate::vm::token::TokenType::*;
 
         match self.peek_token().any(Some(&EndStatement))? {
-            LeftBrace => self.do_function_call(node, ident),
+            LeftBrace => self.do_function_call(node, ident, path),
             ConstDeclaration | Op(_) | RightBrace | EndStatement | ListSeparator => {
                 Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::VariableValue { ident, path }))
             }
@@ -1249,7 +1251,12 @@ where
         }
     }
 
-    fn do_function_call(&mut self, node: PendingNode, ident: String) -> ast::Result {
+    fn do_function_call(
+        &mut self,
+        node: PendingNode,
+        ident: String,
+        path: Option<Vec<String>>,
+    ) -> ast::Result {
         use crate::vm::token::TokenType::*;
 
         self.next_token(&node).expect(&LeftBrace)?;
@@ -1262,7 +1269,8 @@ where
             }
         }
         self.next_token(&node).expect(&RightBrace)?;
-        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Call { ident, args }))
+        println!("{}", ident);
+        Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Call { ident, args, path }))
     }
 
     fn do_return(&mut self, node: PendingNode) -> ast::Result {

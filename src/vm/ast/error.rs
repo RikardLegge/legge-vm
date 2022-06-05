@@ -33,8 +33,9 @@ impl ToString for Err {
 impl Err {
     pub fn into_err<T>(self, asts: Ast<T>) -> crate::Err
     where
-        T: IsInvalid,
+        T: IsInvalid + Debug,
     {
+        println!("{:?}", asts);
         crate::Err::new(format!(
             "\nAst Error: {}\n{}\n",
             self.details,

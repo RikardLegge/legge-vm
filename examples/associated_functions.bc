@@ -9,5 +9,5 @@ A.double :: fn (self: A) -> A {
 
 a := A();
 a.value = 21;
-b :: A.double();
+b :: A.double(a);
 // exit(b);

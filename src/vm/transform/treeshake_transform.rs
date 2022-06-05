@@ -1,4 +1,6 @@
-use crate::vm::ast::{Ast, IsLinked, LinkedNodeBody, NodeReference, PartialNodeValue, SideEffect};
+use crate::vm::ast::{
+    Ast, IsLinked, LNBTypeDeclaration, LinkedNodeBody, NodeReference, PartialNodeValue, SideEffect,
+};
 use crate::vm::ast::{AstBranch, NodeID, Result};
 use crate::vm::ast::{LinkedNodeBodyIterator, NBCall, NBProcedureDeclaration};
 use crate::vm::ast::{Node, NodeReferenceType, NodeType, NodeValue};
@@ -97,7 +99,10 @@ where
         if let Some(parent_id) = node.parent_id {
             let parent = self.ast.get_node(parent_id);
             match &*parent.body {
-                Comment(_) | TypeDeclaration { .. } | Return { .. } | Break { .. } => None,
+                Comment(_)
+                | TypeDeclaration(LNBTypeDeclaration { .. })
+                | Return { .. }
+                | Break { .. } => None,
                 _ => Some(parent_id),
             }
         } else {

@@ -1,7 +1,8 @@
 use crate::vm::ast::NodeReferenceType::*;
 use crate::vm::ast::UnlinkedNodeBody::*;
 use crate::vm::ast::{
-    Ast, Linked, LinkedNodeBody, NodeReferenceLocation, PartialNodeValue, PartialType,
+    Ast, LNBTypeDeclaration, Linked, LinkedNodeBody, NodeReferenceLocation, PartialNodeValue,
+    PartialType,
 };
 use crate::vm::ast::{AstBranch, IsValid, NodeID};
 use crate::vm::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue};
@@ -176,10 +177,9 @@ where
                     ))?,
                 };
                 match &self.ast.get_node(target_id).body {
-                    PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration {
-                        default_value,
-                        ..
-                    }) => match default_value {
+                    PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(
+                        LNBTypeDeclaration { default_value, .. },
+                    )) => match default_value {
                         Some(default_value) => (*default_value).clone(),
                         None => unreachable!(),
                     },
@@ -227,6 +227,7 @@ where
             NodeType::Type {
                 content: mut tp,
                 ident,
+                ..
             } => match self.resolve_type(*tp, parts)? {
                 Some(new_tp) => {
                     *tp = new_tp;
@@ -259,7 +260,7 @@ where
         let node = self.ast.get_node(node_id);
         let tp = match &node.body {
             PartialNodeBody::Linked(body) => match body {
-                LinkedNodeBody::TypeDeclaration { tp, .. } => {
+                LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { tp, .. }) => {
                     let tp = *tp;
                     self.link_types(tp)?
                 }
@@ -362,6 +363,7 @@ where
                         }
                     }
                     StaticAssignment { ident, path, expr } => {
+                        let expr = expr;
                         let (variable, location) = match self.closest_variable(node_id, &ident)? {
                             Some(node_id) => node_id,
                             None => Err(Err::single(
@@ -370,12 +372,48 @@ where
                                 vec![node_id],
                             ))?,
                         };
-                        self.ast
-                            .add_ref((variable, WriteValue), (expr, ReadValue), location);
-                        LinkedNodeBody::ConstAssignment {
-                            ident: variable,
-                            path,
-                            expr,
+                        if let Some(path) = path {
+                            if path.len() != 1 {
+                                Err(ast::Err::single(
+                                    "Invalid path for constant assignment",
+                                    "Assignment of constant value",
+                                    vec![node_id],
+                                ))?
+                            };
+                            let path = &path[0];
+                            let declaration = match &mut self.ast.get_node_mut(variable).body {
+                                PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(td)) => td,
+                                _ => Err(Err::single(
+                                    "Only allowed to statically assign to type declarations",
+                                    "Not allowed to be static",
+                                    vec![node_id],
+                                ))?,
+                            };
+                            if declaration.methods.contains_key(path) {
+                                Err(ast::Err::single(
+                                    "Method already defined on type",
+                                    "Assignment of constant value",
+                                    vec![node_id],
+                                ))?
+                            }
+                            declaration.methods.insert(path.into(), expr);
+
+                            self.ast
+                                .add_ref((variable, WriteValue), (expr, ReadValue), location);
+                            // HACK: NoOp
+                            LinkedNodeBody::Block {
+                                static_body: vec![],
+                                import_body: vec![],
+                                dynamic_body: vec![],
+                            }
+                        } else {
+                            self.ast
+                                .add_ref((variable, WriteValue), (expr, ReadValue), location);
+                            LinkedNodeBody::ConstAssignment {
+                                ident: variable,
+                                path,
+                                expr,
+                            }
                         }
                     }
                     Value { value, tp } => {
@@ -395,7 +433,7 @@ where
                             .add_ref((variable, ReadValue), (node_id, WriteValue), location);
                         LinkedNodeBody::VariableValue { variable, path }
                     }
-                    Call { ident, args } => {
+                    Call { ident, args, path } => {
                         let (func, location) = match self.closest_variable(node_id, &ident)? {
                             Some(node_id) => node_id,
                             None => Err(Err::single(
@@ -406,7 +444,39 @@ where
                         };
                         self.ast
                             .add_ref((func, GoTo), (node_id, ExecuteValue), location);
-                        LinkedNodeBody::Call(NBCall { func, args })
+                        if let Some(path) = path {
+                            let body = &self.ast.get_node(func).body;
+                            let declaration = match body {
+                                PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(t)) => t,
+                                _ => Err(Err::single(
+                                    "Can only call associated functions on types",
+                                    "invalid function call",
+                                    vec![node_id],
+                                ))?,
+                            };
+                            if path.len() != 1 {
+                                Err(Err::single(
+                                    "Can only call associated functions on types",
+                                    "invalid function call",
+                                    vec![node_id],
+                                ))?
+                            }
+                            let path = &path[0];
+                            if let Some(static_fn) = declaration.methods.get(path) {
+                                LinkedNodeBody::Call(NBCall {
+                                    func: *static_fn,
+                                    args,
+                                })
+                            } else {
+                                Err(Err::single(
+                                    "Method not found on type",
+                                    "method not found",
+                                    vec![node_id],
+                                ))?
+                            }
+                        } else {
+                            LinkedNodeBody::Call(NBCall { func, args })
+                        }
                     }
                     ImportValue { is_relative, path } => {
                         if is_relative {

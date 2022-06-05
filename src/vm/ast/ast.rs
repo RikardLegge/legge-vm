@@ -1,5 +1,7 @@
 use super::Result;
-use crate::vm::ast::{Err, IsLinked, IsTypesInferred, IsValid, LinkedNodeBody, Valid};
+use crate::vm::ast::{
+    Err, IsLinked, IsTypesInferred, IsValid, LNBTypeDeclaration, LinkedNodeBody, Valid,
+};
 use crate::vm::ast::{NBProcedureDeclaration, PartialNodeBody};
 use crate::vm::token::{Token, TokenSourceInfo};
 use std::collections::{HashMap, HashSet};
@@ -795,7 +797,7 @@ where
             match &child.body {
                 PartialNodeBody::Linked(body) => match body {
                     LinkedNodeBody::StaticDeclaration { ident, .. }
-                    | LinkedNodeBody::TypeDeclaration { ident, .. } => {
+                    | LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { ident, .. }) => {
                         let name = &[ident.to_string()];
                         let path = SubPath::try_new(name).unwrap();
                         let export = AstExport {
@@ -934,7 +936,7 @@ where
                         VariableDeclaration { ident, .. }
                         | ConstDeclaration { ident, .. }
                         | StaticDeclaration { ident, .. }
-                        | TypeDeclaration { ident, .. } => ident,
+                        | TypeDeclaration(LNBTypeDeclaration { ident, .. }) => ident,
                         Import { path, .. } => path.last(),
                         _ => continue,
                     },
@@ -990,7 +992,7 @@ where
         let node = self.get_node(node_id);
         match &node.body {
             PartialNodeBody::Linked(body) => match body {
-                LinkedNodeBody::TypeDeclaration { tp, .. }
+                LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { tp, .. })
                 | LinkedNodeBody::TypeReference { tp } => self.partial_type(*tp),
                 LinkedNodeBody::PartialType { tp, .. } => {
                     let tp = match tp.tp() {
