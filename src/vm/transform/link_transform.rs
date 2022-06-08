@@ -447,6 +447,9 @@ where
                             let body = &self.ast.get_node(func).body;
                             let declaration = match body {
                                 PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(t)) => t,
+                                PartialNodeBody::Linked(LinkedNodeBody::VariableDeclaration {
+                                    ..
+                                }) => unimplemented!(),
                                 _ => Err(Err::single(
                                     "Can only call associated functions on types",
                                     "invalid function call",
