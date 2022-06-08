@@ -786,6 +786,18 @@ where
 
 impl<T> AstBranch<T>
 where
+    T: IsLinked,
+{
+    pub fn get_node_body(&self, node_id: NodeID) -> &LinkedNodeBody<T> {
+        match &self.get_node(node_id).body {
+            PartialNodeBody::Linked(b) => b,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<T> AstBranch<T>
+where
     T: IsValid,
 {
     pub fn exports(&self) -> Namespace {

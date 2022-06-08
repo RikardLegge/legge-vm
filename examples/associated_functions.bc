@@ -10,4 +10,8 @@ A.double :: fn (self: A) -> A {
 a := A();
 a.value = 21;
 b :: A.double(a);
+// c :: a.double(a);
+
+import std.print;
+print(b.value);
 // exit(b);

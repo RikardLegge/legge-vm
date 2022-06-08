@@ -4,7 +4,7 @@ use crate::Path;
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::fmt;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
 
 #[derive(Debug, Clone)]
@@ -255,58 +255,63 @@ pub struct LinkedNodeBodyIterator<'a, T> {
     body: &'a LinkedNodeBody<T>,
 }
 
-impl<'a, T> Iterator for LinkedNodeBodyIterator<'a, T> {
-    type Item = &'a NodeID;
+impl<'a, T> LinkedNodeBodyIterator<'a, T> {
+    fn procedure_declaration_children(
+        &self,
+        dec: &'a NBProcedureDeclaration,
+        index: usize,
+    ) -> Option<&'a NodeID> {
+        let NBProcedureDeclaration {
+            args,
+            body,
+            returns,
+        } = dec;
+        if index < args.len() {
+            args.get(index)
+        } else if index == args.len() {
+            Some(body)
+        } else if index == args.len() + 1 {
+            match returns {
+                Some(v) => Some(v),
+                None => None,
+            }
+        } else {
+            None
+        }
+    }
 
-    fn next(&mut self) -> Option<&'a NodeID> {
+    fn children(&self, body: &'a LinkedNodeBody<T>, index: usize) -> Option<&'a NodeID> {
         use LinkedNodeBody::*;
-        let option = match self.body {
+        match body {
             Reference { .. } => None,
-            Op { lhs, rhs, .. } => match self.index {
+            Op { lhs, rhs, .. } => match index {
                 0 => Some(lhs),
                 1 => Some(rhs),
                 _ => None,
             },
-            If { condition, body } => match self.index {
+            If { condition, body } => match index {
                 0 => Some(condition),
                 1 => Some(body),
                 _ => None,
             },
-            ProcedureDeclaration(NBProcedureDeclaration {
-                args,
-                body,
-                returns,
-            }) => {
-                if self.index < args.len() {
-                    args.get(self.index)
-                } else if self.index == args.len() {
-                    Some(body)
-                } else if self.index == args.len() + 1 {
-                    match returns {
-                        Some(v) => Some(v),
-                        None => None,
-                    }
-                } else {
-                    None
-                }
-            }
+            ProcedureDeclaration(dec) => self.procedure_declaration_children(dec, index),
             Block {
                 static_body,
                 import_body,
                 dynamic_body,
             } => {
-                if self.index < static_body.len() {
-                    static_body.get(self.index)
-                } else if self.index < static_body.len() + import_body.len() {
-                    import_body.get(self.index - static_body.len())
+                if index < static_body.len() {
+                    static_body.get(index)
+                } else if index < static_body.len() + import_body.len() {
+                    import_body.get(index - static_body.len())
                 } else {
-                    dynamic_body.get(self.index - static_body.len() - import_body.len())
+                    dynamic_body.get(index - static_body.len() - import_body.len())
                 }
             }
-            Call(NBCall { args, .. }) => args.get(self.index),
-            PartialType { parts, .. } => parts.get(self.index),
+            Call(NBCall { args, .. }) => args.get(index),
+            PartialType { parts, .. } => parts.get(index),
 
-            Return { expr, .. } => match self.index {
+            Return { expr, .. } => match index {
                 0 => expr.as_ref(),
                 _ => None,
             },
@@ -315,7 +320,7 @@ impl<'a, T> Iterator for LinkedNodeBodyIterator<'a, T> {
             | Expression(value)
             | VariableAssignment { expr: value, .. }
             | ConstAssignment { expr: value, .. }
-            | Import { expr: value, .. } => match self.index {
+            | Import { expr: value, .. } => match index {
                 0 => Some(value),
                 _ => None,
             },
@@ -324,16 +329,19 @@ impl<'a, T> Iterator for LinkedNodeBodyIterator<'a, T> {
                 tp,
                 methods,
                 ..
-            }) => match self.index {
+            }) => match index {
                 0 => Some(&**constructor),
                 1 => Some(tp),
-                i => methods.values().skip(i - 2).next(),
+                i => {
+                    let index = i - 2;
+                    methods.values().skip(index).next()
+                }
             },
             VariableDeclaration {
                 expr: Option::None,
                 tp,
                 ..
-            } => match self.index {
+            } => match index {
                 0 => tp.as_ref(),
                 _ => None,
             },
@@ -343,17 +351,25 @@ impl<'a, T> Iterator for LinkedNodeBodyIterator<'a, T> {
                 ..
             }
             | ConstDeclaration { expr, tp, .. }
-            | StaticDeclaration { expr, tp, .. } => match self.index {
+            | StaticDeclaration { expr, tp, .. } => match index {
                 0 => Some(expr),
                 1 => tp.as_ref(),
                 _ => None,
             },
-            ConstValue { tp, .. } => match self.index {
+            ConstValue { tp, .. } => match index {
                 0 => tp.as_ref(),
                 _ => None,
             },
             TypeReference { .. } | VariableValue { .. } | Comment { .. } | Break { .. } => None,
-        };
+        }
+    }
+}
+
+impl<'a, T> Iterator for LinkedNodeBodyIterator<'a, T> {
+    type Item = &'a NodeID;
+
+    fn next(&mut self) -> Option<&'a NodeID> {
+        let option = self.children(self.body, self.index);
         if option.is_some() {
             self.index += 1;
         }

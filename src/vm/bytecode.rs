@@ -35,24 +35,19 @@ impl<'a> BytecodeGenerator<'a> {
             let start = vm::time("Bytecode Global allocations", start, log_level);
             let mut init_instructions = scope.instructions;
 
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
+            let mut tasks = Vec::with_capacity(asts.len());
             for ast_id in (&asts).ids() {
-                let tx = tx.clone();
                 let asts = asts.clone();
                 let context = Some(context.clone());
 
-                tokio::task::spawn_blocking(move || {
+                let task = tokio::task::spawn_blocking(move || {
                     let ast = &asts.read_ast(ast_id);
                     let mut bc = Generator::new(context);
                     let (global, local) = bc.evaluate(ast);
                     let procedures = bc.procedures;
-                    tx.send(Ok((ast_id, global, local, procedures, bc.procedure_len)))
-                        .unwrap();
-                    if false {
-                        tx.send(Err(())).unwrap();
-                    }
+                    (ast_id, global, local, procedures, bc.procedure_len)
                 });
+                tasks.push(task);
             }
 
             let mut proc_instruction_len = vec![0; asts.len()];
@@ -70,9 +65,8 @@ impl<'a> BytecodeGenerator<'a> {
             };
             let mut proc_start_offset = init_instructions.len() + halt_instructions.len();
 
-            drop(tx);
-            while let Some(msg) = rx.recv().await {
-                match msg {
+            for task in tasks {
+                match task.await {
                     Ok((ast_id, global, local, procedures, proc_length)) => {
                         let ast_i = ast_id.index();
                         proc_start_offset += global.len() + local.len();
@@ -93,8 +87,7 @@ impl<'a> BytecodeGenerator<'a> {
                 proc_start_offset += proc_instruction_len[ast_i];
             }
 
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
+            let mut tasks = Vec::with_capacity(global_instructions.len());
             for (ast_i, ((mut global, mut local), mut proc)) in global_instructions
                 .into_iter()
                 .zip(instructions.into_iter())
@@ -102,8 +95,7 @@ impl<'a> BytecodeGenerator<'a> {
                 .enumerate()
             {
                 let offset = proc_offsets[ast_i];
-                let tx = tx.clone();
-                tokio::task::spawn_blocking(move || {
+                let task = tokio::task::spawn_blocking(move || {
                     for inst in global
                         .iter_mut()
                         .chain(local.iter_mut())
@@ -114,8 +106,9 @@ impl<'a> BytecodeGenerator<'a> {
                             *proc_index += offset;
                         }
                     }
-                    tx.send((ast_i, global, local, proc)).unwrap();
+                    (ast_i, global, local, proc)
                 });
+                tasks.push(task);
             }
 
             let mut global_instructions = vec![vec![]; asts.len()];
@@ -124,11 +117,15 @@ impl<'a> BytecodeGenerator<'a> {
             let n_insturctions = proc_start_offset
                 + proc_instruction_len.iter().sum::<usize>()
                 + halt_instructions.len();
-            drop(tx);
-            while let Some((ast_i, global, local, proc)) = rx.recv().await {
-                global_instructions[ast_i] = global;
-                instructions[ast_i] = local;
-                proc_instructions[ast_i] = proc;
+            for task in tasks {
+                match task.await {
+                    Ok((ast_i, global, local, proc)) => {
+                        global_instructions[ast_i] = global;
+                        instructions[ast_i] = local;
+                        proc_instructions[ast_i] = proc;
+                    }
+                    _ => unimplemented!(),
+                }
             }
             let start = vm::time("Bytecode patch allocations", start, log_level);
 
@@ -371,7 +368,7 @@ enum ContextType {
     Loop { break_inst: usize },
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct Context {
     node_id: NodeID,
     closure_variables: HashMap<NodeID, usize>,
@@ -451,6 +448,7 @@ where
     procedures: Vec<Vec<Instruction>>,
     procedure_len: usize,
     scopes: Vec<Scope>,
+    static_proc_addresses: HashMap<NodeID, usize>,
     contexts: Vec<Context>,
     global_context: Option<Context>,
     dummy_offset: usize,
@@ -467,6 +465,7 @@ where
             procedures: Vec::new(),
             scopes: Vec::new(),
             contexts: Vec::new(),
+            static_proc_addresses: HashMap::new(),
             dummy_offset: 0,
             global_context,
             _tp: PhantomData::default(),
@@ -532,7 +531,11 @@ where
                 closure_offset += 1;
             }
         }
-        panic!("Failed to get variable offset of {:?}", var_id);
+        panic!(
+            "Failed to get variable offset of {:?}: {:?}",
+            var_id,
+            self.context_rev().collect::<Vec<&Context>>()
+        );
     }
 
     fn get_loop_break_offset(&self, loop_id: NodeID) -> OPOffset {
@@ -680,7 +683,20 @@ where
             VariableValue { variable, path } => {
                 self.ev_variable_value(ast, node_id, *variable, path)
             }
-            TypeDeclaration(LNBTypeDeclaration { constructor, .. }) => {
+            TypeDeclaration(LNBTypeDeclaration {
+                constructor,
+                methods,
+                ..
+            }) => {
+                for proc_id in methods.values() {
+                    match &ast.get_node_body(*proc_id) {
+                        ProcedureDeclaration(NBProcedureDeclaration { args, body, .. }) => {
+                            let addr = self.ev_procedure_addr(ast, *proc_id, &args, *body);
+                            self.static_proc_addresses.insert(*proc_id, addr);
+                        }
+                        _ => unimplemented!(),
+                    }
+                }
                 self.ev_declaration(ast, node_id, Some(**constructor))
             }
             ConstDeclaration { expr, .. }
@@ -809,13 +825,13 @@ where
         StackUsage::new(0, 0)
     }
 
-    fn ev_procedure(
+    fn ev_procedure_addr(
         &mut self,
         ast: &AstBranch<T>,
         node_id: NodeID,
         args: &[NodeID],
         body_id: NodeID,
-    ) -> StackUsage {
+    ) -> usize {
         let (scope, _) = self.with_scope(node_id, ContextType::ClosureBoundary, |bc| {
             for (i, arg) in args.iter().enumerate() {
                 if ast.get_node(*arg).has_closure_references() {
@@ -865,7 +881,17 @@ where
                 _ => panic!("The body of a procedure statement must be a Block"),
             };
         });
-        let proc_index = self.add_proc(scope);
+        self.add_proc(scope)
+    }
+
+    fn ev_procedure(
+        &mut self,
+        ast: &AstBranch<T>,
+        node_id: NodeID,
+        args: &[NodeID],
+        body_id: NodeID,
+    ) -> StackUsage {
+        let proc_index = self.ev_procedure_addr(ast, node_id, args, body_id);
         self.add_op(
             node_id,
             OPCode::PushImmediate(Value::ProcAddress(proc_index)),
@@ -987,8 +1013,13 @@ where
             assert_eq!(0, usage.popped);
         }
         self.add_op(node_id, OPCode::PrepareStackFrame(args.len()));
-        let offset = self.get_variable_offset(proc_var_id, None);
-        self.add_op(node_id, OPCode::SLoad(offset));
+        if let Some(offset) = self.static_proc_addresses.get(&proc_var_id) {
+            let offset = *offset;
+            self.add_op(node_id, OPCode::PushImmediate(Value::ProcAddress(offset)));
+        } else {
+            let offset = self.get_variable_offset(proc_var_id, None);
+            self.add_op(node_id, OPCode::SLoad(offset));
+        };
         self.add_op(node_id, OPCode::Jump);
         let offset = self.op_index() - pc_index - 1;
         self.set_op(pc_index, OPCode::PushPc(offset as isize));

@@ -1,6 +1,8 @@
 use super::AstTransformation;
 use crate::vm::ast::PartialType::Complete;
-use crate::vm::ast::{Ast, IsTypesInferred, LNBTypeDeclaration, LinkedNodeBody, TypesChecked};
+use crate::vm::ast::{
+    Ast, IsTypesInferred, LNBTypeDeclaration, LinkedNodeBody, PartialNodeBody, TypesChecked,
+};
 use crate::vm::ast::{AstBranch, Node};
 use crate::vm::ast::{ErrPart, NodeID, NodeType};
 use crate::vm::ast::{NBCall, NBProcedureDeclaration};
@@ -26,35 +28,31 @@ where
     }
     fn transform(&self, ast: Ast<T>) -> transform::Result<TypesChecked> {
         self.tokio_runtime.block_on(async {
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
             let asts = Arc::new(ast);
             let mut tasks = Vec::new();
             for ast_id in (&asts).ids() {
                 let asts = asts.clone();
-                let tx = tx.clone();
                 let task = tokio::task::spawn_blocking(move || {
                     let ast = asts.read_ast(ast_id);
                     let root_id = ast.root();
                     let checker = Checker::new(&ast, &asts);
 
                     let result = checker.check_all_types(root_id);
-                    tx.send(result).unwrap();
+                    result
                 });
                 tasks.push(task);
             }
-            drop(tx);
 
             let mut errors = vec![];
-            while let Some(msg) = rx.recv().await {
-                if let Err(err) = msg {
-                    errors.push(err);
-                }
-            }
-
-            for task in tasks.into_iter() {
-                if task.await.is_err() {
-                    unimplemented!()
+            for task in tasks {
+                match task.await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(err)) => {
+                        errors.push(err);
+                    }
+                    Err(_) => {
+                        unimplemented!()
+                    }
                 }
             }
 
@@ -331,7 +329,13 @@ where
                 self.fits_function_call(func, caller, func_tp, &call)?;
                 Ok(())
             }
-            ConstAssignment { .. } => unimplemented!(),
+            ConstAssignment { ident, .. } => {
+                let dec = self.ast.get_node(*ident);
+                match &dec.body {
+                    PartialNodeBody::Linked(TypeDeclaration(_)) => Ok(()),
+                    _ => unimplemented!(),
+                }
+            }
         }
     }
 

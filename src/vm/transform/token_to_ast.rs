@@ -1269,7 +1269,6 @@ where
             }
         }
         self.next_token(&node).expect(&RightBrace)?;
-        println!("{}", ident);
         Ok(self.add_uncomplete_node(node, UnlinkedNodeBody::Call { ident, args, path }))
     }
 

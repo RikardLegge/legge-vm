@@ -372,15 +372,15 @@ where
                                 vec![node_id],
                             ))?,
                         };
-                        if let Some(path) = path {
-                            if path.len() != 1 {
+                        if let Some(ref associated_path) = path {
+                            if associated_path.len() != 1 {
                                 Err(ast::Err::single(
-                                    "Invalid path for constant assignment",
+                                    "Invalid path for constant assignment (unimplemented)",
                                     "Assignment of constant value",
                                     vec![node_id],
                                 ))?
                             };
-                            let path = &path[0];
+                            let first_path = &associated_path[0];
                             let declaration = match &mut self.ast.get_node_mut(variable).body {
                                 PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(td)) => td,
                                 _ => Err(Err::single(
@@ -389,18 +389,17 @@ where
                                     vec![node_id],
                                 ))?,
                             };
-                            if declaration.methods.contains_key(path) {
+                            if declaration.methods.contains_key(first_path) {
                                 Err(ast::Err::single(
                                     "Method already defined on type",
                                     "Assignment of constant value",
                                     vec![node_id],
                                 ))?
                             }
-                            declaration.methods.insert(path.into(), expr);
+                            declaration.methods.insert(first_path.into(), expr);
 
                             self.ast
                                 .add_ref((variable, WriteValue), (expr, ReadValue), location);
-                            // HACK: NoOp
                             LinkedNodeBody::Block {
                                 static_body: vec![],
                                 import_body: vec![],
@@ -456,7 +455,7 @@ where
                             };
                             if path.len() != 1 {
                                 Err(Err::single(
-                                    "Can only call associated functions on types",
+                                    "Can only call associated functions on non nested types",
                                     "invalid function call",
                                     vec![node_id],
                                 ))?
