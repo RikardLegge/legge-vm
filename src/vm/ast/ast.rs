@@ -913,7 +913,7 @@ where
         }
     }
 
-    pub fn closest_fn(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
+    pub fn closest_fn(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation, usize)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
                 PartialNodeBody::Linked(LinkedNodeBody::ProcedureDeclaration(_)) => Some(node.id),
@@ -923,7 +923,7 @@ where
         .unwrap()
     }
 
-    pub fn closest_loop(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation)> {
+    pub fn closest_loop(&self, node_id: NodeID) -> Option<(NodeID, NodeReferenceLocation, usize)> {
         self.closest(node_id, |node| {
             Ok(match node.body {
                 PartialNodeBody::Linked(LinkedNodeBody::Loop { .. }) => Some(node.id),
@@ -937,7 +937,7 @@ where
         &self,
         node_id: NodeID,
         target_ident: &str,
-    ) -> Result<Option<(NodeID, NodeReferenceLocation)>> {
+    ) -> Result<Option<(NodeID, NodeReferenceLocation, usize)>> {
         use crate::vm::ast::LinkedNodeBody::*;
         self.closest(node_id, |node| {
             let mut closest_id = None;
@@ -973,17 +973,18 @@ where
         &self,
         mut node_id: NodeID,
         test: F,
-    ) -> Result<Option<(NodeID, NodeReferenceLocation)>>
+    ) -> Result<Option<(NodeID, NodeReferenceLocation, usize)>>
     where
         F: Fn(&Node<T>) -> Result<Option<NodeID>>,
     {
+        let mut depth = 0;
         let mut location = NodeReferenceLocation::Local;
         loop {
             let node = self.get_node(node_id);
             let result = test(node);
             match result {
                 Ok(Some(node_id)) => {
-                    break Ok(Some((node_id, location)));
+                    break Ok(Some((node_id, location, depth)));
                 }
                 Ok(_) => {
                     if let Some(parent_id) = node.parent_id {
@@ -997,6 +998,7 @@ where
                 }
                 Err(e) => break Result::Err(e),
             }
+            depth += 1;
         }
     }
 

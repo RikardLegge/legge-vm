@@ -120,11 +120,14 @@ where
         &self,
         node_id: NodeID,
         ident: &str,
-    ) -> ast::Result<Option<(NodeID, NodeReferenceLocation)>> {
+    ) -> ast::Result<Option<(NodeID, NodeReferenceLocation, usize)>> {
         self.ast.closest_variable(node_id, ident)
     }
 
-    fn closest_fn(&mut self, node_id: NodeID) -> ast::Result<(NodeID, NodeReferenceLocation)> {
+    fn closest_fn(
+        &mut self,
+        node_id: NodeID,
+    ) -> ast::Result<(NodeID, NodeReferenceLocation, usize)> {
         match self.ast.closest_fn(node_id) {
             Some(id) => Ok(id),
             _ => Err(Err::single(
@@ -135,7 +138,10 @@ where
         }
     }
 
-    fn closest_loop(&mut self, node_id: NodeID) -> ast::Result<(NodeID, NodeReferenceLocation)> {
+    fn closest_loop(
+        &mut self,
+        node_id: NodeID,
+    ) -> ast::Result<(NodeID, NodeReferenceLocation, usize)> {
         match self.ast.closest_loop(node_id) {
             Some(id) => Ok(id),
             _ => Err(Err::single(
@@ -168,7 +174,7 @@ where
                 }
             },
             PartialNodeValue::Unlinked(ident) => {
-                let (target_id, _) = match self.closest_variable(node_id, &ident)? {
+                let (target_id, _, _) = match self.closest_variable(node_id, &ident)? {
                     Some(target) => target,
                     None => Err(Err::single(
                         "Failed to find type",
@@ -267,7 +273,7 @@ where
                 LinkedNodeBody::PartialType { tp, parts } => match tp {
                     PartialType::Complete(tp) => Some(tp.clone()),
                     PartialType::Uncomplete(NodeType::Unknown { ident }) => {
-                        let (target_id, _) = match self.closest_variable(node_id, &ident)? {
+                        let (target_id, _, _) = match self.closest_variable(node_id, &ident)? {
                             Some(target) => target,
                             None => Err(Err::single(
                                 "Failed to find type",
@@ -346,14 +352,15 @@ where
             if let Some(body) = unlinked_body {
                 let linked_body = match body {
                     VariableAssignment { ident, path, expr } => {
-                        let (variable, location) = match self.closest_variable(node_id, &ident)? {
-                            Some(node_id) => node_id,
-                            None => Err(Err::single(
-                                "Failed to find variable to assign to",
-                                "variable not found",
-                                vec![node_id],
-                            ))?,
-                        };
+                        let (variable, location, _) =
+                            match self.closest_variable(node_id, &ident)? {
+                                Some(node_id) => node_id,
+                                None => Err(Err::single(
+                                    "Failed to find variable to assign to",
+                                    "variable not found",
+                                    vec![node_id],
+                                ))?,
+                            };
                         self.ast
                             .add_ref((variable, WriteValue), (expr, ReadValue), location);
                         LinkedNodeBody::VariableAssignment {
@@ -364,24 +371,23 @@ where
                     }
                     StaticAssignment { ident, path, expr } => {
                         let expr = expr;
-                        let (variable, location) = match self.closest_variable(node_id, &ident)? {
-                            Some(node_id) => node_id,
-                            None => Err(Err::single(
-                                "Failed to find type to assign to",
-                                "type not found",
-                                vec![node_id],
-                            ))?,
-                        };
+                        let (variable, location, variable_depth) =
+                            match self.closest_variable(node_id, &ident)? {
+                                Some(node_id) => node_id,
+                                None => Err(Err::single(
+                                    "Failed to find type to assign to",
+                                    "type not found",
+                                    vec![node_id],
+                                ))?,
+                            };
                         if let Some(ref associated_path) = path {
-                            match location {
-                                NodeReferenceLocation::Local => {}
-                                NodeReferenceLocation::Closure => {
-                                    Err(Err::single(
-                                        "Not allowed to define associated function in a different scope than the type",
-                                        "Not allowed ",
-                                        vec![node_id, expr],
-                                    ))?
-                                }
+                            if variable_depth > 1 {
+                                println!("{}", variable_depth);
+                                Err(Err::single(
+                                    "Associated methods can only be defined in the same scope as type",
+                                    "Not allowed",
+                                    vec![node_id, expr],
+                                ))?
                             }
                             if associated_path.len() != 1 {
                                 Err(ast::Err::single(
@@ -430,20 +436,21 @@ where
                         LinkedNodeBody::ConstValue { tp, value }
                     }
                     VariableValue { ident, path } => {
-                        let (variable, location) = match self.closest_variable(node_id, &ident)? {
-                            Some(target) => target,
-                            None => Err(Err::single(
-                                "Failed to find variable",
-                                "variable not found",
-                                vec![node_id],
-                            ))?,
-                        };
+                        let (variable, location, _) =
+                            match self.closest_variable(node_id, &ident)? {
+                                Some(target) => target,
+                                None => Err(Err::single(
+                                    "Failed to find variable",
+                                    "variable not found",
+                                    vec![node_id],
+                                ))?,
+                            };
                         self.ast
                             .add_ref((variable, ReadValue), (node_id, WriteValue), location);
                         LinkedNodeBody::VariableValue { variable, path }
                     }
                     Call { ident, args, path } => {
-                        let (func, location) = match self.closest_variable(node_id, &ident)? {
+                        let (func, location, _) = match self.closest_variable(node_id, &ident)? {
                             Some(node_id) => node_id,
                             None => Err(Err::single(
                                 "Failed to find variable to call",
@@ -544,7 +551,7 @@ where
                         }
                     }
                     Return { expr, automatic } => {
-                        let (func, location) = self.closest_fn(node_id)?;
+                        let (func, location, _) = self.closest_fn(node_id)?;
                         self.ast
                             .add_ref((func, GoTo), (node_id, ControlFlow), location);
                         LinkedNodeBody::Return {
@@ -554,7 +561,7 @@ where
                         }
                     }
                     Break => {
-                        let (r#loop, location) = self.closest_loop(node_id)?;
+                        let (r#loop, location, _) = self.closest_loop(node_id)?;
                         self.ast
                             .add_ref((r#loop, GoTo), (node_id, ControlFlow), location);
                         LinkedNodeBody::Break { r#loop }
