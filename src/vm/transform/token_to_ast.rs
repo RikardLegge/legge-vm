@@ -164,6 +164,18 @@ where
         }
     }
 
+    fn expect_panic(self, other: &TokenType, node: &PendingNode) -> ast::Result<&'a TokenType> {
+        match self.got {
+            Some(tp) => match tp.is(other) {
+                true => Ok(tp),
+                false => {
+                    panic!("{:?}", self.ast.get_node(node.id).body);
+                }
+            },
+            None => Err(self.missing_token_error(other)),
+        }
+    }
+
     fn expect_exact(self, other: &TokenType) -> ast::Result<&'a TokenType> {
         match self.got {
             Some(tp) => match tp == other {
@@ -223,14 +235,19 @@ where
         let mut dynamic_statements = Vec::new();
         while self.peek_token().any(None).is_ok() {
             let statement = self.do_statement(node.id)?;
-            match &self.ast.get_node(statement).body {
-                PartialNodeBody::Linked(body) => match body {
-                    LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { .. })
-                    | LinkedNodeBody::StaticDeclaration { .. } => static_statements.push(statement),
-                    LinkedNodeBody::Import { .. } => import_statements.push(statement),
+            if let Some(statement) = statement {
+                match &self.ast.get_node(statement).body {
+                    PartialNodeBody::Linked(body) => match body {
+                        LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { .. })
+                        | LinkedNodeBody::ConstAssignment { .. }
+                        | LinkedNodeBody::StaticDeclaration { .. } => {
+                            static_statements.push(statement)
+                        }
+                        LinkedNodeBody::Import { .. } => import_statements.push(statement),
+                        _ => dynamic_statements.push(statement),
+                    },
                     _ => dynamic_statements.push(statement),
-                },
-                _ => dynamic_statements.push(statement),
+                }
             }
         }
         self.add_complete_node(
@@ -337,7 +354,7 @@ where
                 _ => true,
             },
             Unlinked(_) => true,
-            Empty => true,
+            Empty => false,
         }
     }
 
@@ -347,14 +364,18 @@ where
         let mut dynamic_statements = Vec::new();
         while self.peek_token().not(&TokenType::RightCurlyBrace)? {
             let statement = self.do_statement(node.id)?;
-            match &self.ast.get_node(statement).body {
-                PartialNodeBody::Linked(body) => match body {
-                    LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { .. })
-                    | LinkedNodeBody::StaticDeclaration { .. } => static_statements.push(statement),
-                    LinkedNodeBody::Import { .. } => import_statements.push(statement),
+            if let Some(statement) = statement {
+                match &self.ast.get_node(statement).body {
+                    PartialNodeBody::Linked(body) => match body {
+                        LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { .. })
+                        | LinkedNodeBody::StaticDeclaration { .. } => {
+                            static_statements.push(statement)
+                        }
+                        LinkedNodeBody::Import { .. } => import_statements.push(statement),
+                        _ => dynamic_statements.push(statement),
+                    },
                     _ => dynamic_statements.push(statement),
-                },
-                _ => dynamic_statements.push(statement),
+                }
             }
         }
         self.next_token(&node).expect(&TokenType::RightCurlyBrace)?;
@@ -368,7 +389,7 @@ where
         ))
     }
 
-    fn do_statement(&mut self, parent_id: NodeID) -> ast::Result {
+    fn do_statement(&mut self, parent_id: NodeID) -> ast::Result<Option<NodeID>> {
         use crate::vm::token::KeyName::*;
         use crate::vm::token::TokenType::*;
         let node = self.node(parent_id);
@@ -405,7 +426,9 @@ where
                 self.do_statement_symbol(node, symbol)
             }
             LeftCurlyBrace => self.do_block(node),
-            EndStatement => Ok(self.add_node(node, PartialNodeBody::Empty)),
+            EndStatement => {
+                return Ok(None);
+            }
             KeyName(Return) => self.do_return(node),
             KeyName(If) => self.do_if(node),
             KeyName(Loop) => self.do_loop(node),
@@ -448,7 +471,7 @@ where
             let node = PendingNode { id: node };
             self.next_token(&node).expect(&EndStatement)?;
         }
-        Ok(node)
+        Ok(Some(node))
     }
 
     fn do_expression(&mut self, parent_id: NodeID) -> ast::Result {

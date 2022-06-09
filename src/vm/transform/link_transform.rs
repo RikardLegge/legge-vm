@@ -373,6 +373,16 @@ where
                             ))?,
                         };
                         if let Some(ref associated_path) = path {
+                            match location {
+                                NodeReferenceLocation::Local => {}
+                                NodeReferenceLocation::Closure => {
+                                    Err(Err::single(
+                                        "Not allowed to define associated function in a different scope than the type",
+                                        "Not allowed ",
+                                        vec![node_id, expr],
+                                    ))?
+                                }
+                            }
                             if associated_path.len() != 1 {
                                 Err(ast::Err::single(
                                     "Invalid path for constant assignment (unimplemented)",

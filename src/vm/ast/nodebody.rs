@@ -47,8 +47,8 @@ where
         use PartialNodeBody::*;
         match &self {
             Linked(body) => body,
+            Empty => unreachable!(),
             Unlinked(_) => unreachable!(),
-            _ => unreachable!(),
         }
     }
 }

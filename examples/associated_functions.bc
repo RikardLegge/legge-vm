@@ -1,16 +1,18 @@
-A -> type {
-  value: int
-}
+  A -> type {
+    value: int
+  }
 
-A.double :: fn (self: A) -> A {
-  self.value = self.value * 2;
-  return self;
-};
 
-a := A();
-a.value = 21;
-b :: A.double(a);
+  A.double :: fn (self: A) -> A {
+    self.value = self.value * 2;
+    return self;
+  };
 
-import std.print;
-print(b.value);
+
+  a := A();
+  a.value = 21;
+  b :: A.double(a);
+  import std.print;
+  print(b.value);
+
 // exit(b);
