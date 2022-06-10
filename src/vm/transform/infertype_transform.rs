@@ -6,7 +6,8 @@ use crate::vm::ast::{
     PartialNodeValue, TypesInferred,
 };
 use crate::vm::ast::{NBCall, NBProcedureDeclaration};
-use crate::vm::runtime::RuntimeDefinitions;
+use crate::vm::runtime::{Namespace, NamespaceElement, RuntimeDefinitions};
+use crate::vm::transform::link_transform::Linker;
 use crate::vm::transform::{AstTransformation, Result};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
@@ -18,6 +19,7 @@ struct Msg<T>
 where
     T: IsValid,
 {
+    // linker: Linker<T>,
     typer: Typer<T>,
     tx: Box<UnboundedSender<Msg<T>>>,
     state: TyperState,
@@ -30,6 +32,10 @@ where
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let t = &self.typer;
         match &self.state {
+            TyperState::Link => {
+                unimplemented!();
+                write!(f, "Link({:?}, q:{})", t.ast_id, t.queue.len())
+            }
             TyperState::TypeCheck => {
                 write!(f, "TypeCheck({:?}, q:{})", t.ast_id, t.queue.len())
             }
@@ -65,6 +71,7 @@ where
 }
 
 enum TyperState {
+    Link,
     TypeCheck,
     TypeCheckBlocked(AstBranchID),
     Err(ast::Err),
@@ -112,13 +119,19 @@ where
             let mut n_active = 0;
             let mut n_blocked = 0;
 
+            let mut exports = Namespace::new();
+            for (path, ast) in ast.paths() {
+                exports.set(path.as_ref(), NamespaceElement::Namespace(ast.exports()));
+            }
+
+            let exports = Arc::new(exports);
+
             let asts = Arc::new(ast);
             for id in (&asts).ids() {
-                let asts = asts.clone();
-                let definitions = self.vm_runtime.clone();
                 n_active += 1;
                 Msg {
-                    typer: Typer::new(id, asts, definitions),
+                    // linker: Linker::new(id, self.vm_runtime.clone(), exports.clone()),
+                    typer: Typer::new(id, asts.clone(), self.vm_runtime.clone()),
                     tx: Box::new(tx.clone()),
                     state: TyperState::TypeCheck,
                 }.resend();
@@ -135,6 +148,19 @@ where
                     continue
                 }
                 match msg.state {
+                    TyperState::Link => {
+                        let vm_runtime = self.vm_runtime.clone();
+                        let exports = exports.clone();
+                        tokio::task::spawn_blocking(move || {
+                            // let mut ast = asts.write_ast(msg.typer.ast_id);
+                            // let linker = Linker::new(&mut ast, vm_runtime, exports);
+                            // match linker.link() {
+                            //     Ok(pending) => Ok(pending),
+                            //     Err(e) => Err(e),
+                            // }
+                            unimplemented!()
+                        });
+                    },
                     TyperState::TypeCheck => {
                         tokio::task::spawn_blocking(move || {
                             use TyperResult::*;
@@ -559,6 +585,7 @@ where
         while let Some(node_id) = self.queue.pop_front() {
             let tp = {
                 let ast = self.asts.read_ast(self.ast_id);
+                // let ast = self.ast();
                 let node = ast.get_node(node_id);
                 for &child_id in node.body.children() {
                     if let None = ast.get_node(child_id).maybe_tp() {

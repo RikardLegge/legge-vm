@@ -15,7 +15,7 @@ use std::mem;
 use std::sync::Arc;
 
 #[derive(Debug)]
-struct PendingRef {
+pub struct PendingRef {
     target: (NodeID, NodeReferenceType),
     referencer: (NodeID, NodeReferenceType),
     loc: NodeReferenceLocation,
@@ -60,9 +60,8 @@ where
                 let asts = asts.clone();
                 let exports = exports.clone();
                 tokio::task::spawn_blocking(move || {
-                    let vm_runtime = &vm_runtime;
                     let mut ast = asts.write_ast(id);
-                    let linker = Linker::new(&mut ast, vm_runtime, &exports);
+                    let linker = Linker::new(&mut ast, vm_runtime, exports);
                     match linker.link() {
                         Ok(pending) => Ok(pending),
                         Err(e) => Err(e),
@@ -90,24 +89,24 @@ where
     }
 }
 
-struct Linker<'a, 'b, T>
+pub struct Linker<'a, T>
 where
     T: IsValid,
 {
     queue: VecDeque<NodeID>,
     ast: &'a mut AstBranch<T>,
-    runtime: &'b RuntimeDefinitions,
-    exports: &'b Namespace,
+    runtime: Arc<RuntimeDefinitions>,
+    exports: Arc<Namespace>,
 }
 
-impl<'a, 'b, T> Linker<'a, 'b, T>
+impl<'a, T> Linker<'a, T>
 where
     T: IsValid,
 {
-    fn new(
+    pub fn new(
         ast: &'a mut AstBranch<T>,
-        runtime: &'b RuntimeDefinitions,
-        exports: &'b Namespace,
+        runtime: Arc<RuntimeDefinitions>,
+        exports: Arc<Namespace>,
     ) -> Self {
         let root = ast.root();
         let queue = VecDeque::from(vec![root]);
@@ -334,7 +333,7 @@ where
         }
     }
 
-    fn link(mut self) -> ast::Result<Vec<PendingRef>> {
+    pub fn link(mut self) -> ast::Result<Vec<PendingRef>> {
         let mut pending_refs = Vec::new();
         while let Some(node_id) = self.queue.pop_front() {
             let node = self.ast.get_node(node_id);
@@ -506,7 +505,7 @@ where
                                     Some(NamespaceElement::Namespace(n)) => n,
                                     _ => unimplemented!(),
                                 },
-                                None => self.exports,
+                                None => &self.exports,
                             };
                             match parent.get(path.as_ref()) {
                                 Some(NamespaceElement::Namespace(_)) => unimplemented!(),

@@ -327,6 +327,7 @@ where
                     self.should_terminate_statement(constructor)
                 }
                 ConstDeclaration { expr, .. }
+                | ConstAssignment { expr, .. }
                 | StaticDeclaration { expr, .. }
                 | VariableDeclaration {
                     expr: Some(expr), ..
@@ -339,7 +340,21 @@ where
                 | If { .. }
                 | Loop { .. }
                 | Comment { .. } => false,
-                _ => true,
+
+                ConstValue { .. }
+                | TypeReference { .. }
+                | PartialType { .. }
+                | Op { .. }
+                | PrefixOp { .. }
+                | Expression(_)
+                | Import { .. }
+                | Reference { .. }
+                | VariableAssignment { .. }
+                | VariableValue { .. }
+                | Return { .. }
+                | Break { .. }
+                | VariableDeclaration { .. }
+                | Call(_) => true,
             },
             Unlinked(_) => true,
             Empty => false,
