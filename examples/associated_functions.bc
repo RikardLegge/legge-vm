@@ -9,7 +9,7 @@ A.double :: fn (self: A) -> A {
 
 a := A();
 a.value = 21;
-b :: A.double(a);
+b :: a.double();
 import std.print;
 print(b.value);
 

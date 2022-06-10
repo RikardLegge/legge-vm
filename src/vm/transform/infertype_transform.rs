@@ -33,10 +33,10 @@ where
         let t = &self.typer;
         match &self.state {
             TyperState::Link => {
-                unimplemented!();
+                write!(f, "Link({:?}", t.ast_id)
             }
-            TyperState::AddPendingRefs(_) => {
-                unimplemented!();
+            TyperState::AddPendingRefs(refs) => {
+                write!(f, "AddPendingRefs({:?}: refs: {:?}", t.ast_id, refs)
             }
             TyperState::TypeCheck => {
                 write!(f, "TypeCheck({:?}, q:{})", t.ast_id, t.queue.len())
@@ -83,8 +83,11 @@ enum TyperState {
 
 enum TyperResult {
     Complete,
-    BlockedBy {
+    BlockedByType {
         blocked_by: AstBranchID,
+    },
+    BlockedByLink {
+        blocked_by: NodeID,
     },
     FailedToMakeProgress {
         blocked: HashMap<NodeID, Vec<NodeID>>,
@@ -177,7 +180,8 @@ where
                             let ast_id = msg.typer.ast_id;
                             match msg.typer.infer_all_types() {
                                 Complete => msg.send(TyperState::Done(ast_id)),
-                                BlockedBy { blocked_by } => msg.send(TyperState::TypeCheckBlocked(blocked_by)),
+                                BlockedByType { blocked_by } => msg.send(TyperState::TypeCheckBlocked(blocked_by)),
+                                BlockedByLink { blocked_by } => msg.send(TyperState::TypeCheckBlocked(blocked_by.ast())),
                                 FailedToMakeProgress { blocked } => {
                                     let err = ast::Err::single(
                                         &format!("Unable to make progress type checking"), 
@@ -488,7 +492,7 @@ where
                     let node = ast.get_node(*variable);
                     let body = match &node.body {
                         PartialNodeBody::Linked(body) => body,
-                        PartialNodeBody::Unlinked(_) => unimplemented!(),
+                        PartialNodeBody::Unlinked(_) => Err(BlockedByUnlinkedNode(*variable))?,
                         PartialNodeBody::Empty => unreachable!(),
                     };
                     match body {
@@ -636,7 +640,9 @@ where
                     blockers.get_mut(&blocking_id).unwrap().push(node_id);
                 }
                 Err(BlockedByUnlinkedNode(blocking_id)) => {
-                    unimplemented!()
+                    return TyperResult::BlockedByLink {
+                        blocked_by: blocking_id,
+                    };
                 }
                 Err(Fail(err)) => return TyperResult::Failed(err),
             };
@@ -649,7 +655,7 @@ where
             for (blocking_id, _) in blockers.iter() {
                 if blocking_id.ast() != ast_id {
                     if made_progress {
-                        return TyperResult::BlockedBy {
+                        return TyperResult::BlockedByType {
                             blocked_by: blocking_id.ast(),
                         };
                     } else {
