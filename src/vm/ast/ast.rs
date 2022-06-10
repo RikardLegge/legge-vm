@@ -154,12 +154,15 @@ where
         AstGuard(id, ast)
     }
 
-    pub fn get_node_mut(&mut self, id: NodeID) -> AstGuardMut<T> {
-        let ast = self.write_ast(id.ast());
+    pub unsafe fn get_node_mut(&self, id: NodeID) -> AstGuardMut<T> {
+        let ast = unsafe {
+            // Safety: Caller ensure that there is no other mutable references
+            self.write_ast(id.ast())
+        };
         AstGuardMut(id, ast)
     }
 
-    pub fn write_ast(&self, id: AstBranchID) -> RwLockWriteGuard<AstBranch<T>> {
+    pub unsafe fn write_ast(&self, id: AstBranchID) -> RwLockWriteGuard<AstBranch<T>> {
         self.asts.get(id.index()).unwrap().write().unwrap()
     }
 
@@ -189,17 +192,23 @@ where
         loc: NodeReferenceLocation,
     ) {
         let referenced_by = NodeReference::new(referencer.0, referencer.1, loc);
-        let inserted_referenced = self
+        let mut ast = unsafe {
+            // Safety: Caller ensure that there is no other mutable references on this thread
+            self.write_ast(target.0.ast())
+        };
+        let inserted_referenced = ast
             .get_node_mut(target.0)
             .referenced_by
             .insert(referenced_by);
         assert!(inserted_referenced);
+        drop(ast);
 
         let references = NodeReference::new(target.0, target.1, loc);
-        let inserted_references = self
-            .get_node_mut(referencer.0)
-            .references
-            .insert(references);
+        let mut ast = unsafe {
+            // Safety: Caller ensure that there is no other mutable references on this thread
+            self.write_ast(referencer.0.ast())
+        };
+        let inserted_references = ast.get_node_mut(referencer.0).references.insert(references);
         assert!(inserted_references);
     }
 }
@@ -907,7 +916,8 @@ where
     }
 
     pub fn get_node_mut(&mut self, node_id: NodeID) -> &mut Node<T> {
-        match self.nodes.get_mut(node_id.0) {
+        assert_eq!(node_id.ast(), self.ast_id, "Accessing node from wrong ast");
+        match self.nodes.get_mut(node_id.index()) {
             Some(node) => node,
             None => panic!("Could not find {:?} in ast", node_id),
         }

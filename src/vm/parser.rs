@@ -34,7 +34,7 @@ impl<'a> Parser<'a> {
         }
         let ast = builder
             .transform(&transform::Main::new(tokio, file_store, path))?
-            .transform(&transform::Link::new(tokio, std.clone()))?
+            // .transform(&transform::Link::new(tokio, std.clone()))?
             .transform(&transform::InferTypes::new(tokio, std.clone()))?
             .transform(&transform::CheckTypes::new(tokio))?
             .transform(&transform::TreeShake::new())?

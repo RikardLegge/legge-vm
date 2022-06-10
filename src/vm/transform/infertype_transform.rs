@@ -7,7 +7,7 @@ use crate::vm::ast::{
 };
 use crate::vm::ast::{NBCall, NBProcedureDeclaration};
 use crate::vm::runtime::{Namespace, NamespaceElement, RuntimeDefinitions};
-use crate::vm::transform::link_transform::Linker;
+use crate::vm::transform::link_transform::{Linker, PendingRef};
 use crate::vm::transform::{AstTransformation, Result};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
@@ -34,7 +34,9 @@ where
         match &self.state {
             TyperState::Link => {
                 unimplemented!();
-                write!(f, "Link({:?}, q:{})", t.ast_id, t.queue.len())
+            }
+            TyperState::AddPendingRefs(_) => {
+                unimplemented!();
             }
             TyperState::TypeCheck => {
                 write!(f, "TypeCheck({:?}, q:{})", t.ast_id, t.queue.len())
@@ -72,6 +74,7 @@ where
 
 enum TyperState {
     Link,
+    AddPendingRefs(Vec<PendingRef>),
     TypeCheck,
     TypeCheckBlocked(AstBranchID),
     Err(ast::Err),
@@ -133,13 +136,14 @@ where
                     linker: Linker::new(id, asts.clone(), self.vm_runtime.clone(), exports.clone()),
                     typer: Typer::new(id, asts.clone(), self.vm_runtime.clone()),
                     tx: Box::new(tx.clone()),
-                    state: TyperState::TypeCheck,
+                    state: TyperState::Link,
                 }.resend();
             }
 
             let mut blocked_checkers = HashMap::new();
             let mut completed = HashSet::new();
             let mut error = None;
+            let mut pending_refs = HashMap::new();
 
             drop(tx);
             while let Some(mut msg) = rx.recv().await {
@@ -149,17 +153,23 @@ where
                 }
                 match msg.state {
                     TyperState::Link => {
-                        let vm_runtime = self.vm_runtime.clone();
-                        let exports = exports.clone();
                         tokio::task::spawn_blocking(move || {
-                            // let mut ast = asts.write_ast(msg.typer.ast_id);
-                            // let linker = Linker::new(&mut ast, vm_runtime, exports);
-                            // match linker.link() {
-                            //     Ok(pending) => Ok(pending),
-                            //     Err(e) => Err(e),
-                            // }
-                            unimplemented!()
+                            let res = msg.linker.link();
+                            match res {
+                                Ok(refs) => {
+                                    msg.send(TyperState::AddPendingRefs(refs))
+                                },
+                                Err(e) => msg.send(TyperState::Err(e))
+                            }
                         });
+                    },
+                    TyperState::AddPendingRefs(ref mut refs) => {
+                        let key = msg.typer.ast_id;
+                        if !pending_refs.contains_key(&key) {
+                            pending_refs.insert(key, Vec::new());
+                        }
+                        pending_refs.get_mut(&key).unwrap().append(refs);
+                        msg.send(TyperState::TypeCheck)
                     },
                     TyperState::TypeCheck => {
                         tokio::task::spawn_blocking(move || {
@@ -226,7 +236,14 @@ where
 
             // Drop blocked_checkers to ensure that all other references to the arch are dropped.
             drop(blocked_checkers);
-            let asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform error");
+            let mut asts = Arc::try_unwrap(asts).expect("Single instance of ast in infer type transform error");
+
+            for outer in pending_refs.values() {
+                for pending in outer {
+                    asts.add_ref(pending.target, pending.referencer, pending.loc);
+                }
+            }
+
             return if let Some(err) = error {
                 Err((asts.guarantee_state(), err))
             } else {
@@ -320,8 +337,11 @@ where
         self.asts.read_ast(self.ast_id)
     }
 
-    fn ast_mut(&self) -> RwLockWriteGuard<AstBranch<T>> {
-        self.asts.write_ast(self.ast_id)
+    fn ast_mut(&mut self) -> RwLockWriteGuard<AstBranch<T>> {
+        unsafe {
+            // Safety: takes a mutable reference to self and therefore guarantees that there are no other live mutable references
+            self.asts.write_ast(self.ast_id)
+        }
     }
 
     fn get_type<'a, 'b: 'a>(

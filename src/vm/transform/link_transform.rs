@@ -10,15 +10,14 @@ use crate::vm::ast::{NBCall, PartialNodeBody};
 use crate::vm::runtime::{Namespace, NamespaceElement, RuntimeDefinitions};
 use crate::vm::{ast, transform};
 use std::collections::VecDeque;
-use std::fmt::Debug;
 use std::mem;
 use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Debug)]
 pub struct PendingRef {
-    target: (NodeID, NodeReferenceType),
-    referencer: (NodeID, NodeReferenceType),
-    loc: NodeReferenceLocation,
+    pub target: (NodeID, NodeReferenceType),
+    pub referencer: (NodeID, NodeReferenceType),
+    pub loc: NodeReferenceLocation,
 }
 
 pub struct Link<'a> {
@@ -45,46 +44,37 @@ where
     fn name(&self) -> String {
         "Link Nodes".to_string()
     }
-    fn transform(&self, ast: Ast<T>) -> transform::Result<Linked> {
-        self.tokio_runtime.block_on(async {
-            let mut exports = Namespace::new();
-            for (path, ast) in ast.paths() {
-                exports.set(path.as_ref(), NamespaceElement::Namespace(ast.exports()));
-            }
-
-            let exports = Arc::new(exports);
-            let asts = Arc::new(ast);
-
-            let tasks = asts.ids().map(|id| {
-                let vm_runtime = self.vm_runtime.clone();
-                let asts = asts.clone();
-                let exports = exports.clone();
-                tokio::task::spawn_blocking(move || {
-                    let linker = Linker::new(id, asts, vm_runtime, exports);
-                    match linker.link() {
-                        Ok(pending) => Ok(pending),
-                        Err(e) => Err(e),
-                    }
-                })
-            });
-
-            let mut pending_refs = Vec::with_capacity(asts.len());
-            let task_results = futures::future::try_join_all(tasks).await.unwrap();
-            let mut asts = Arc::try_unwrap(asts).expect("Single instance of ast in link transform");
-            for res in task_results {
-                match res {
-                    Ok(refs) => pending_refs.push(refs),
-                    Err(err) => return Err((asts.guarantee_state(), err)),
-                }
-            }
-
-            for outer in pending_refs {
-                for pending in outer {
-                    asts.add_ref(pending.target, pending.referencer, pending.loc);
-                }
-            }
-            Ok(asts.guarantee_state())
-        })
+    fn transform(&self, _: Ast<T>) -> transform::Result<Linked> {
+        unimplemented!();
+        // self.tokio_runtime.block_on(async {
+        //     let mut exports = Namespace::new();
+        //     for (path, ast) in ast.paths() {
+        //         exports.set(path.as_ref(), NamespaceElement::Namespace(ast.exports()));
+        //     }
+        //
+        //     let exports = Arc::new(exports);
+        //     let asts = Arc::new(ast);
+        //
+        //     let tasks = asts.ids().map(|id| {
+        //         let vm_runtime = self.vm_runtime.clone();
+        //         let asts = asts.clone();
+        //         let exports = exports.clone();
+        //         tokio::task::spawn_blocking(move || {
+        //             let mut linker = Linker::new(id, asts, vm_runtime, exports);
+        //             linker.link()
+        //         })
+        //     });
+        //
+        //     let task_results = futures::future::try_join_all(tasks).await.unwrap();
+        //     let asts = Arc::try_unwrap(asts).expect("Single instance of ast in link transform");
+        //     for res in task_results {
+        //         match res {
+        //             Ok(_) => {}
+        //             Err(err) => return Err((asts.guarantee_state(), err)),
+        //         }
+        //     }
+        //     Ok(asts.guarantee_state())
+        // })
     }
 }
 
@@ -124,8 +114,11 @@ where
         self.asts.read_ast(self.ast_id)
     }
 
-    fn ast_mut(&self) -> RwLockWriteGuard<AstBranch<T>> {
-        self.asts.write_ast(self.ast_id)
+    fn ast_mut(&mut self) -> RwLockWriteGuard<AstBranch<T>> {
+        unsafe {
+            // Safety: takes a mutable reference to self and therefore guarantees that there are no other live mutable references
+            self.asts.write_ast(self.ast_id)
+        }
     }
 
     fn closest_variable(
@@ -276,6 +269,7 @@ where
                 LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { tp, .. }) => {
                     let tp = *tp;
                     drop(ast);
+
                     self.link_types(tp)?
                 }
                 LinkedNodeBody::PartialType { tp, parts } => match tp {
@@ -293,6 +287,7 @@ where
                             Some((tp_id, tp)) => {
                                 let tp = tp.clone();
                                 drop(ast);
+
                                 let mut ast = self.ast_mut();
                                 let node = ast.get_node_mut(node_id);
                                 node.body =
@@ -308,6 +303,7 @@ where
                         let tp = tp.clone();
                         let parts = parts.clone();
                         drop(ast);
+
                         match self.resolve_type(tp, &parts)? {
                             Some(tp) => {
                                 let mut ast = self.ast_mut();
@@ -344,20 +340,21 @@ where
         }
     }
 
-    pub fn link(mut self) -> ast::Result<Vec<PendingRef>> {
+    pub fn link(&mut self) -> ast::Result<Vec<PendingRef>> {
         let mut pending_refs = Vec::new();
         while let Some(node_id) = self.queue.pop_front() {
-            let ast = self.asts.read_ast(self.ast_id);
-            let node = ast.get_node(node_id);
-            for &child in node.body.children() {
-                self.queue.push_back(child);
-            }
-            let is_unlinked = if let PartialNodeBody::Unlinked(_) = node.body {
-                true
-            } else {
-                false
+            let is_unlinked = {
+                let ast = self.asts.read_ast(self.ast_id);
+                let node = ast.get_node(node_id);
+                for &child in node.body.children() {
+                    self.queue.push_back(child);
+                }
+                if let PartialNodeBody::Unlinked(_) = node.body {
+                    true
+                } else {
+                    false
+                }
             };
-            drop(ast);
 
             let unlinked_body = if is_unlinked {
                 let mut ast = self.ast_mut();
@@ -528,17 +525,21 @@ where
                     }
                     ImportValue { is_relative, path } => {
                         if is_relative {
-                            let parent = match self.ast().path.not_last() {
-                                Some(parent_path) => match self.exports.get(parent_path) {
-                                    Some(NamespaceElement::Namespace(n)) => n,
-                                    _ => unimplemented!(),
-                                },
-                                None => &self.exports,
+                            let parent = {
+                                let ast = self.ast();
+                                match ast.path.not_last() {
+                                    Some(parent_path) => match self.exports.get(parent_path) {
+                                        Some(NamespaceElement::Namespace(n)) => n,
+                                        _ => unimplemented!(),
+                                    },
+                                    None => &self.exports,
+                                }
                             };
                             match parent.get(path.as_ref()) {
                                 Some(NamespaceElement::Namespace(_)) => unimplemented!(),
                                 Some(NamespaceElement::BuiltIn(_)) => unimplemented!(),
                                 Some(NamespaceElement::Export(export)) => {
+                                    let export = *export;
                                     if export.is_static {
                                         pending_refs.push(PendingRef {
                                             target: (
@@ -551,6 +552,7 @@ where
                                             ),
                                             loc: self.loc_relative_to_root(node_id),
                                         });
+
                                         LinkedNodeBody::Reference {
                                             node_id: export.node_id,
                                         }
@@ -601,10 +603,12 @@ where
                 node.body = PartialNodeBody::Linked(linked_body);
             }
 
-            let ast = self.ast();
-            let node = ast.get_node(node_id);
-            if node.maybe_tp().is_none() {
-                drop(ast);
+            let missing_tp = {
+                let ast = self.ast();
+                let node = ast.get_node(node_id);
+                node.maybe_tp().is_none()
+            };
+            if missing_tp {
                 self.link_types(node_id)?;
             }
         }
