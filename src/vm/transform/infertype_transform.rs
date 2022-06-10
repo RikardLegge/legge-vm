@@ -1,8 +1,9 @@
 use crate::vm;
 use crate::vm::ast;
 use crate::vm::ast::{
-    Ast, AstBranch, AstBranchID, ErrPart, InferredType, IsLinked, LNBTypeDeclaration,
-    LinkedNodeBody, Node, NodeID, NodeType, NodeTypeSource, NodeValue, TypesInferred,
+    Ast, AstBranch, AstBranchID, ErrPart, InferredType, IsValid, LNBTypeDeclaration,
+    LinkedNodeBody, Node, NodeID, NodeType, NodeTypeSource, NodeValue, PartialNodeBody,
+    PartialNodeValue, TypesInferred,
 };
 use crate::vm::ast::{NBCall, NBProcedureDeclaration};
 use crate::vm::runtime::RuntimeDefinitions;
@@ -15,7 +16,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 struct Msg<T>
 where
-    T: IsLinked,
+    T: IsValid,
 {
     typer: Typer<T>,
     tx: Box<UnboundedSender<Msg<T>>>,
@@ -24,7 +25,7 @@ where
 
 impl<T> Debug for Msg<T>
 where
-    T: IsLinked,
+    T: IsValid,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let t = &self.typer;
@@ -43,7 +44,7 @@ where
 
 impl<T> Msg<T>
 where
-    T: IsLinked,
+    T: IsValid,
 {
     fn mut_state(mut self, state: TyperState) -> Self {
         self.state = state;
@@ -74,7 +75,9 @@ enum TyperResult {
     Complete,
     BlockedBy {
         blocked_by: AstBranchID,
-        made_progress: bool,
+    },
+    FailedToMakeProgress {
+        blocked: HashMap<NodeID, Vec<NodeID>>,
     },
     Failed(ast::Err),
 }
@@ -98,7 +101,7 @@ impl<'a> InferTypes<'a> {
 
 impl<'a, T> AstTransformation<T, TypesInferred> for InferTypes<'a>
 where
-    T: IsLinked,
+    T: IsValid,
 {
     fn name(&self) -> String {
         "Infer Types".to_string()
@@ -138,12 +141,12 @@ where
                             let ast_id = msg.typer.ast_id;
                             match msg.typer.infer_all_types() {
                                 Complete => msg.send(TyperState::Done(ast_id)),
-                                BlockedBy { made_progress:true, blocked_by } => msg.send(TyperState::TypeCheckBlocked(blocked_by)),
-                                BlockedBy { made_progress:false, blocked_by } => {
+                                BlockedBy { blocked_by } => msg.send(TyperState::TypeCheckBlocked(blocked_by)),
+                                FailedToMakeProgress { blocked } => {
                                     let err = ast::Err::single(
-                                        &format!("Unable to make progress type checking, blocked by {:?}", blocked_by), 
+                                        &format!("Unable to make progress type checking"), 
                                         "",
-                                        msg.typer.blocked.values().flatten().cloned().collect()
+                                        blocked.values().flatten().cloned().collect()
                                     );
                                     msg.send(TyperState::Err(err))
                                 },
@@ -183,8 +186,7 @@ where
                     let nodes = blocked_checkers
                         .values()
                         .flatten()
-                        .map(|msg| msg.typer.blocked.values())
-                        .flatten()
+                        .map(|msg| msg.typer.queue.iter())
                         .flatten()
                         .cloned()
                         .collect();
@@ -209,7 +211,8 @@ where
 }
 
 enum TypeInferenceErr {
-    BlockedBy(NodeID),
+    BlockedByNodeType(NodeID),
+    BlockedByUnlinkedNode(NodeID),
     Fail(ast::Err),
 }
 
@@ -217,10 +220,9 @@ type TypeInferenceResult<T = InferredType> = result::Result<T, TypeInferenceErr>
 
 pub struct Typer<T>
 where
-    T: IsLinked,
+    T: IsValid,
 {
     queue: VecDeque<NodeID>,
-    blocked: HashMap<NodeID, Vec<NodeID>>,
     ast_id: AstBranchID,
     asts: Arc<Ast<T>>,
     runtime: Arc<vm::runtime::RuntimeDefinitions>,
@@ -228,7 +230,7 @@ where
 
 impl<T> Debug for Typer<T>
 where
-    T: IsLinked,
+    T: IsValid,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Typer")
@@ -237,7 +239,7 @@ where
 
 impl<T> Typer<T>
 where
-    T: IsLinked,
+    T: IsValid,
 {
     pub fn new(
         ast_id: AstBranchID,
@@ -246,10 +248,8 @@ where
     ) -> Self {
         let root = asts.read_ast(ast_id).root();
         let queue = VecDeque::from(vec![root]);
-        let blocked = HashMap::new();
         Self {
             queue,
-            blocked,
             ast_id,
             asts,
             runtime,
@@ -307,23 +307,34 @@ where
         if let Some(tp) = ast.get_node(node_id).maybe_tp() {
             Ok(tp)
         } else {
-            Err(TypeInferenceErr::BlockedBy(node_id))
+            Err(TypeInferenceErr::BlockedByNodeType(node_id))
         }
     }
 
-    fn node_value_type(&self, value: &NodeValue<T>) -> NodeType {
-        match value {
+    fn node_value_type(&self, value: &PartialNodeValue<T>) -> Option<NodeType> {
+        let value = match value {
+            PartialNodeValue::Linked(value) => value,
+            PartialNodeValue::Unlinked(_) => return None,
+            PartialNodeValue::_TP(_) => unreachable!(),
+        };
+        let tp = match value {
             NodeValue::Int(..) => NodeType::Int,
             NodeValue::Float(..) => NodeType::Float,
             NodeValue::String(..) => NodeType::String,
             NodeValue::Bool(..) => NodeType::Bool,
             NodeValue::Struct(fields) => {
+                let types = fields
+                    .iter()
+                    .map(|(_, value)| self.node_value_type(&*value))
+                    .collect::<Vec<Option<NodeType>>>();
+                if types.iter().any(|tp| tp.is_none()) {
+                    return None;
+                }
                 let field_types = fields
                     .iter()
-                    .map(|(name, value)| {
-                        let tp = self.node_value_type(&*value);
-                        (name.clone(), tp)
-                    })
+                    .map(|(name, _)| name)
+                    .zip(types.into_iter())
+                    .map(|(name, tp)| (name.clone(), tp.unwrap()))
                     .collect();
                 NodeType::Struct {
                     fields: field_types,
@@ -334,7 +345,8 @@ where
                 let path = &def.paths[*id];
                 def.namespace.get_tp(path.as_ref()).unwrap().clone()
             }
-        }
+        };
+        Some(tp)
     }
 
     fn infer_type(&self, node: &Node<T>) -> result::Result<InferredType, TypeInferenceErr> {
@@ -343,7 +355,14 @@ where
         use crate::vm::ast::NodeTypeSource::*;
         use TypeInferenceErr::*;
         let ast = self.ast();
-        match &*node.body {
+
+        let body = match &node.body {
+            PartialNodeBody::Linked(body) => body,
+            PartialNodeBody::Unlinked(_) => return Err(BlockedByUnlinkedNode(node.id())),
+            PartialNodeBody::Empty => unreachable!(),
+        };
+
+        match body {
             TypeReference { tp } => match ast.partial_type(*tp) {
                 Some((_, tp)) => Ok(InferredType::new(tp.clone(), NodeTypeSource::Declared)),
                 None => Err(Fail(ast::Err::single(
@@ -370,7 +389,10 @@ where
                 };
                 let tp = match tp {
                     Some(tp) => tp,
-                    None => self.node_value_type(&*value),
+                    None => match self.node_value_type(&*value) {
+                        None => return Err(BlockedByUnlinkedNode(node.id())),
+                        Some(tp) => tp,
+                    },
                 };
                 Ok(InferredType::new(tp, Declared))
             }
@@ -411,13 +433,18 @@ where
                 let node = (&self.asts).get_node(*node_id);
                 match node.maybe_inferred_tp() {
                     Some(tp) => Ok(tp.clone()),
-                    None => Err(BlockedBy(*node_id)),
+                    None => Err(BlockedByNodeType(*node_id)),
                 }
             }
             VariableValue { variable, path } => {
                 let mut value_tp = self.get_type(&ast, *variable)?;
                 if let NodeType::NewType { .. } = value_tp {
-                    let body = &*ast.get_node(*variable).body;
+                    let node = ast.get_node(*variable);
+                    let body = match &node.body {
+                        PartialNodeBody::Linked(body) => body,
+                        PartialNodeBody::Unlinked(_) => unimplemented!(),
+                        PartialNodeBody::Empty => unreachable!(),
+                    };
                     match body {
                             LinkedNodeBody::ConstDeclaration { expr, .. }
                             | LinkedNodeBody::StaticDeclaration { expr, .. } => {
@@ -489,7 +516,7 @@ where
             }
             TypeDeclaration(LNBTypeDeclaration { tp, .. }) => match ast.get_node_type(*tp) {
                 Some(tp) => Ok(InferredType::new(tp.clone(), Declared)),
-                None => Err(BlockedBy(*tp)),
+                None => Err(BlockedByNodeType(*tp)),
             },
             Import { expr, .. } => {
                 let tp = self.get_type(&ast, *expr)?;
@@ -524,10 +551,8 @@ where
 
     fn infer_all_types(&mut self) -> TyperResult {
         use TypeInferenceErr::*;
-        {
-            let blocked = std::mem::replace(&mut self.blocked, HashMap::new());
-            self.queue.extend(blocked.into_values().flatten());
-        }
+
+        let mut blockers = HashMap::new();
 
         let mut made_progress = false;
         let ast_id = self.ast_id;
@@ -551,31 +576,39 @@ where
                         let node = ast.get_node_mut(node_id);
                         node.infer_type(tp);
                     }
-                    if let Some(blocked) = self.blocked.remove(&node_id) {
+                    if let Some(blocked) = blockers.remove(&node_id) {
                         for blocked_id in blocked {
                             self.queue.push_back(blocked_id);
                         }
                     }
                 }
-                Err(BlockedBy(blocking_id)) => {
-                    if !self.blocked.contains_key(&blocking_id) {
-                        self.blocked.insert(blocking_id, vec![]);
+                Err(BlockedByNodeType(blocking_id)) => {
+                    if !blockers.contains_key(&blocking_id) {
+                        blockers.insert(blocking_id, vec![]);
                     }
-                    self.blocked.get_mut(&blocking_id).unwrap().push(node_id);
+                    blockers.get_mut(&blocking_id).unwrap().push(node_id);
+                }
+                Err(BlockedByUnlinkedNode(blocking_id)) => {
+                    unimplemented!()
                 }
                 Err(Fail(err)) => return TyperResult::Failed(err),
             };
         }
 
-        if self.blocked.is_empty() {
+        self.queue.extend(blockers.values().flatten());
+
+        if blockers.is_empty() {
             TyperResult::Complete
         } else {
-            for (blocking_id, _) in self.blocked.iter() {
+            for (blocking_id, _) in blockers.iter() {
                 if blocking_id.ast() != ast_id {
-                    return TyperResult::BlockedBy {
-                        blocked_by: blocking_id.ast(),
-                        made_progress,
-                    };
+                    if made_progress {
+                        return TyperResult::BlockedBy {
+                            blocked_by: blocking_id.ast(),
+                        };
+                    } else {
+                        return TyperResult::FailedToMakeProgress { blocked: blockers };
+                    }
                 }
             }
             let parts = self

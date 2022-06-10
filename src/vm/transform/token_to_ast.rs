@@ -164,18 +164,6 @@ where
         }
     }
 
-    fn expect_panic(self, other: &TokenType, node: &PendingNode) -> ast::Result<&'a TokenType> {
-        match self.got {
-            Some(tp) => match tp.is(other) {
-                true => Ok(tp),
-                false => {
-                    panic!("{:?}", self.ast.get_node(node.id).body);
-                }
-            },
-            None => Err(self.missing_token_error(other)),
-        }
-    }
-
     fn expect_exact(self, other: &TokenType) -> ast::Result<&'a TokenType> {
         match self.got {
             Some(tp) => match tp == other {
