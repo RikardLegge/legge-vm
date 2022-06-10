@@ -9,7 +9,7 @@ count=300;
 
 for i in `seq 0 $count`; do
   ii=$((i+1));
-  echo "count :: $i;" > "tmp/test$i.bc"
+  echo "count :: $i;" > "../tmp/test$i.bc"
   for j in `seq 0 100`; do
     i1=$(($RANDOM % $count))
     i2=$(($RANDOM % $count))
@@ -49,10 +49,10 @@ for i in `seq 0 $count`; do
         break;
       }
     }
-    " >> "tmp/test$i.bc"
+    " >> "../tmp/test$i.bc"
   done
 done
 
 echo "
 count :: $ii;
-" > "tmp/test$ii.bc"
+" > "../tmp/test$ii.bc"
