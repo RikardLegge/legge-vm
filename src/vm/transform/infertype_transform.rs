@@ -19,7 +19,7 @@ struct Msg<T>
 where
     T: IsValid,
 {
-    // linker: Linker<T>,
+    linker: Linker<T>,
     typer: Typer<T>,
     tx: Box<UnboundedSender<Msg<T>>>,
     state: TyperState,
@@ -130,7 +130,7 @@ where
             for id in (&asts).ids() {
                 n_active += 1;
                 Msg {
-                    // linker: Linker::new(id, self.vm_runtime.clone(), exports.clone()),
+                    linker: Linker::new(id, asts.clone(), self.vm_runtime.clone(), exports.clone()),
                     typer: Typer::new(id, asts.clone(), self.vm_runtime.clone()),
                     tx: Box::new(tx.clone()),
                     state: TyperState::TypeCheck,

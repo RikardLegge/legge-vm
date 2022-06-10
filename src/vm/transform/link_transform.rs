@@ -1,8 +1,8 @@
 use crate::vm::ast::NodeReferenceType::*;
 use crate::vm::ast::UnlinkedNodeBody::*;
 use crate::vm::ast::{
-    Ast, LNBTypeDeclaration, Linked, LinkedNodeBody, NodeReferenceLocation, PartialNodeValue,
-    PartialType,
+    Ast, AstBranchID, LNBTypeDeclaration, Linked, LinkedNodeBody, NodeReferenceLocation,
+    PartialNodeValue, PartialType,
 };
 use crate::vm::ast::{AstBranch, IsValid, NodeID};
 use crate::vm::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue};
@@ -12,7 +12,7 @@ use crate::vm::{ast, transform};
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::mem;
-use std::sync::Arc;
+use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Debug)]
 pub struct PendingRef {
@@ -60,8 +60,7 @@ where
                 let asts = asts.clone();
                 let exports = exports.clone();
                 tokio::task::spawn_blocking(move || {
-                    let mut ast = asts.write_ast(id);
-                    let linker = Linker::new(&mut ast, vm_runtime, exports);
+                    let linker = Linker::new(id, asts, vm_runtime, exports);
                     match linker.link() {
                         Ok(pending) => Ok(pending),
                         Err(e) => Err(e),
@@ -89,33 +88,44 @@ where
     }
 }
 
-pub struct Linker<'a, T>
+pub struct Linker<T>
 where
     T: IsValid,
 {
     queue: VecDeque<NodeID>,
-    ast: &'a mut AstBranch<T>,
+    ast_id: AstBranchID,
+    asts: Arc<Ast<T>>,
     runtime: Arc<RuntimeDefinitions>,
     exports: Arc<Namespace>,
 }
 
-impl<'a, T> Linker<'a, T>
+impl<T> Linker<T>
 where
     T: IsValid,
 {
     pub fn new(
-        ast: &'a mut AstBranch<T>,
+        ast_id: AstBranchID,
+        asts: Arc<Ast<T>>,
         runtime: Arc<RuntimeDefinitions>,
         exports: Arc<Namespace>,
     ) -> Self {
-        let root = ast.root();
+        let root = asts.read_ast(ast_id).root();
         let queue = VecDeque::from(vec![root]);
         Self {
             queue,
-            ast,
+            ast_id,
+            asts,
             runtime,
             exports,
         }
+    }
+
+    fn ast(&self) -> RwLockReadGuard<AstBranch<T>> {
+        self.asts.read_ast(self.ast_id)
+    }
+
+    fn ast_mut(&self) -> RwLockWriteGuard<AstBranch<T>> {
+        self.asts.write_ast(self.ast_id)
     }
 
     fn closest_variable(
@@ -123,14 +133,11 @@ where
         node_id: NodeID,
         ident: &str,
     ) -> ast::Result<Option<(NodeID, NodeReferenceLocation, usize)>> {
-        self.ast.closest_variable(node_id, ident)
+        self.ast().closest_variable(node_id, ident)
     }
 
-    fn closest_fn(
-        &mut self,
-        node_id: NodeID,
-    ) -> ast::Result<(NodeID, NodeReferenceLocation, usize)> {
-        match self.ast.closest_fn(node_id) {
+    fn closest_fn(&self, node_id: NodeID) -> ast::Result<(NodeID, NodeReferenceLocation, usize)> {
+        match self.ast().closest_fn(node_id) {
             Some(id) => Ok(id),
             _ => Err(Err::single(
                 "No function ancestor found starting at",
@@ -140,11 +147,8 @@ where
         }
     }
 
-    fn closest_loop(
-        &mut self,
-        node_id: NodeID,
-    ) -> ast::Result<(NodeID, NodeReferenceLocation, usize)> {
-        match self.ast.closest_loop(node_id) {
+    fn closest_loop(&self, node_id: NodeID) -> ast::Result<(NodeID, NodeReferenceLocation, usize)> {
+        match self.ast().closest_loop(node_id) {
             Some(id) => Ok(id),
             _ => Err(Err::single(
                 "No loop ancestor found starting at",
@@ -184,7 +188,7 @@ where
                         vec![node_id],
                     ))?,
                 };
-                match &self.ast.get_node(target_id).body {
+                match &self.ast().get_node(target_id).body {
                     PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(
                         LNBTypeDeclaration { default_value, .. },
                     )) => match default_value {
@@ -265,11 +269,13 @@ where
     }
 
     fn link_types(&mut self, node_id: NodeID) -> ast::Result<Option<NodeType>> {
-        let node = self.ast.get_node(node_id);
+        let ast = self.ast();
+        let node = ast.get_node(node_id);
         let tp = match &node.body {
             PartialNodeBody::Linked(body) => match body {
                 LinkedNodeBody::TypeDeclaration(LNBTypeDeclaration { tp, .. }) => {
                     let tp = *tp;
+                    drop(ast);
                     self.link_types(tp)?
                 }
                 LinkedNodeBody::PartialType { tp, parts } => match tp {
@@ -283,10 +289,12 @@ where
                                 vec![node_id],
                             ))?,
                         };
-                        match self.ast.partial_type(target_id) {
+                        match ast.partial_type(target_id) {
                             Some((tp_id, tp)) => {
                                 let tp = tp.clone();
-                                let node = self.ast.get_node_mut(node_id);
+                                drop(ast);
+                                let mut ast = self.ast_mut();
+                                let node = ast.get_node_mut(node_id);
                                 node.body =
                                     PartialNodeBody::Linked(LinkedNodeBody::TypeReference {
                                         tp: tp_id,
@@ -299,9 +307,11 @@ where
                     PartialType::Uncomplete(tp) => {
                         let tp = tp.clone();
                         let parts = parts.clone();
+                        drop(ast);
                         match self.resolve_type(tp, &parts)? {
                             Some(tp) => {
-                                let node = self.ast.get_node_mut(node_id);
+                                let mut ast = self.ast_mut();
+                                let node = ast.get_node_mut(node_id);
                                 node.body = PartialNodeBody::Linked(LinkedNodeBody::PartialType {
                                     tp: PartialType::Complete(tp.clone()),
                                     parts,
@@ -320,8 +330,9 @@ where
     }
 
     fn loc_relative_to_root(&self, mut node_id: NodeID) -> NodeReferenceLocation {
+        let ast = self.ast();
         loop {
-            let node = self.ast.get_node(node_id);
+            let node = ast.get_node(node_id);
             if let Some(parent_id) = node.parent_id {
                 if node.is_closure_boundary() {
                     break NodeReferenceLocation::Closure;
@@ -336,12 +347,21 @@ where
     pub fn link(mut self) -> ast::Result<Vec<PendingRef>> {
         let mut pending_refs = Vec::new();
         while let Some(node_id) = self.queue.pop_front() {
-            let node = self.ast.get_node(node_id);
+            let ast = self.asts.read_ast(self.ast_id);
+            let node = ast.get_node(node_id);
             for &child in node.body.children() {
                 self.queue.push_back(child);
             }
-            let unlinked_body = if let PartialNodeBody::Unlinked(_) = node.body {
-                let node = self.ast.get_node_mut(node_id);
+            let is_unlinked = if let PartialNodeBody::Unlinked(_) = node.body {
+                true
+            } else {
+                false
+            };
+            drop(ast);
+
+            let unlinked_body = if is_unlinked {
+                let mut ast = self.ast_mut();
+                let node = ast.get_node_mut(node_id);
                 let body = mem::replace(&mut node.body, PartialNodeBody::Empty);
                 match body {
                     PartialNodeBody::Unlinked(unlinked_body) => Some(unlinked_body),
@@ -350,6 +370,7 @@ where
             } else {
                 None
             };
+
             if let Some(body) = unlinked_body {
                 let linked_body = match body {
                     VariableAssignment { ident, path, expr } => {
@@ -362,7 +383,7 @@ where
                                     vec![node_id],
                                 ))?,
                             };
-                        self.ast
+                        self.ast_mut()
                             .add_ref((variable, WriteValue), (expr, ReadValue), location);
                         LinkedNodeBody::VariableAssignment {
                             variable,
@@ -398,7 +419,8 @@ where
                                 ))?
                             };
                             let first_path = &associated_path[0];
-                            let declaration = match &mut self.ast.get_node_mut(variable).body {
+                            let mut ast = self.ast_mut();
+                            let declaration = match &mut ast.get_node_mut(variable).body {
                                 PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(td)) => td,
                                 _ => Err(Err::single(
                                     "Only allowed to statically assign to type declarations",
@@ -415,16 +437,18 @@ where
                             }
                             declaration.methods.insert(first_path.into(), expr);
 
-                            self.ast
-                                .add_ref((variable, WriteValue), (expr, ReadValue), location);
+                            ast.add_ref((variable, WriteValue), (expr, ReadValue), location);
                             LinkedNodeBody::Block {
                                 static_body: vec![],
                                 import_body: vec![],
                                 dynamic_body: vec![],
                             }
                         } else {
-                            self.ast
-                                .add_ref((variable, WriteValue), (expr, ReadValue), location);
+                            self.ast_mut().add_ref(
+                                (variable, WriteValue),
+                                (expr, ReadValue),
+                                location,
+                            );
                             LinkedNodeBody::ConstAssignment {
                                 ident: variable,
                                 path,
@@ -446,8 +470,11 @@ where
                                     vec![node_id],
                                 ))?,
                             };
-                        self.ast
-                            .add_ref((variable, ReadValue), (node_id, WriteValue), location);
+                        self.ast_mut().add_ref(
+                            (variable, ReadValue),
+                            (node_id, WriteValue),
+                            location,
+                        );
                         LinkedNodeBody::VariableValue { variable, path }
                     }
                     Call { ident, args, path } => {
@@ -459,10 +486,11 @@ where
                                 vec![node_id],
                             ))?,
                         };
-                        self.ast
+                        self.ast_mut()
                             .add_ref((func, GoTo), (node_id, ExecuteValue), location);
                         if let Some(path) = path {
-                            let body = &self.ast.get_node(func).body;
+                            let ast = self.ast();
+                            let body = &ast.get_node(func).body;
                             let declaration = match body {
                                 PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(t)) => t,
                                 PartialNodeBody::Linked(LinkedNodeBody::VariableDeclaration {
@@ -500,7 +528,7 @@ where
                     }
                     ImportValue { is_relative, path } => {
                         if is_relative {
-                            let parent = match self.ast.path.not_last() {
+                            let parent = match self.ast().path.not_last() {
                                 Some(parent_path) => match self.exports.get(parent_path) {
                                     Some(NamespaceElement::Namespace(n)) => n,
                                     _ => unimplemented!(),
@@ -553,7 +581,7 @@ where
                     }
                     Return { expr, automatic } => {
                         let (func, location, _) = self.closest_fn(node_id)?;
-                        self.ast
+                        self.ast_mut()
                             .add_ref((func, GoTo), (node_id, ControlFlow), location);
                         LinkedNodeBody::Return {
                             func,
@@ -563,17 +591,20 @@ where
                     }
                     Break => {
                         let (r#loop, location, _) = self.closest_loop(node_id)?;
-                        self.ast
+                        self.ast_mut()
                             .add_ref((r#loop, GoTo), (node_id, ControlFlow), location);
                         LinkedNodeBody::Break { r#loop }
                     }
                 };
-                let node = self.ast.get_node_mut(node_id);
+                let mut ast = self.ast_mut();
+                let node = ast.get_node_mut(node_id);
                 node.body = PartialNodeBody::Linked(linked_body);
             }
 
-            let node = self.ast.get_node(node_id);
-            if let None = node.maybe_tp() {
+            let ast = self.ast();
+            let node = ast.get_node(node_id);
+            if node.maybe_tp().is_none() {
+                drop(ast);
                 self.link_types(node_id)?;
             }
         }
