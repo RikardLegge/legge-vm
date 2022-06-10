@@ -375,7 +375,7 @@ impl<T> Node<T>
 where
     T: IsValid,
 {
-    pub fn infer_type(&mut self, itp: InferredType) {
+    pub fn set_inferred_tp(&mut self, itp: InferredType) {
         self.tp = Some(itp);
     }
 }

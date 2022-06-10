@@ -574,7 +574,7 @@ where
                     {
                         let mut ast = self.ast_mut();
                         let node = ast.get_node_mut(node_id);
-                        node.infer_type(tp);
+                        node.set_inferred_tp(tp);
                     }
                     if let Some(blocked) = blockers.remove(&node_id) {
                         for blocked_id in blocked {
@@ -595,11 +595,10 @@ where
             };
         }
 
-        self.queue.extend(blockers.values().flatten());
-
         if blockers.is_empty() {
             TyperResult::Complete
         } else {
+            self.queue.extend(blockers.values().flatten());
             for (blocking_id, _) in blockers.iter() {
                 if blocking_id.ast() != ast_id {
                     if made_progress {

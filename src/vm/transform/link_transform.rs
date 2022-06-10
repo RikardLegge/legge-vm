@@ -62,9 +62,8 @@ where
                 tokio::task::spawn_blocking(move || {
                     let vm_runtime = &vm_runtime;
                     let mut ast = asts.write_ast(id);
-                    let root_id = ast.root();
                     let linker = Linker::new(&mut ast, vm_runtime, &exports);
-                    match linker.link(root_id) {
+                    match linker.link() {
                         Ok(pending) => Ok(pending),
                         Err(e) => Err(e),
                     }
@@ -95,6 +94,7 @@ struct Linker<'a, 'b, T>
 where
     T: IsValid,
 {
+    queue: VecDeque<NodeID>,
     ast: &'a mut AstBranch<T>,
     runtime: &'b RuntimeDefinitions,
     exports: &'b Namespace,
@@ -109,7 +109,10 @@ where
         runtime: &'b RuntimeDefinitions,
         exports: &'b Namespace,
     ) -> Self {
+        let root = ast.root();
+        let queue = VecDeque::from(vec![root]);
         Self {
+            queue,
             ast,
             runtime,
             exports,
@@ -331,13 +334,12 @@ where
         }
     }
 
-    fn link(mut self, root_id: NodeID) -> ast::Result<Vec<PendingRef>> {
+    fn link(mut self) -> ast::Result<Vec<PendingRef>> {
         let mut pending_refs = Vec::new();
-        let mut queue = VecDeque::from(vec![root_id]);
-        while let Some(node_id) = queue.pop_front() {
+        while let Some(node_id) = self.queue.pop_front() {
             let node = self.ast.get_node(node_id);
             for &child in node.body.children() {
-                queue.push_back(child);
+                self.queue.push_back(child);
             }
             let unlinked_body = if let PartialNodeBody::Unlinked(_) = node.body {
                 let node = self.ast.get_node_mut(node_id);
