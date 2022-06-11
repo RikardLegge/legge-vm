@@ -1179,8 +1179,9 @@ where
             }
             Dot => {
                 let path = Some(self.find_traverse_path(&node, vec![])?);
-                match self.next_token(&node).any(Some(&Assignment))? {
+                match self.peek_token().any(Some(&Assignment))? {
                     Assignment => {
+                        self.next_token(&node);
                         let expr = self.do_expression(node.id)?;
                         let node = self.add_uncomplete_node(
                             node,
@@ -1189,6 +1190,7 @@ where
                         Ok(node)
                     }
                     ConstDeclaration => {
+                        self.next_token(&node);
                         let expr = self.do_expression(node.id)?;
                         let node = self.add_uncomplete_node(
                             node,
@@ -1196,8 +1198,9 @@ where
                         );
                         Ok(node)
                     }
-                    token => {
-                        let token = token.clone();
+                    LeftBrace => self.do_function_call(node, ident, path),
+                    _ => {
+                        let token = self.next_token(&node).any(None)?.clone();
                         Err(wrong_token_error(
                             &self.ast,
                             node.id,

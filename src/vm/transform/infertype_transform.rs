@@ -7,7 +7,7 @@ use crate::vm::ast::{
 };
 use crate::vm::ast::{NBCall, NBProcedureDeclaration};
 use crate::vm::runtime::{Namespace, NamespaceElement, RuntimeDefinitions};
-use crate::vm::transform::link_transform::{Linker, PendingRef};
+use crate::vm::transform::link_transform::{Linker, LinkerResult, PendingRef};
 use crate::vm::transform::{AstTransformation, Result};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
@@ -41,8 +41,8 @@ where
             TyperState::TypeCheck => {
                 write!(f, "TypeCheck({:?}, q:{})", t.ast_id, t.queue.len())
             }
-            TyperState::TypeCheckBlocked(ast_id) => {
-                write!(f, "TypeCheckBlocked({:?}, by: {:?})", t.ast_id, ast_id)
+            TyperState::Blocked(ast_id) => {
+                write!(f, "Blocked({:?}, by: {:?}", t.ast_id, ast_id)
             }
             TyperState::Err(err) => write!(f, "Err({})", err.to_string()),
             TyperState::Done(ast_id) => write!(f, "Done({:?})", ast_id),
@@ -76,7 +76,7 @@ enum TyperState {
     Link,
     AddPendingRefs(Vec<PendingRef>),
     TypeCheck,
-    TypeCheckBlocked(AstBranchID),
+    Blocked(AstBranchID),
     Err(ast::Err),
     Done(AstBranchID),
 }
@@ -157,12 +157,16 @@ where
                 match msg.state {
                     TyperState::Link => {
                         tokio::task::spawn_blocking(move || {
-                            let res = msg.linker.link();
-                            match res {
-                                Ok(refs) => {
+                            match msg.linker.link_all_nodes() {
+                                LinkerResult::Complete(refs) => {
                                     msg.send(TyperState::AddPendingRefs(refs))
-                                },
-                                Err(e) => msg.send(TyperState::Err(e))
+                                }
+                                LinkerResult::BlockedByType { .. } => {
+                                    msg.send(TyperState::TypeCheck)
+                                }
+                                LinkerResult::BlockedByLink { .. } => unimplemented!(),
+                                LinkerResult::FailedToMakeProgress { .. } => unimplemented!(),
+                                LinkerResult::Failed(e) => msg.send(TyperState::Err(e))
                             }
                         });
                     },
@@ -180,8 +184,8 @@ where
                             let ast_id = msg.typer.ast_id;
                             match msg.typer.infer_all_types() {
                                 Complete => msg.send(TyperState::Done(ast_id)),
-                                BlockedByType { blocked_by } => msg.send(TyperState::TypeCheckBlocked(blocked_by)),
-                                BlockedByLink { blocked_by } => msg.send(TyperState::TypeCheckBlocked(blocked_by.ast())),
+                                BlockedByType { blocked_by } => msg.send(TyperState::Blocked(blocked_by)),
+                                BlockedByLink { blocked_by } => msg.send(TyperState::Link),
                                 FailedToMakeProgress { blocked } => {
                                     let err = ast::Err::single(
                                         &format!("Unable to make progress type checking"), 
@@ -194,7 +198,7 @@ where
                             };
                         });
                     }
-                    TyperState::TypeCheckBlocked(by) => {
+                    TyperState::Blocked(by) => {
                         let msg = msg.mut_state(TyperState::TypeCheck);
                         if completed.contains(&by) {
                             msg.resend();
@@ -408,8 +412,7 @@ where
 
         let body = match &node.body {
             PartialNodeBody::Linked(body) => body,
-            PartialNodeBody::Unlinked(_) => return Err(BlockedByUnlinkedNode(node.id())),
-            PartialNodeBody::Empty => unreachable!(),
+            _ => return Err(BlockedByUnlinkedNode(node.id())),
         };
 
         match body {
@@ -609,7 +612,6 @@ where
         while let Some(node_id) = self.queue.pop_front() {
             let tp = {
                 let ast = self.asts.read_ast(self.ast_id);
-                // let ast = self.ast();
                 let node = ast.get_node(node_id);
                 for &child_id in node.body.children() {
                     if let None = ast.get_node(child_id).maybe_tp() {

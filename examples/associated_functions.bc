@@ -2,15 +2,14 @@ A -> type {
   value: int
 }
 
-A.double :: fn (self: A) -> A {
+A.double :: fn (self: A) {
   self.value = self.value * 2;
-  return self;
 };
 
 a := A();
 a.value = 21;
-b :: a.double();
+a.double();
 import std.print;
-print(b.value);
+print(a.value);
 
 // exit(b);

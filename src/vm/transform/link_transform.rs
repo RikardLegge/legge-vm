@@ -2,16 +2,16 @@ use crate::vm::ast::NodeReferenceType::*;
 use crate::vm::ast::UnlinkedNodeBody::*;
 use crate::vm::ast::{
     Ast, AstBranchID, LNBTypeDeclaration, Linked, LinkedNodeBody, NodeReferenceLocation,
-    PartialNodeValue, PartialType,
+    PartialNodeValue, PartialType, UnlinkedNodeBody,
 };
 use crate::vm::ast::{AstBranch, IsValid, NodeID};
 use crate::vm::ast::{Err, ErrPart, NodeReferenceType, NodeType, NodeValue};
 use crate::vm::ast::{NBCall, PartialNodeBody};
 use crate::vm::runtime::{Namespace, NamespaceElement, RuntimeDefinitions};
 use crate::vm::{ast, transform};
-use std::collections::VecDeque;
-use std::mem;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
+use std::{mem, result};
 
 #[derive(Debug)]
 pub struct PendingRef {
@@ -78,10 +78,36 @@ where
     }
 }
 
+pub enum LinkerErr {
+    BlockedByNodeType(NodeID),
+    Fail(ast::Err),
+}
+
+pub enum LinkerResult {
+    Complete(Vec<PendingRef>),
+    BlockedByType {
+        blocked: HashMap<NodeID, Vec<NodeID>>,
+    },
+    BlockedByLink {
+        blocked_by: NodeID,
+    },
+    FailedToMakeProgress {
+        blocked: HashMap<NodeID, Vec<NodeID>>,
+    },
+    Failed(ast::Err),
+}
+
+impl From<ast::Err> for LinkerErr {
+    fn from(e: Err) -> Self {
+        LinkerErr::Fail(e)
+    }
+}
+
 pub struct Linker<T>
 where
     T: IsValid,
 {
+    pending_refs: Vec<PendingRef>,
     queue: VecDeque<NodeID>,
     ast_id: AstBranchID,
     asts: Arc<Ast<T>>,
@@ -100,10 +126,12 @@ where
         exports: Arc<Namespace>,
     ) -> Self {
         let root = asts.read_ast(ast_id).root();
+        let pending_refs = Vec::new();
         let queue = VecDeque::from(vec![root]);
         Self {
             queue,
             ast_id,
+            pending_refs,
             asts,
             runtime,
             exports,
@@ -340,278 +368,303 @@ where
         }
     }
 
-    pub fn link(&mut self) -> ast::Result<Vec<PendingRef>> {
-        let mut pending_refs = Vec::new();
+    pub fn link_all_nodes(&mut self) -> LinkerResult {
+        let mut made_progress = false;
+        let mut blockers = HashMap::new();
+
         while let Some(node_id) = self.queue.pop_front() {
-            let is_unlinked = {
+            {
                 let ast = self.asts.read_ast(self.ast_id);
                 let node = ast.get_node(node_id);
                 for &child in node.body.children() {
                     self.queue.push_back(child);
                 }
                 if let PartialNodeBody::Unlinked(_) = node.body {
-                    true
                 } else {
-                    false
+                    continue;
                 }
-            };
-
-            let unlinked_body = if is_unlinked {
-                let mut ast = self.ast_mut();
-                let node = ast.get_node_mut(node_id);
-                let body = mem::replace(&mut node.body, PartialNodeBody::Empty);
-                match body {
-                    PartialNodeBody::Unlinked(unlinked_body) => Some(unlinked_body),
-                    _ => unreachable!(),
-                }
-            } else {
-                None
-            };
-
-            if let Some(body) = unlinked_body {
-                let linked_body = match body {
-                    VariableAssignment { ident, path, expr } => {
-                        let (variable, location, _) =
-                            match self.closest_variable(node_id, &ident)? {
-                                Some(node_id) => node_id,
-                                None => Err(Err::single(
-                                    "Failed to find variable to assign to",
-                                    "variable not found",
-                                    vec![node_id],
-                                ))?,
-                            };
-                        self.ast_mut()
-                            .add_ref((variable, WriteValue), (expr, ReadValue), location);
-                        LinkedNodeBody::VariableAssignment {
-                            variable,
-                            path,
-                            expr,
-                        }
-                    }
-                    StaticAssignment { ident, path, expr } => {
-                        let expr = expr;
-                        let (variable, location, variable_depth) =
-                            match self.closest_variable(node_id, &ident)? {
-                                Some(node_id) => node_id,
-                                None => Err(Err::single(
-                                    "Failed to find type to assign to",
-                                    "type not found",
-                                    vec![node_id],
-                                ))?,
-                            };
-                        if let Some(ref associated_path) = path {
-                            if variable_depth > 1 {
-                                println!("{}", variable_depth);
-                                Err(Err::single(
-                                    "Associated methods can only be defined in the same scope as type",
-                                    "Not allowed",
-                                    vec![node_id, expr],
-                                ))?
-                            }
-                            if associated_path.len() != 1 {
-                                Err(ast::Err::single(
-                                    "Invalid path for constant assignment (unimplemented)",
-                                    "Assignment of constant value",
-                                    vec![node_id],
-                                ))?
-                            };
-                            let first_path = &associated_path[0];
-                            let mut ast = self.ast_mut();
-                            let declaration = match &mut ast.get_node_mut(variable).body {
-                                PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(td)) => td,
-                                _ => Err(Err::single(
-                                    "Only allowed to statically assign to type declarations",
-                                    "Not allowed to be static",
-                                    vec![node_id],
-                                ))?,
-                            };
-                            if declaration.methods.contains_key(first_path) {
-                                Err(ast::Err::single(
-                                    "Method already defined on type",
-                                    "Assignment of constant value",
-                                    vec![node_id],
-                                ))?
-                            }
-                            declaration.methods.insert(first_path.into(), expr);
-
-                            ast.add_ref((variable, WriteValue), (expr, ReadValue), location);
-                            LinkedNodeBody::Block {
-                                static_body: vec![],
-                                import_body: vec![],
-                                dynamic_body: vec![],
-                            }
-                        } else {
-                            self.ast_mut().add_ref(
-                                (variable, WriteValue),
-                                (expr, ReadValue),
-                                location,
-                            );
-                            LinkedNodeBody::ConstAssignment {
-                                ident: variable,
-                                path,
-                                expr,
-                            }
-                        }
-                    }
-                    Value { value, tp } => {
-                        let value = self.resolve_value(node_id, value)?;
-                        LinkedNodeBody::ConstValue { tp, value }
-                    }
-                    VariableValue { ident, path } => {
-                        let (variable, location, _) =
-                            match self.closest_variable(node_id, &ident)? {
-                                Some(target) => target,
-                                None => Err(Err::single(
-                                    "Failed to find variable",
-                                    "variable not found",
-                                    vec![node_id],
-                                ))?,
-                            };
-                        self.ast_mut().add_ref(
-                            (variable, ReadValue),
-                            (node_id, WriteValue),
-                            location,
-                        );
-                        LinkedNodeBody::VariableValue { variable, path }
-                    }
-                    Call { ident, args, path } => {
-                        let (func, location, _) = match self.closest_variable(node_id, &ident)? {
-                            Some(node_id) => node_id,
-                            None => Err(Err::single(
-                                "Failed to find variable to call",
-                                "function not found",
-                                vec![node_id],
-                            ))?,
-                        };
-                        self.ast_mut()
-                            .add_ref((func, GoTo), (node_id, ExecuteValue), location);
-                        if let Some(path) = path {
-                            let ast = self.ast();
-                            let body = &ast.get_node(func).body;
-                            let declaration = match body {
-                                PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(t)) => t,
-                                PartialNodeBody::Linked(LinkedNodeBody::VariableDeclaration {
-                                    ..
-                                }) => unimplemented!(),
-                                _ => Err(Err::single(
-                                    "Can only call associated functions on types",
-                                    "invalid function call",
-                                    vec![node_id],
-                                ))?,
-                            };
-                            if path.len() != 1 {
-                                Err(Err::single(
-                                    "Can only call associated functions on non nested types",
-                                    "invalid function call",
-                                    vec![node_id],
-                                ))?
-                            }
-                            let path = &path[0];
-                            if let Some(static_fn) = declaration.methods.get(path) {
-                                LinkedNodeBody::Call(NBCall {
-                                    func: *static_fn,
-                                    args,
-                                })
-                            } else {
-                                Err(Err::single(
-                                    "Method not found on type",
-                                    "method not found",
-                                    vec![node_id],
-                                ))?
-                            }
-                        } else {
-                            LinkedNodeBody::Call(NBCall { func, args })
-                        }
-                    }
-                    ImportValue { is_relative, path } => {
-                        if is_relative {
-                            let parent = {
-                                let ast = self.ast();
-                                match ast.path.not_last() {
-                                    Some(parent_path) => match self.exports.get(parent_path) {
-                                        Some(NamespaceElement::Namespace(n)) => n,
-                                        _ => unimplemented!(),
-                                    },
-                                    None => &self.exports,
-                                }
-                            };
-                            match parent.get(path.as_ref()) {
-                                Some(NamespaceElement::Namespace(_)) => unimplemented!(),
-                                Some(NamespaceElement::BuiltIn(_)) => unimplemented!(),
-                                Some(NamespaceElement::Export(export)) => {
-                                    let export = *export;
-                                    if export.is_static {
-                                        pending_refs.push(PendingRef {
-                                            target: (
-                                                export.node_id,
-                                                NodeReferenceType::ReadExternalValue,
-                                            ),
-                                            referencer: (
-                                                node_id,
-                                                NodeReferenceType::WriteExternalValue,
-                                            ),
-                                            loc: self.loc_relative_to_root(node_id),
-                                        });
-
-                                        LinkedNodeBody::Reference {
-                                            node_id: export.node_id,
-                                        }
-                                    } else {
-                                        Err(Err::new(
-                                            "Invalid import: Only allowed to import static declarations like types, constants or functions".to_string(),
-                                            vec![
-                                                ErrPart::new("Imported here".to_string(), vec![node_id]),
-                                                ErrPart::new("This value is not static".to_string(), vec![export.node_id]),
-                                            ]
-                                        ))?
-                                    }
-                                }
-                                None => unreachable!("Invalid path {:?}", path),
-                            }
-                        } else {
-                            match self.runtime.namespace.get(path.as_ref()) {
-                                Some(NamespaceElement::Namespace(_)) => unimplemented!(),
-                                Some(NamespaceElement::Export(_)) => unimplemented!(),
-                                Some(NamespaceElement::BuiltIn(built_in)) => built_in.body(),
-                                None => Err(Err::single(
-                                    "Import not available in the built in runtime",
-                                    "Imported here",
-                                    vec![node_id],
-                                ))?,
-                            }
-                        }
-                    }
-                    Return { expr, automatic } => {
-                        let (func, location, _) = self.closest_fn(node_id)?;
-                        self.ast_mut()
-                            .add_ref((func, GoTo), (node_id, ControlFlow), location);
-                        LinkedNodeBody::Return {
-                            func,
-                            expr,
-                            automatic,
-                        }
-                    }
-                    Break => {
-                        let (r#loop, location, _) = self.closest_loop(node_id)?;
-                        self.ast_mut()
-                            .add_ref((r#loop, GoTo), (node_id, ControlFlow), location);
-                        LinkedNodeBody::Break { r#loop }
-                    }
-                };
-                let mut ast = self.ast_mut();
-                let node = ast.get_node_mut(node_id);
-                node.body = PartialNodeBody::Linked(linked_body);
             }
-
+            let partial_body = {
+                let mut ast = self.ast_mut();
+                let node = ast.get_node_mut(node_id);
+                mem::replace(&mut node.body, PartialNodeBody::Empty)
+            };
+            let unlinked_body = match partial_body {
+                PartialNodeBody::Unlinked(unlinked_body) => unlinked_body,
+                _ => unreachable!(),
+            };
+            let linked_body = self.link(node_id, unlinked_body);
+            match linked_body {
+                Ok(linked_body) => {
+                    made_progress = true;
+                    let mut ast = self.ast_mut();
+                    let node = ast.get_node_mut(node_id);
+                    node.body = PartialNodeBody::Linked(linked_body);
+                }
+                Err(err) => match err {
+                    LinkerErr::BlockedByNodeType(blocking_id) => {
+                        if !blockers.contains_key(&blocking_id) {
+                            blockers.insert(blocking_id, vec![]);
+                        }
+                        blockers.get_mut(&blocking_id).unwrap().push(node_id);
+                    }
+                    LinkerErr::Fail(e) => return LinkerResult::Failed(e),
+                },
+            }
             let missing_tp = {
                 let ast = self.ast();
                 let node = ast.get_node(node_id);
                 node.maybe_tp().is_none()
             };
             if missing_tp {
-                self.link_types(node_id)?;
+                self.link_types(node_id).unwrap();
             }
         }
-        Ok(pending_refs)
+        if blockers.is_empty() {
+            let pending_refs = mem::replace(&mut self.pending_refs, Vec::new());
+            LinkerResult::Complete(pending_refs)
+        } else {
+            self.queue.extend(blockers.values().flatten());
+            if made_progress {
+                return LinkerResult::BlockedByType { blocked: blockers };
+            } else {
+                return LinkerResult::FailedToMakeProgress { blocked: blockers };
+            }
+        }
+    }
+
+    pub fn link(
+        &mut self,
+        node_id: NodeID,
+        unlinked_body: UnlinkedNodeBody<T>,
+    ) -> result::Result<LinkedNodeBody<T>, LinkerErr> {
+        let linked_body = match unlinked_body {
+            VariableAssignment { ident, path, expr } => {
+                let (variable, location, _) = match self.closest_variable(node_id, &ident)? {
+                    Some(node_id) => node_id,
+                    None => Err(Err::single(
+                        "Failed to find variable to assign to",
+                        "variable not found",
+                        vec![node_id],
+                    ))?,
+                };
+                self.ast_mut()
+                    .add_ref((variable, WriteValue), (expr, ReadValue), location);
+                LinkedNodeBody::VariableAssignment {
+                    variable,
+                    path,
+                    expr,
+                }
+            }
+            StaticAssignment { ident, path, expr } => {
+                let expr = expr;
+                let (variable, location, variable_depth) =
+                    match self.closest_variable(node_id, &ident)? {
+                        Some(node_id) => node_id,
+                        None => Err(Err::single(
+                            "Failed to find type to assign to",
+                            "type not found",
+                            vec![node_id],
+                        ))?,
+                    };
+                if let Some(ref associated_path) = path {
+                    if variable_depth > 1 {
+                        println!("{}", variable_depth);
+                        Err(Err::single(
+                            "Associated methods can only be defined in the same scope as type",
+                            "Not allowed",
+                            vec![node_id, expr],
+                        ))?
+                    }
+                    if associated_path.len() != 1 {
+                        Err(ast::Err::single(
+                            "Invalid path for constant assignment (unimplemented)",
+                            "Assignment of constant value",
+                            vec![node_id],
+                        ))?
+                    };
+                    let first_path = &associated_path[0];
+                    let mut ast = self.ast_mut();
+                    let declaration = match &mut ast.get_node_mut(variable).body {
+                        PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(td)) => td,
+                        _ => Err(Err::single(
+                            "Only allowed to statically assign to type declarations",
+                            "Not allowed to be static",
+                            vec![node_id],
+                        ))?,
+                    };
+                    if declaration.methods.contains_key(first_path) {
+                        Err(ast::Err::single(
+                            "Method already defined on type",
+                            "Assignment of constant value",
+                            vec![node_id],
+                        ))?
+                    }
+                    declaration.methods.insert(first_path.into(), expr);
+
+                    ast.add_ref((variable, WriteValue), (expr, ReadValue), location);
+                    LinkedNodeBody::Block {
+                        static_body: vec![],
+                        import_body: vec![],
+                        dynamic_body: vec![],
+                    }
+                } else {
+                    self.ast_mut()
+                        .add_ref((variable, WriteValue), (expr, ReadValue), location);
+                    LinkedNodeBody::ConstAssignment {
+                        ident: variable,
+                        path,
+                        expr,
+                    }
+                }
+            }
+            Value { value, tp } => {
+                let value = self.resolve_value(node_id, value)?;
+                LinkedNodeBody::ConstValue { tp, value }
+            }
+            VariableValue { ident, path } => {
+                let (variable, location, _) = match self.closest_variable(node_id, &ident)? {
+                    Some(target) => target,
+                    None => Err(Err::single(
+                        "Failed to find variable",
+                        "variable not found",
+                        vec![node_id],
+                    ))?,
+                };
+                self.ast_mut()
+                    .add_ref((variable, ReadValue), (node_id, WriteValue), location);
+                LinkedNodeBody::VariableValue { variable, path }
+            }
+            Call { ident, args, path } => {
+                let (func, location, _) = match self.closest_variable(node_id, &ident)? {
+                    Some(node_id) => node_id,
+                    None => Err(Err::single(
+                        "Failed to find variable to call",
+                        "function not found",
+                        vec![node_id],
+                    ))?,
+                };
+                self.ast_mut()
+                    .add_ref((func, GoTo), (node_id, ExecuteValue), location);
+                if let Some(path) = path {
+                    let ast = self.ast();
+                    let body = &ast.get_node(func).body;
+                    let declaration = match body {
+                        PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(t)) => t,
+                        PartialNodeBody::Linked(LinkedNodeBody::VariableDeclaration {
+                            tp, ..
+                        }) => {
+                            if let Some(tp) = tp {
+                                let body = &ast.get_node(*tp).body;
+                                match body {
+                                    PartialNodeBody::Linked(LinkedNodeBody::TypeDeclaration(t)) => {
+                                        t
+                                    }
+                                    _ => unimplemented!(),
+                                }
+                            } else {
+                                return Err(LinkerErr::BlockedByNodeType(func));
+                            }
+                        }
+                        _ => Err(Err::single(
+                            "Can only call associated functions on types",
+                            "invalid function call",
+                            vec![node_id],
+                        ))?,
+                    };
+                    if path.len() != 1 {
+                        Err(Err::single(
+                            "Can only call associated functions on non nested types",
+                            "invalid function call",
+                            vec![node_id],
+                        ))?
+                    }
+                    let path = &path[0];
+                    if let Some(static_fn) = declaration.methods.get(path) {
+                        LinkedNodeBody::Call(NBCall {
+                            func: *static_fn,
+                            args,
+                        })
+                    } else {
+                        Err(Err::single(
+                            "Method not found on type",
+                            "method not found",
+                            vec![node_id],
+                        ))?
+                    }
+                } else {
+                    LinkedNodeBody::Call(NBCall { func, args })
+                }
+            }
+            ImportValue { is_relative, path } => {
+                if is_relative {
+                    let parent = {
+                        let ast = self.ast();
+                        match ast.path.not_last() {
+                            Some(parent_path) => match self.exports.get(parent_path) {
+                                Some(NamespaceElement::Namespace(n)) => n,
+                                _ => unimplemented!(),
+                            },
+                            None => &self.exports,
+                        }
+                    };
+                    match parent.get(path.as_ref()) {
+                        Some(NamespaceElement::Namespace(_)) => unimplemented!(),
+                        Some(NamespaceElement::BuiltIn(_)) => unimplemented!(),
+                        Some(NamespaceElement::Export(export)) => {
+                            let export = *export;
+                            if export.is_static {
+                                self.pending_refs.push(PendingRef {
+                                    target: (export.node_id, NodeReferenceType::ReadExternalValue),
+                                    referencer: (node_id, NodeReferenceType::WriteExternalValue),
+                                    loc: self.loc_relative_to_root(node_id),
+                                });
+
+                                LinkedNodeBody::Reference {
+                                    node_id: export.node_id,
+                                }
+                            } else {
+                                Err(Err::new(
+                                            "Invalid import: Only allowed to import static declarations like types, constants or functions".to_string(),
+                                            vec![
+                                                ErrPart::new("Imported here".to_string(), vec![node_id]),
+                                                ErrPart::new("This value is not static".to_string(), vec![export.node_id]),
+                                            ]
+                                        ))?
+                            }
+                        }
+                        None => unreachable!("Invalid path {:?}", path),
+                    }
+                } else {
+                    match self.runtime.namespace.get(path.as_ref()) {
+                        Some(NamespaceElement::Namespace(_)) => unimplemented!(),
+                        Some(NamespaceElement::Export(_)) => unimplemented!(),
+                        Some(NamespaceElement::BuiltIn(built_in)) => built_in.body(),
+                        None => Err(Err::single(
+                            "Import not available in the built in runtime",
+                            "Imported here",
+                            vec![node_id],
+                        ))?,
+                    }
+                }
+            }
+            Return { expr, automatic } => {
+                let (func, location, _) = self.closest_fn(node_id)?;
+                self.ast_mut()
+                    .add_ref((func, GoTo), (node_id, ControlFlow), location);
+                LinkedNodeBody::Return {
+                    func,
+                    expr,
+                    automatic,
+                }
+            }
+            Break => {
+                let (r#loop, location, _) = self.closest_loop(node_id)?;
+                self.ast_mut()
+                    .add_ref((r#loop, GoTo), (node_id, ControlFlow), location);
+                LinkedNodeBody::Break { r#loop }
+            }
+        };
+        Ok(linked_body)
     }
 }
