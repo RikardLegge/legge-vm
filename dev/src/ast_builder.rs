@@ -1,5 +1,5 @@
-use crate::node::VariableValue;
-use crate::token::Token;
+use crate::node::{Function, TypeDeclaration, VariableValue};
+use crate::token::{KeyName, Token};
 use crate::{Ast, Block, Error, Node, TokenType};
 use crate::{
     Expression, NodeID, Operation, Result, State, Statement, Value, Variable, VariableAssignment,
@@ -41,9 +41,9 @@ where
                 TokenType::Name(name) => {
                     let statement = self.statement_named(name, block_id.into())?;
                     children.push(statement);
-                    self.expect_end_statement()?;
                 }
-                _ => unimplemented!(),
+                TokenType::Comment(_) => continue,
+                tt => unimplemented!("{:?}", tt),
             }
         }
         let block = Block::new(children, &self.ast);
@@ -66,10 +66,17 @@ where
     }
 
     fn next_token(&mut self) -> Result<Token> {
-        self.tokens.next().ok_or(Error::EOF)
+        loop {
+            let token = self.tokens.next().ok_or(Error::EOF)?;
+            match token.tp {
+                TokenType::Comment(_) => continue,
+                _ => break Ok(token),
+            }
+        }
     }
 
-    fn expression(&mut self, parent_id: NodeID) -> Result<NodeID<Expression>> {
+    fn expression(&mut self, parent_id: impl Into<NodeID>) -> Result<NodeID<Expression>> {
+        let parent_id = parent_id.into();
         let next_token = self.next_token()?;
         let expression: Expression = match next_token.tp {
             TokenType::Int(value, _) => Value::Int(value).into(),
@@ -94,7 +101,7 @@ where
                 self.next_token()?;
                 let operation_id = self.ast.new_node(parent_id);
 
-                let rhs = self.expression(operation_id.into())?;
+                let rhs = self.expression(operation_id)?;
                 let lhs_node = self.ast.get_mut(lhs);
                 lhs_node.parent_id = Some(operation_id.into());
 
@@ -103,6 +110,23 @@ where
             }
             _ => Ok(lhs),
         }
+    }
+
+    fn new_type(&mut self, variable: NodeID<Variable>) -> Result<Statement> {
+        let expr_id = self.ast.new_node(variable);
+        let expr = Expression::Function(Function {});
+        let expr = self.ast.push(expr_id, expr);
+
+        match self.next_token()?.tp {
+            TokenType::LeftCurlyBrace => match self.next_token()?.tp {
+                TokenType::RightCurlyBrace => {}
+                _ => unimplemented!(),
+            },
+            _ => unimplemented!(),
+        }
+
+        let statement = TypeDeclaration::new(variable, expr).into();
+        Ok(statement)
     }
 
     fn statement_named(&mut self, name: &str, parent_id: NodeID) -> Result<NodeID<Statement>> {
@@ -114,14 +138,29 @@ where
                 let variable = Variable::new(name.to_string());
                 let variable = self.ast.push(variable_id, variable);
 
-                let value = self.expression(variable.into())?;
+                let value = self.expression(variable)?;
+                self.expect_end_statement()?;
+
                 VariableDeclaration::new(variable, value).into()
             }
             TokenType::Assignment => {
-                let value = self.expression(statement_id.into())?;
+                let value = self.expression(statement_id)?;
+                self.expect_end_statement()?;
+
                 VariableAssignment::new(name.to_string(), value).into()
             }
-            _ => unimplemented!(),
+            TokenType::ReturnTypes => {
+                match self.next_token()?.tp {
+                    TokenType::KeyName(KeyName::Type) => {}
+                    _ => unimplemented!(),
+                }
+                let variable_id = self.ast.new_node(statement_id);
+                let variable = Variable::new(name.to_string());
+                let variable = self.ast.push(variable_id, variable);
+
+                self.new_type(variable)?
+            }
+            tt => unimplemented!("{:?}", tt),
         };
         Ok(self.ast.push(statement_id, statement))
     }

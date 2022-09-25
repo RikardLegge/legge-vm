@@ -21,9 +21,70 @@ pub enum NodeType {
     String,
 }
 
-enum NodeIterator<'a> {
+enum NodeIteratorBody<'a> {
     Empty,
+    Single(NodeID),
+    Dual(NodeID, NodeID),
     Slice(&'a [NodeID]),
+    Chained(Box<NodeIterator<'a>>, Box<NodeIterator<'a>>),
+}
+
+pub struct NodeIterator<'a> {
+    index: usize,
+    items: NodeIteratorBody<'a>,
+}
+
+impl<'a> NodeIterator<'a> {
+    fn new(items: NodeIteratorBody<'a>) -> NodeIterator<'a> {
+        Self { index: 0, items }
+    }
+
+    pub fn empty() -> NodeIterator<'a> {
+        Self::new(NodeIteratorBody::Empty)
+    }
+
+    pub fn single(first: impl Into<NodeID>) -> NodeIterator<'a> {
+        Self::new(NodeIteratorBody::Single(first.into()))
+    }
+
+    pub fn dual(first: impl Into<NodeID>, second: impl Into<NodeID>) -> NodeIterator<'a> {
+        Self::new(NodeIteratorBody::Dual(first.into(), second.into()))
+    }
+
+    pub fn chained(first: NodeIterator<'a>, second: NodeIterator<'a>) -> NodeIterator<'a> {
+        Self::new(NodeIteratorBody::Chained(Box::new(first), Box::new(second)))
+    }
+
+    pub fn slice<T>(slice: &[NodeID<T>]) -> NodeIterator<'a> {
+        // Safety: A slice is a contiguous piece of memory and can not change it's
+        // bit representation. NodeID is also repr(transparent) to ensure that the
+        // marker trait does not have an affect on the layout in future versions.
+        let type_erased_slice: &[NodeID] = unsafe { std::mem::transmute(slice) };
+        Self::new(NodeIteratorBody::Slice(type_erased_slice))
+    }
+}
+
+impl<'a> Iterator for NodeIterator<'a> {
+    type Item = NodeID;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = match self.items {
+            NodeIteratorBody::Single(item) if self.index == 0 => Some(item),
+
+            NodeIteratorBody::Dual(item, _) if self.index == 0 => Some(item),
+            NodeIteratorBody::Dual(_, item) if self.index == 1 => Some(item),
+
+            NodeIteratorBody::Slice(slice) => slice.get(self.index).cloned(),
+
+            NodeIteratorBody::Chained(ref mut first, ref mut second) => first.chain(second).next(),
+
+            _ => None,
+        };
+        if result.is_some() {
+            self.index += 1;
+        }
+        result
+    }
 }
 
 pub trait Node<T = Self>: Sized {
@@ -31,8 +92,8 @@ pub trait Node<T = Self>: Sized {
         Err(Error::TypeNotInferred)
     }
 
-    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
-        Box::new(None.into_iter())
+    fn children(&self) -> NodeIterator<'_> {
+        NodeIterator::empty()
     }
 
     fn link(_: NodeID<T>, _: &mut Ast) -> Result<()> {
@@ -122,7 +183,7 @@ macro_rules! impl_enum_node {
                 }
             }
 
-            fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+            fn children(&self) -> NodeIterator<'_> {
                 match &self {
                     $(
                         $enum::$variant(value) => value.children()
@@ -199,7 +260,7 @@ macro_rules! impl_try_from_ast_node {
         }
 
         impl AstNodeBody {
-            pub fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+            pub fn children(&self) -> NodeIterator<'_> {
                 match self {
                     AstNodeBody::Unknown(_) => unreachable!(),
                     $(
@@ -222,7 +283,7 @@ pub struct AstNode<T = Unknown> {
 }
 
 impl<T> AstNode<T> {
-    pub fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+    pub fn children(&self) -> NodeIterator<'_> {
         self.body.as_ref().unwrap().children()
     }
 }

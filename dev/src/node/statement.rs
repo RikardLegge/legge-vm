@@ -1,11 +1,13 @@
+use crate::node::NodeIterator;
 use crate::node::{Expression, Node, NodeID, NodeType, Variable};
 use crate::{impl_enum_node, Ast, Error, Result, State};
-use std::iter;
+use std::collections::HashMap;
 
 impl_enum_node!(
     pub enum Statement {
         VariableDeclaration,
         VariableAssignment,
+        TypeDeclaration,
     }
 );
 
@@ -14,6 +16,7 @@ impl Statement {
         match self {
             Statement::VariableDeclaration(dec) => Some(dec.variable),
             Statement::VariableAssignment(_) => None,
+            Statement::TypeDeclaration(dec) => Some(dec.variable),
         }
     }
 
@@ -21,14 +24,42 @@ impl Statement {
         match self {
             Statement::VariableDeclaration(var) => Some(var.value),
             Statement::VariableAssignment(var) => Some(var.value),
+            Statement::TypeDeclaration(var) => Some(var.constructor),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct TypeDeclaration {
+    variable: NodeID<Variable>,
+    constructor: NodeID<Expression>,
+    fields: Vec<NodeID>,
+    associated_values: HashMap<String, NodeID<Expression>>,
+}
+
+impl TypeDeclaration {
+    pub fn new(variable: NodeID<Variable>, constructor: NodeID<Expression>) -> Self {
+        TypeDeclaration {
+            variable,
+            constructor,
+            fields: Vec::new(),
+            associated_values: HashMap::new(),
+        }
+    }
+}
+
+impl Node<Statement> for TypeDeclaration {
+    fn children(&self) -> NodeIterator<'_> {
+        let props = NodeIterator::dual(self.variable, self.constructor);
+        let fields = NodeIterator::slice(&self.fields);
+        NodeIterator::chained(props, fields)
     }
 }
 
 #[derive(Debug)]
 pub struct VariableDeclaration {
     variable: NodeID<Variable>,
-    pub value: NodeID<Expression>,
+    value: NodeID<Expression>,
 }
 
 impl VariableDeclaration {
@@ -37,17 +68,13 @@ impl VariableDeclaration {
     }
 }
 
-// enum OwnedIterator {
-//
-// }
-
 impl Node<Statement> for VariableDeclaration {
     fn node_type(_: NodeID<Statement>, _: &Ast) -> Result<NodeType> {
         Ok(NodeType::Void)
     }
 
-    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
-        Box::new([self.variable.into(), self.value.into()].into_iter())
+    fn children(&self) -> NodeIterator<'_> {
+        NodeIterator::dual(self.variable, self.value)
     }
 
     fn link(_: NodeID<Statement>, _: &mut Ast) -> Result<()> {
@@ -75,8 +102,8 @@ impl Node<Statement> for VariableAssignment {
         Ok(NodeType::Void)
     }
 
-    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
-        Box::new([self.value.into()].into_iter())
+    fn children(&self) -> NodeIterator<'_> {
+        NodeIterator::single(self.value)
     }
 
     fn link(node_id: NodeID<Statement>, ast: &mut Ast) -> Result<()> {

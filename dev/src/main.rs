@@ -26,6 +26,9 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 fn main() -> Result<()> {
     let tokens = token::from_chars(
         r#"
+    A -> type {}
+    // A.value :: 2;
+     
     a := 1; 
     a = a + 1; 
     b := "😇";

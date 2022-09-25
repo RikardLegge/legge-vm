@@ -1,4 +1,4 @@
-use crate::node::{Node, NodeID, NodeType, Statement};
+use crate::node::{Node, NodeID, NodeIterator, NodeType, Statement};
 use crate::{Ast, Result, Variable};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -29,7 +29,7 @@ impl Node for Block {
         Ok(NodeType::Void)
     }
 
-    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
-        Box::new(self.children.iter().map(|c| (*c).into()))
+    fn children(&self) -> NodeIterator<'_> {
+        NodeIterator::slice(&self.children)
     }
 }

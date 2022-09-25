@@ -1,16 +1,21 @@
-use crate::node::{NodeID, NodeType, Variable};
+use crate::node::{NodeID, NodeIterator, NodeType, Variable};
 use crate::token::ArithmeticOP;
 use crate::{impl_enum_node, Ast, Error, Result};
 use crate::{Node, State};
-use std::iter;
 
 impl_enum_node!(
     pub enum Expression {
         ConstValue,
         VariableValue,
         Operation,
+        Function,
     }
 );
+
+#[derive(Debug)]
+pub struct Function {}
+
+impl Node<Expression> for Function {}
 
 #[derive(Debug)]
 pub struct Operation {
@@ -43,8 +48,8 @@ impl Node<Expression> for Operation {
         }
     }
 
-    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
-        Box::new([self.lhs.into(), self.rhs.into()].into_iter())
+    fn children(&self) -> NodeIterator<'_> {
+        NodeIterator::dual(self.lhs, self.rhs)
     }
 
     fn link(_: NodeID<Expression>, _: &mut Ast) -> Result<()> {
@@ -70,14 +75,6 @@ impl Node<Expression> for Value {
             Value::String(_) => NodeType::String,
         })
     }
-
-    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
-        Box::new(None.into_iter())
-    }
-
-    fn link(_: NodeID<Expression>, _: &mut Ast) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
@@ -96,10 +93,6 @@ impl Node<Expression> for VariableValue {
             State::Linked(var) => ast.get_node_type(var),
             _ => Err(Error::TypeNotInferred),
         }
-    }
-
-    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
-        Box::new(None.into_iter())
     }
 
     fn link(node_id: NodeID<Expression>, ast: &mut Ast) -> Result<()> {
