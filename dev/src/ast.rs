@@ -1,7 +1,7 @@
 use crate::ast_builder::AstBuilder;
 use crate::node::AstNodeBody;
 use crate::token::Token;
-use crate::{AstNode, Block, Error, Node, NodeID, NodeType, Result, Variable};
+use crate::{try_cast_node, AstNode, Block, Error, Node, NodeID, NodeType, Result, Variable};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
@@ -149,9 +149,9 @@ impl Ast {
     where
         F: Fn(&AstNode<Block>) -> Result<Option<NodeID<NodeType>>>,
     {
-        self.walk_up(node_id, |node| match node.body.as_ref().unwrap() {
-            AstNodeBody::Block(_) => test(unsafe { std::mem::transmute(node) }),
-            _ => Ok(None),
+        self.walk_up(node_id, |node| match try_cast_node!(node as Block) {
+            Some(block) => test(block),
+            None => Ok(None),
         })
     }
 

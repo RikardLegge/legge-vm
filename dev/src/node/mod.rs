@@ -36,6 +36,22 @@ pub trait Node: Into<AstNodeBody> {
 }
 
 #[macro_export]
+macro_rules! try_cast_node {
+    ($node:ident as $ty:ident) => {
+        match $node.body.as_ref().unwrap() {
+            AstNodeBody::$ty(_) => {
+                // Safety: The node must have a body of type $ty, since AstNode
+                // is repr(C), it must adhere to the C layout ABI and therefore
+                // the marker trait <T> will not change the binary representation.
+                let block: &AstNode<$ty> = unsafe { std::mem::transmute($node) };
+                Some(block)
+            }
+            _ => None,
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! impl_try_from_variant {
     ( impl $from:ident for $to:ident throws $error:ident :: $error_variant:ident ) => {
         impl<'a> TryFrom<&'a $from> for &'a $to {
@@ -121,20 +137,20 @@ macro_rules! impl_enum_node {
 }
 
 macro_rules! impl_try_from_ast_node {
-    ( $($for: ident),* ) => {
+    ( $($variant: ident),* ) => {
         $(
-            impl_try_from_variant!(impl AstNodeBody for $for throws Error::InternalError);
+            impl_try_from_variant!(impl AstNodeBody for $variant throws Error::InternalError);
 
-            impl From<$for> for AstNodeBody {
-                fn from(node: $for) -> Self {
-                    AstNodeBody::$for(node)
+            impl From<$variant> for AstNodeBody {
+                fn from(node: $variant) -> Self {
+                    AstNodeBody::$variant(node)
                 }
             }
 
-            impl AstNode<$for> {
-                pub fn body(&self) -> &$for {
+            impl AstNode<$variant> {
+                pub fn body(&self) -> &$variant {
                     match self.body.as_ref().unwrap() {
-                        AstNodeBody::$for(inner) => inner,
+                        AstNodeBody::$variant(inner) => inner,
                         _ => unreachable!(),
                     }
                 }
@@ -144,7 +160,7 @@ macro_rules! impl_try_from_ast_node {
         #[derive(Debug)]
         pub enum AstNodeBody {
             Unknown(Unknown),
-            $($for($for)),*
+            $($variant($variant)),*
         }
 
         impl AstNode {
@@ -153,9 +169,9 @@ macro_rules! impl_try_from_ast_node {
                 match node.body.as_ref().unwrap() {
                     AstNodeBody::Unknown(_) => unreachable!(),
                     $(
-                        AstNodeBody::$for(_) => {
-                            let node_id: NodeID<$for> = unsafe {std::mem::transmute(node.id) };
-                            $for::link(node_id, ast)
+                        AstNodeBody::$variant(_) => {
+                            let node = crate::try_cast_node!(node as $variant).unwrap();
+                            $variant::link(node.id, ast)
                         }
                     ),*
 
@@ -167,9 +183,9 @@ macro_rules! impl_try_from_ast_node {
                 match node.body.as_ref().unwrap() {
                     AstNodeBody::Unknown(_) => unreachable!(),
                     $(
-                        AstNodeBody::$for(_) => {
-                            let node_id: NodeID<$for> = unsafe {std::mem::transmute(node.id) };
-                            $for::node_type(node_id, ast)
+                        AstNodeBody::$variant(_) => {
+                            let node = crate::try_cast_node!(node as $variant).unwrap();
+                            $variant::node_type(node.id, ast)
                         }
                     ),*
 
@@ -182,7 +198,7 @@ macro_rules! impl_try_from_ast_node {
                 match self {
                     AstNodeBody::Unknown(_) => unreachable!(),
                     $(
-                        AstNodeBody::$for(ref inner) => inner.children()
+                        AstNodeBody::$variant(ref inner) => inner.children()
                     ),*
                 }
             }
@@ -193,6 +209,7 @@ macro_rules! impl_try_from_ast_node {
 pub type Unknown = ();
 
 #[derive(Debug)]
+#[repr(C)]
 pub struct AstNode<T = Unknown> {
     pub id: NodeID<T>,
     pub parent_id: Option<NodeID>,
