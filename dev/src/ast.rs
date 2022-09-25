@@ -77,7 +77,7 @@ impl Ast {
 
         if children.peek().is_some() {
             write!(f, " [\n")?;
-            for &child in children {
+            for child in children {
                 self.fmt_debug_node(f, level + 1, child)?;
                 write!(f, "\n")?;
             }
@@ -119,7 +119,7 @@ impl Ast {
 
     pub fn push<Child>(&mut self, id: NodeID<Child>, child: Child) -> NodeID<Child>
     where
-        Child: Node,
+        Child: Node + Into<AstNodeBody>,
     {
         let body = child.into();
         let node = self.get_mut(id);

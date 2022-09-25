@@ -35,18 +35,22 @@ impl VariableDeclaration {
     pub fn new(variable: NodeID<Variable>, value: NodeID<Expression>) -> Self {
         VariableDeclaration { variable, value }
     }
+}
 
-    pub fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
-        let variable_iter = iter::once(&self.variable).map(|c| c.into());
-        let value_iter = iter::once(&self.value).map(|c| c.into());
-        Box::new(variable_iter.chain(value_iter))
-    }
+// enum OwnedIterator {
+//
+// }
 
+impl Node<Statement> for VariableDeclaration {
     fn node_type(_: NodeID<Statement>, _: &Ast) -> Result<NodeType> {
         Ok(NodeType::Void)
     }
 
-    pub fn link(_: NodeID<Statement>, _: &mut Ast) -> Result<()> {
+    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+        Box::new([self.variable.into(), self.value.into()].into_iter())
+    }
+
+    fn link(_: NodeID<Statement>, _: &mut Ast) -> Result<()> {
         Ok(())
     }
 }
@@ -64,16 +68,18 @@ impl VariableAssignment {
             value,
         }
     }
+}
 
-    pub fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
-        Box::new(iter::once(&self.value).map(|c| c.into()))
-    }
-
+impl Node<Statement> for VariableAssignment {
     fn node_type(_: NodeID<Statement>, _: &Ast) -> Result<NodeType> {
         Ok(NodeType::Void)
     }
 
-    pub fn link(node_id: NodeID<Statement>, ast: &mut Ast) -> Result<()> {
+    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+        Box::new([self.value.into()].into_iter())
+    }
+
+    fn link(node_id: NodeID<Statement>, ast: &mut Ast) -> Result<()> {
         let node: &Self = ast.get_inner(node_id).try_into()?;
         if let State::Unlinked(var) = &node.variable {
             let var = ast

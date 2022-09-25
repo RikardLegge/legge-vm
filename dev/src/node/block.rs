@@ -29,7 +29,7 @@ impl Node for Block {
         Ok(NodeType::Void)
     }
 
-    fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
-        Box::new(self.children.iter().map(|c| c.into()))
+    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+        Box::new(self.children.iter().map(|c| (*c).into()))
     }
 }

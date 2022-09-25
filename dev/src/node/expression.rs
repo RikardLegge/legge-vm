@@ -29,18 +29,10 @@ impl Operation {
             tp: None,
         }
     }
+}
 
-    fn link(_: NodeID<Expression>, _: &mut Ast) -> Result<()> {
-        Ok(())
-    }
-
-    fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
-        let lhs_iter = iter::once(&self.lhs).map(|c| c.into());
-        let rhs_iter = iter::once(&self.rhs).map(|c| c.into());
-        Box::new(lhs_iter.chain(rhs_iter))
-    }
-
-    pub fn node_type(node_id: NodeID<Expression>, ast: &Ast) -> Result<NodeType> {
+impl Node<Expression> for Operation {
+    fn node_type(node_id: NodeID<Expression>, ast: &Ast) -> Result<NodeType> {
         let op: &Self = ast.get_inner(node_id).try_into()?;
         let lhs_type = ast.get_node_type(op.lhs)?;
         let rhs_type = ast.get_node_type(op.lhs)?;
@@ -49,6 +41,14 @@ impl Operation {
         } else {
             unimplemented!()
         }
+    }
+
+    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+        Box::new([self.lhs.into(), self.rhs.into()].into_iter())
+    }
+
+    fn link(_: NodeID<Expression>, _: &mut Ast) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -61,8 +61,8 @@ pub enum Value {
     String(String),
 }
 
-impl Value {
-    pub fn node_type(node_id: NodeID<Expression>, ast: &Ast) -> Result<NodeType> {
+impl Node<Expression> for Value {
+    fn node_type(node_id: NodeID<Expression>, ast: &Ast) -> Result<NodeType> {
         let value: &Value = ast.get_inner(node_id).try_into()?;
         Ok(match value {
             Value::Int(_) => NodeType::Int,
@@ -71,12 +71,12 @@ impl Value {
         })
     }
 
-    fn link(_: NodeID<Expression>, _: &mut Ast) -> Result<()> {
-        Ok(())
+    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+        Box::new(None.into_iter())
     }
 
-    fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
-        Box::new([].iter())
+    fn link(_: NodeID<Expression>, _: &mut Ast) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -87,7 +87,9 @@ impl VariableValue {
     pub fn new(state: State<String, NodeID<Variable>>) -> Self {
         Self(state)
     }
+}
 
+impl Node<Expression> for VariableValue {
     fn node_type(node_id: NodeID<Expression>, ast: &Ast) -> Result<NodeType> {
         let variable: &Self = ast.get_inner(node_id).try_into()?;
         match variable.0 {
@@ -96,8 +98,8 @@ impl VariableValue {
         }
     }
 
-    fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
-        Box::new([].iter())
+    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+        Box::new(None.into_iter())
     }
 
     fn link(node_id: NodeID<Expression>, ast: &mut Ast) -> Result<()> {

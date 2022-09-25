@@ -19,7 +19,7 @@ impl Linker {
     pub fn link(mut self) -> Result<Ast> {
         while let Some(node_id) = self.queue.pop_front() {
             let node = self.ast.get(node_id);
-            for &child in node.children() {
+            for child in node.children() {
                 self.queue.push_back(child);
             }
             match AstNode::link(node_id, &mut self.ast) {

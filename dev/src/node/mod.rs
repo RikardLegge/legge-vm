@@ -21,16 +21,21 @@ pub enum NodeType {
     String,
 }
 
-pub trait Node: Into<AstNodeBody> {
-    fn node_type(_: NodeID<Self>, _: &Ast) -> Result<NodeType> {
+enum NodeIterator<'a> {
+    Empty,
+    Slice(&'a [NodeID]),
+}
+
+pub trait Node<T = Self>: Sized {
+    fn node_type(_: NodeID<T>, _: &Ast) -> Result<NodeType> {
         Err(Error::TypeNotInferred)
     }
 
-    fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
-        Box::new([].iter())
+    fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
+        Box::new(None.into_iter())
     }
 
-    fn link(_: NodeID<Self>, _: &mut Ast) -> Result<()> {
+    fn link(_: NodeID<T>, _: &mut Ast) -> Result<()> {
         Ok(())
     }
 }
@@ -117,7 +122,7 @@ macro_rules! impl_enum_node {
                 }
             }
 
-            fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
+            fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
                 match &self {
                     $(
                         $enum::$variant(value) => value.children()
@@ -194,7 +199,7 @@ macro_rules! impl_try_from_ast_node {
         }
 
         impl AstNodeBody {
-            pub fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
+            pub fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
                 match self {
                     AstNodeBody::Unknown(_) => unreachable!(),
                     $(
@@ -217,7 +222,7 @@ pub struct AstNode<T = Unknown> {
 }
 
 impl<T> AstNode<T> {
-    pub fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
+    pub fn children(&self) -> Box<dyn Iterator<Item = NodeID> + '_> {
         self.body.as_ref().unwrap().children()
     }
 }
