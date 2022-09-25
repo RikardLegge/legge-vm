@@ -6,8 +6,8 @@ mod token;
 
 use crate::ast::Ast;
 use crate::node::{
-    AstNode, Block, Expression, Node, NodeID, NodeType, Operation, Statement, TryFromMut,
-    TryFromRef, Value, Variable, VariableAssignment, VariableDeclaration,
+    AstNode, Block, Expression, Node, NodeID, NodeType, Operation, Statement, Value, Variable,
+    VariableAssignment, VariableDeclaration,
 };
 use crate::token::TokenType;
 use std::fmt::Debug;
@@ -29,6 +29,7 @@ fn main() -> Result<()> {
     a := 1; 
     a = a + 1; 
     b := "😇";
+    c := a;
     "#,
     );
     println!(

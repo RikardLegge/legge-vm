@@ -19,7 +19,10 @@ impl Node for Variable {
         let parent_id = node.parent_id.ok_or(Error::InternalError)?;
         let parent = ast.get(parent_id);
         match parent.body.as_ref().unwrap() {
-            AstNodeBody::Statement(statement) => statement.variable_type(ast),
+            AstNodeBody::Statement(statement) => {
+                let value = statement.value().ok_or(Error::InternalError)?;
+                ast.get_node_type(value)
+            }
             _ => unimplemented!(),
         }
     }

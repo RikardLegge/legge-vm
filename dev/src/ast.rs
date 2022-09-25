@@ -1,7 +1,7 @@
 use crate::ast_builder::AstBuilder;
 use crate::node::AstNodeBody;
 use crate::token::Token;
-use crate::{AstNode, Block, Node, NodeID, NodeType, Result, TryFromMut, TryFromRef, Variable};
+use crate::{AstNode, Block, Error, Node, NodeID, NodeType, Result, Variable};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
@@ -194,19 +194,23 @@ impl Ast {
         self.nodes.get_mut(node_id.into().id()).unwrap()
     }
 
-    pub fn get_inner<Child>(&self, node_id: NodeID<Child>) -> &Child
+    pub fn get_inner<'a, Child>(&'a self, node_id: NodeID<Child>) -> &'a Child
     where
-        Child: TryFromRef<AstNodeBody>,
+        &'a Child: TryFrom<&'a AstNodeBody>,
     {
         let node = self.nodes.get(node_id.id()).unwrap();
-        Child::try_from_ref(node.body.as_ref().unwrap()).unwrap()
+        let body: &AstNodeBody = node.body.as_ref().unwrap();
+        let inner: &Child = body.try_into().map_err(|_| Error::InternalError).unwrap();
+        inner
     }
 
-    pub fn get_inner_mut<Child>(&mut self, node_id: NodeID<Child>) -> &mut Child
+    pub fn get_inner_mut<'a, Child>(&'a mut self, node_id: NodeID<Child>) -> &'a mut Child
     where
-        Child: TryFromMut<AstNodeBody>,
+        &'a mut Child: TryFrom<&'a mut AstNodeBody>,
     {
         let node = self.nodes.get_mut(node_id.id()).unwrap();
-        Child::try_from_mut(node.body.as_mut().unwrap()).unwrap()
+        let body: &mut AstNodeBody = node.body.as_mut().unwrap();
+        let inner: &mut Child = body.try_into().map_err(|_| Error::InternalError).unwrap();
+        inner
     }
 }

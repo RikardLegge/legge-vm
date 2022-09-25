@@ -1,3 +1,4 @@
+use crate::node::VariableValue;
 use crate::token::Token;
 use crate::{Ast, Block, Error, Node, TokenType};
 use crate::{
@@ -74,7 +75,9 @@ where
             TokenType::Int(value, _) => Value::Int(value).into(),
             TokenType::Float(value, _) => Value::Float(value).into(),
             TokenType::String(value) => Value::String(value.to_string()).into(),
-            TokenType::Name(value) => Expression::VariableValue(State::Unlinked(value.to_string())),
+            TokenType::Name(value) => {
+                Expression::VariableValue(VariableValue::new(State::Unlinked(value.to_string())))
+            }
             tp => unimplemented!("{:?}", tp),
         };
         let expression_id = self.ast.new_node(parent_id);

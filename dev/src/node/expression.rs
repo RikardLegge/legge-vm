@@ -1,8 +1,16 @@
 use crate::node::{NodeID, NodeType, Variable};
 use crate::token::ArithmeticOP;
-use crate::{Ast, Error, Result};
+use crate::{impl_enum_node, Ast, Error, Result};
 use crate::{Node, State};
 use std::iter;
+
+impl_enum_node!(
+    pub enum Expression {
+        ConstValue,
+        VariableValue,
+        Operation,
+    }
+);
 
 #[derive(Debug)]
 pub struct Operation {
@@ -22,9 +30,20 @@ impl Operation {
         }
     }
 
-    pub fn node_type(&self, ast: &Ast) -> Result<NodeType> {
-        let lhs_type = ast.get_node_type(self.lhs)?;
-        let rhs_type = ast.get_node_type(self.lhs)?;
+    fn link(_: NodeID<Expression>, _: &mut Ast) -> Result<()> {
+        Ok(())
+    }
+
+    fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
+        let lhs_iter = iter::once(&self.lhs).map(|c| c.into());
+        let rhs_iter = iter::once(&self.rhs).map(|c| c.into());
+        Box::new(lhs_iter.chain(rhs_iter))
+    }
+
+    pub fn node_type(node_id: NodeID<Expression>, ast: &Ast) -> Result<NodeType> {
+        let op: &Self = ast.get_inner(node_id).try_into()?;
+        let lhs_type = ast.get_node_type(op.lhs)?;
+        let rhs_type = ast.get_node_type(op.lhs)?;
         if lhs_type == rhs_type {
             Ok(lhs_type)
         } else {
@@ -33,18 +52,7 @@ impl Operation {
     }
 }
 
-impl From<Operation> for Expression {
-    fn from(op: Operation) -> Self {
-        Expression::Operation(op)
-    }
-}
-
-#[derive(Debug)]
-pub enum Expression {
-    ConstValue(Value),
-    VariableValue(State<String, NodeID<Variable>>),
-    Operation(Operation),
-}
+pub type ConstValue = Value;
 
 #[derive(Debug)]
 pub enum Value {
@@ -54,56 +62,54 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn node_type(&self) -> Result<NodeType> {
-        Ok(match &self {
+    pub fn node_type(node_id: NodeID<Expression>, ast: &Ast) -> Result<NodeType> {
+        let value: &Value = ast.get_inner(node_id).try_into()?;
+        Ok(match value {
             Value::Int(_) => NodeType::Int,
             Value::Float(_) => NodeType::Float,
             Value::String(_) => NodeType::String,
         })
     }
-}
 
-impl From<Value> for Expression {
-    fn from(value: Value) -> Self {
-        Expression::ConstValue(value)
+    fn link(_: NodeID<Expression>, _: &mut Ast) -> Result<()> {
+        Ok(())
+    }
+
+    fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
+        Box::new([].iter())
     }
 }
 
-impl Node for Expression {
-    fn node_type(node_id: NodeID<Self>, ast: &Ast) -> Result<NodeType> {
-        let node = ast.get_inner(node_id);
-        match node {
-            Expression::ConstValue(value) => value.node_type(),
-            Expression::VariableValue(State::Linked(var)) => ast.get_node_type(*var),
-            Expression::Operation(operation) => operation.node_type(ast),
+#[derive(Debug)]
+pub struct VariableValue(State<String, NodeID<Variable>>);
+
+impl VariableValue {
+    pub fn new(state: State<String, NodeID<Variable>>) -> Self {
+        Self(state)
+    }
+
+    fn node_type(node_id: NodeID<Expression>, ast: &Ast) -> Result<NodeType> {
+        let variable: &Self = ast.get_inner(node_id).try_into()?;
+        match variable.0 {
+            State::Linked(var) => ast.get_node_type(var),
             _ => Err(Error::TypeNotInferred),
         }
     }
 
     fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
-        match &self {
-            Expression::ConstValue(_) => Box::new([].iter()),
-            Expression::VariableValue(_) => Box::new([].iter()),
-            Expression::Operation(Operation { lhs, rhs, .. }) => {
-                let lhs_iter = iter::once(lhs).map(|c| c.into());
-                let rhs_iter = iter::once(rhs).map(|c| c.into());
-                Box::new(lhs_iter.chain(rhs_iter))
-            }
-        }
+        Box::new([].iter())
     }
 
-    fn link(id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
-        let node = ast.get_inner(id);
-        match &node {
-            Expression::VariableValue(State::Unlinked(var)) => {
-                let var = ast
-                    .closest_variable(id, var)?
-                    .ok_or(Error::VariableNotFound)?;
-                let node = ast.get_inner_mut(id);
-                *node = Expression::VariableValue(State::Linked(var));
-                Ok(())
-            }
-            _ => Ok(()),
+    fn link(node_id: NodeID<Expression>, ast: &mut Ast) -> Result<()> {
+        let node: &Self = ast.get_inner(node_id).try_into()?;
+        if let State::Unlinked(var) = &node.0 {
+            let var = ast
+                .closest_variable(node_id, var)?
+                .ok_or(Error::VariableNotFound)?;
+
+            let node: &mut Self = ast.get_inner_mut(node_id).try_into()?;
+            node.0 = State::Linked(var);
         }
+        Ok(())
     }
 }

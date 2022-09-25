@@ -1,12 +1,13 @@
 use crate::node::{Expression, Node, NodeID, NodeType, Variable};
-use crate::{Ast, Result};
+use crate::{impl_enum_node, Ast, Error, Result, State};
 use std::iter;
 
-#[derive(Debug)]
-pub enum Statement {
-    VariableDeclaration(VariableDeclaration),
-    VariableAssignment(VariableAssignment),
-}
+impl_enum_node!(
+    pub enum Statement {
+        VariableDeclaration,
+        VariableAssignment,
+    }
+);
 
 impl Statement {
     pub fn variable(&self) -> Option<NodeID<Variable>> {
@@ -16,65 +17,72 @@ impl Statement {
         }
     }
 
-    pub fn variable_type(&self, ast: &Ast) -> Result<NodeType> {
+    pub fn value(&self) -> Option<NodeID<Expression>> {
         match self {
-            Statement::VariableDeclaration(dec) => ast.get_node_type(dec.value),
-            Statement::VariableAssignment(_) => unimplemented!(),
+            Statement::VariableDeclaration(var) => Some(var.value),
+            Statement::VariableAssignment(var) => Some(var.value),
         }
-    }
-}
-
-impl Node for Statement {
-    fn node_type(_: NodeID<Self>, _: &Ast) -> Result<NodeType> {
-        Ok(NodeType::Void)
-    }
-
-    fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
-        match &self {
-            Statement::VariableDeclaration(VariableDeclaration { variable, value }) => {
-                let variable_iter = iter::once(variable).map(|c| c.into());
-                let value_iter = iter::once(value).map(|c| c.into());
-                Box::new(variable_iter.chain(value_iter))
-            }
-            Statement::VariableAssignment(VariableAssignment { name: _, value }) => {
-                Box::new(iter::once(value).map(|c| c.into()))
-            }
-        }
-    }
-}
-
-impl VariableDeclaration {
-    pub fn new(variable: NodeID<Variable>, value: NodeID<Expression>) -> Self {
-        VariableDeclaration { variable, value }
-    }
-}
-
-impl From<VariableDeclaration> for Statement {
-    fn from(var: VariableDeclaration) -> Self {
-        Statement::VariableDeclaration(var)
     }
 }
 
 #[derive(Debug)]
 pub struct VariableDeclaration {
     variable: NodeID<Variable>,
-    value: NodeID<Expression>,
+    pub value: NodeID<Expression>,
+}
+
+impl VariableDeclaration {
+    pub fn new(variable: NodeID<Variable>, value: NodeID<Expression>) -> Self {
+        VariableDeclaration { variable, value }
+    }
+
+    pub fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
+        let variable_iter = iter::once(&self.variable).map(|c| c.into());
+        let value_iter = iter::once(&self.value).map(|c| c.into());
+        Box::new(variable_iter.chain(value_iter))
+    }
+
+    fn node_type(_: NodeID<Statement>, _: &Ast) -> Result<NodeType> {
+        Ok(NodeType::Void)
+    }
+
+    pub fn link(_: NodeID<Statement>, _: &mut Ast) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
 pub struct VariableAssignment {
-    name: String,
+    variable: State<String, NodeID<Variable>>,
     value: NodeID<Expression>,
 }
 
 impl VariableAssignment {
-    pub fn new(name: String, value: NodeID<Expression>) -> Self {
-        VariableAssignment { name, value }
+    pub fn new(ident: String, value: NodeID<Expression>) -> Self {
+        VariableAssignment {
+            variable: State::Unlinked(ident),
+            value,
+        }
     }
-}
 
-impl From<VariableAssignment> for Statement {
-    fn from(var: VariableAssignment) -> Self {
-        Statement::VariableAssignment(var)
+    pub fn children(&self) -> Box<dyn Iterator<Item = &NodeID> + '_> {
+        Box::new(iter::once(&self.value).map(|c| c.into()))
+    }
+
+    fn node_type(_: NodeID<Statement>, _: &Ast) -> Result<NodeType> {
+        Ok(NodeType::Void)
+    }
+
+    pub fn link(node_id: NodeID<Statement>, ast: &mut Ast) -> Result<()> {
+        let node: &Self = ast.get_inner(node_id).try_into()?;
+        if let State::Unlinked(var) = &node.variable {
+            let var = ast
+                .closest_variable(node_id, var)?
+                .ok_or(Error::VariableNotFound)?;
+
+            let node: &mut Self = ast.get_inner_mut(node_id).try_into()?;
+            node.variable = State::Linked(var);
+        }
+        Ok(())
     }
 }
