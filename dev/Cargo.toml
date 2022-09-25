@@ -1,0 +1,12 @@
+[package]
+edition = "2021"
+name = "leggevm-dev"
+version = "0.1.0"
+authors = ["Rikard Legge <rikard@legge.se>"]
+
+[dependencies]
+tokio = { version = "1.13", features = ["rt-multi-thread", "io-util", "sync", "fs", "macros"] }
+
+[profile.release]
+panic = "abort"
+debug = true
