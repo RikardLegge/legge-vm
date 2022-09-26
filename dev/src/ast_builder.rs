@@ -1,8 +1,8 @@
-use crate::node::{Function, TypeDeclaration, VariableValue};
+use crate::node::{Function, ReferenceType, StaticAssignment, TypeDeclaration, VariableValue};
 use crate::token::{KeyName, Token};
 use crate::{Ast, Block, Error, Node, TokenType};
 use crate::{
-    Expression, NodeID, Operation, Result, State, Statement, Value, Variable, VariableAssignment,
+    Expression, NodeID, Operation, Reference, Result, State, Statement, Value, VariableAssignment,
     VariableDeclaration,
 };
 use std::iter::Peekable;
@@ -103,7 +103,7 @@ where
 
                 let rhs = self.expression(operation_id)?;
                 let lhs_node = self.ast.get_mut(lhs);
-                lhs_node.parent_id = Some(operation_id.into());
+                lhs_node.set_parent(operation_id);
 
                 let operation = Expression::Operation(Operation::new(op, lhs, rhs));
                 Ok(self.ast.push(operation_id, operation))
@@ -112,7 +112,7 @@ where
         }
     }
 
-    fn new_type(&mut self, variable: NodeID<Variable>) -> Result<Statement> {
+    fn new_type(&mut self, variable: NodeID<Reference>) -> Result<Statement> {
         let expr_id = self.ast.new_node(variable);
         let expr = Expression::Function(Function {});
         let expr = self.ast.push(expr_id, expr);
@@ -135,7 +135,7 @@ where
         let statement: Statement = match next_token.tp {
             TokenType::VariableDeclaration => {
                 let variable_id = self.ast.new_node(statement_id);
-                let variable = Variable::new(name.to_string());
+                let variable = Reference::new(name.to_string(), ReferenceType::VariableDeclaration);
                 let variable = self.ast.push(variable_id, variable);
 
                 let value = self.expression(variable)?;
@@ -155,10 +155,32 @@ where
                     _ => unimplemented!(),
                 }
                 let variable_id = self.ast.new_node(statement_id);
-                let variable = Variable::new(name.to_string());
+                let variable = Reference::new(name.to_string(), ReferenceType::TypeDeclaration);
                 let variable = self.ast.push(variable_id, variable);
 
                 self.new_type(variable)?
+            }
+            TokenType::Dot => {
+                let field = match self.next_token()?.tp {
+                    TokenType::Name(path) => Some(path.to_string()),
+                    _ => unimplemented!(),
+                };
+
+                match self.next_token()?.tp {
+                    TokenType::ConstDeclaration => {}
+                    _ => unimplemented!(),
+                };
+
+                let value = self.expression(statement_id)?;
+                self.expect_end_statement()?;
+
+                StaticAssignment {
+                    variable: name.to_string().into(),
+                    value,
+                    field,
+                    is_static: false,
+                }
+                .into()
             }
             tt => unimplemented!("{:?}", tt),
         };

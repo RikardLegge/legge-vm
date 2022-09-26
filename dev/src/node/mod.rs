@@ -87,8 +87,8 @@ impl<'a> Iterator for NodeIterator<'a> {
     }
 }
 
-pub trait Node<T = Self>: Sized {
-    fn node_type(_: NodeID<T>, _: &Ast) -> Result<NodeType> {
+pub trait Node: Sized {
+    fn node_type(_: NodeID<Self>, _: &Ast) -> Result<NodeType> {
         Err(Error::TypeNotInferred)
     }
 
@@ -96,20 +96,20 @@ pub trait Node<T = Self>: Sized {
         NodeIterator::empty()
     }
 
-    fn link(_: NodeID<T>, _: &mut Ast) -> Result<()> {
+    fn link(_: NodeID<Self>, _: &mut Ast) -> Result<()> {
         Ok(())
     }
 }
 
 #[macro_export]
 macro_rules! try_cast_node {
-    ($node:ident as $ty:ident) => {
+    ($node:ident as $ty:tt) => {
         match $node.body.as_ref().unwrap() {
-            AstNodeBody::$ty(_) => {
+            $crate::node::AstNodeBody::$ty(_) => {
                 // Safety: The node must have a body of type $ty, since AstNode
                 // is repr(C), it must adhere to the C layout ABI and therefore
                 // the marker trait <T> will not change the binary representation.
-                let block: &AstNode<$ty> = unsafe { std::mem::transmute($node) };
+                let block: &$crate::node::AstNode<$ty> = unsafe { std::mem::transmute($node) };
                 Some(block)
             }
             _ => None,
@@ -172,13 +172,53 @@ macro_rules! impl_enum_node {
                 }
             }
 
+
+            impl<'a> TryFrom<&'a $crate::node::AstNodeBody> for &'a $variant {
+                type Error = $crate::Error;
+
+                fn try_from(body: &'a $crate::node::AstNodeBody) -> std::result::Result<Self, Self::Error> {
+                    let value = <&$enum>::try_from(body).map_err(|_| $crate::Error::InternalError)?;
+                    match value {
+                        $enum::$variant(ref value) => Ok(value),
+                        _ => Err(Error::InternalError)
+                    }
+                }
+            }
+
+            impl<'a> TryFrom<&'a mut $crate::node::AstNodeBody> for &'a mut $variant {
+                type Error = $crate::Error;
+
+                fn try_from(body: &'a mut $crate::node::AstNodeBody) -> std::result::Result<Self, Self::Error> {
+                    let value = <&mut $enum>::try_from(body).map_err(|_| $crate::Error::InternalError)?;
+                    match value {
+                        $enum::$variant(ref mut value) => Ok(value),
+                        _ => Err(Error::InternalError)
+                    }
+                }
+            }
+
+            impl TryFrom<$crate::node::AstNodeBody> for $variant {
+                type Error = $crate::Error;
+
+                fn try_from(body: $crate::node::AstNodeBody) -> std::result::Result<Self, Self::Error> {
+                    let value = <$enum>::try_from(body).map_err(|_| $crate::Error::InternalError)?;
+                    match value {
+                        $enum::$variant(value) => Ok(value),
+                        _ => Err(Error::InternalError)
+                    }
+                }
+            }
+
         )*
 
         impl Node for $enum {
             fn node_type(node_id: NodeID<Self>, ast: &Ast) -> Result<NodeType> {
                 match ast.get_inner(node_id) {
                     $(
-                        $enum::$variant(_) => $variant::node_type(node_id, ast)
+                        $enum::$variant(_) => {
+                            let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
+                            $variant::node_type(node_id, ast)
+                        }
                     ),*
                 }
             }
@@ -191,10 +231,13 @@ macro_rules! impl_enum_node {
                 }
             }
 
-            fn link(id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
-                match ast.get_inner(id) {
+            fn link(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
+                match ast.get_inner(node_id) {
                     $(
-                        $enum::$variant(_) => $variant::link(id, ast)
+                        $enum::$variant(_) => {
+                            let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
+                            $variant::link(node_id, ast)
+                        }
                     ),*
                 }
             }
@@ -276,8 +319,8 @@ pub type Unknown = ();
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct AstNode<T = Unknown> {
-    pub id: NodeID<T>,
+pub struct AstNode<NodeType = Unknown> {
+    pub id: NodeID<NodeType>,
     pub parent_id: Option<NodeID>,
     pub body: Option<AstNodeBody>,
 }
@@ -286,6 +329,10 @@ impl<T> AstNode<T> {
     pub fn children(&self) -> NodeIterator<'_> {
         self.body.as_ref().unwrap().children()
     }
+
+    pub fn set_parent(&mut self, parent_id: impl Into<NodeID>) {
+        self.parent_id = Some(parent_id.into());
+    }
 }
 
-impl_try_from_ast_node![Block, Statement, Expression, Variable];
+impl_try_from_ast_node![Block, Statement, Expression, Reference];

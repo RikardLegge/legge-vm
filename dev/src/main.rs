@@ -6,7 +6,7 @@ mod token;
 
 use crate::ast::Ast;
 use crate::node::{
-    AstNode, Block, Expression, Node, NodeID, NodeType, Operation, Statement, Value, Variable,
+    AstNode, Block, Expression, Node, NodeID, NodeType, Operation, Reference, Statement, Value,
     VariableAssignment, VariableDeclaration,
 };
 use crate::token::TokenType;
@@ -27,7 +27,10 @@ fn main() -> Result<()> {
     let tokens = token::from_chars(
         r#"
     A -> type {}
-    // A.value :: 2;
+    A.value :: 2;
+    // A.value :: (self: A) {
+    //     
+    // };
      
     a := 1; 
     a = a + 1; 
@@ -56,4 +59,10 @@ fn main() -> Result<()> {
 pub enum State<Unlinked, Linked> {
     Unlinked(Unlinked),
     Linked(Linked),
+}
+
+impl<Unlinked, Linked> From<Unlinked> for State<Unlinked, Linked> {
+    fn from(value: Unlinked) -> Self {
+        State::Unlinked(value)
+    }
 }

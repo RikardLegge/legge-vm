@@ -1,19 +1,40 @@
-use crate::node::{AstNodeBody, NodeType};
-use crate::{Ast, Error, Result};
+use crate::node::{AstNodeBody, NodeType, TypeDeclaration};
+use crate::{Ast, AstNode, Error, Result};
 use crate::{Node, NodeID};
 
 #[derive(Debug)]
-pub struct Variable {
-    pub name: String,
+pub enum ReferenceType {
+    VariableDeclaration,
+    TypeDeclaration,
 }
 
-impl Variable {
-    pub fn new(name: String) -> Self {
-        Variable { name }
+#[derive(Debug)]
+pub struct Reference {
+    pub name: String,
+    reference_type: ReferenceType,
+}
+
+impl AstNode<Reference> {
+    pub fn type_declaration_id(&self) -> Option<NodeID<TypeDeclaration>> {
+        match self.body().reference_type {
+            ReferenceType::TypeDeclaration => self
+                .parent_id
+                .map(|parent_id| unsafe { std::mem::transmute(parent_id) }),
+            ReferenceType::VariableDeclaration => None,
+        }
     }
 }
 
-impl Node for Variable {
+impl Reference {
+    pub fn new(name: String, reference_type: ReferenceType) -> Self {
+        Reference {
+            name,
+            reference_type,
+        }
+    }
+}
+
+impl Node for Reference {
     fn node_type(node_id: NodeID<Self>, ast: &Ast) -> Result<NodeType> {
         let node = ast.get(node_id);
         let parent_id = node.parent_id.ok_or(Error::InternalError)?;

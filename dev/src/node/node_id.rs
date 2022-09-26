@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 /// NodeID is repr(transparent) to ensure that it's safe to cast between
 /// different marker types.
+#[derive(Eq, PartialEq)]
 #[repr(transparent)]
 pub struct NodeID<T = Unknown> {
     id: usize,
