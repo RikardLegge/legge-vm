@@ -1,4 +1,5 @@
-use crate::node::{NodeID, NodeIterator, NodeType, Variable};
+use crate::ast::AstContext;
+use crate::node::{NodeID, NodeIDContext, NodeIterator, NodeType, NodeUsage, Variable};
 use crate::token::ArithmeticOP;
 use crate::{impl_enum_node, Ast, Error, Result};
 use crate::{Node, State};
@@ -8,10 +9,12 @@ impl_enum_node!(
         ConstValue,
         VariableValue,
         Operation,
+        FunctionCall,
+        ExpressionChain,
     }
 );
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Operation {
     pub op: ArithmeticOP,
     pub lhs: NodeID<Expression>,
@@ -31,14 +34,19 @@ impl Operation {
 }
 
 impl Node for Operation {
-    fn node_type(node_id: NodeID<Self>, ast: &Ast) -> Result<NodeType> {
-        let op: &Self = ast.get_inner(node_id);
-        let lhs_type = ast.get_node_type(op.lhs)?;
-        let rhs_type = ast.get_node_type(op.lhs)?;
-        if lhs_type == rhs_type {
-            Ok(lhs_type)
-        } else {
-            unimplemented!()
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, node_usage: NodeUsage) -> Result<NodeType> {
+        match node_usage {
+            NodeUsage::Value => {
+                let op: &Self = ast.get_body(node_id);
+                let lhs_type = ast.get_node_type(op.lhs, NodeUsage::Value)?;
+                let rhs_type = ast.get_node_type(op.lhs, NodeUsage::Value)?;
+                if lhs_type == rhs_type {
+                    Ok(lhs_type)
+                } else {
+                    unimplemented!()
+                }
+            }
+            _ => unimplemented!(),
         }
     }
 
@@ -46,14 +54,14 @@ impl Node for Operation {
         NodeIterator::dual(self.lhs, self.rhs)
     }
 
-    fn link(_: NodeID<Self>, _: &mut Ast) -> Result<()> {
+    fn link(_: NodeID<Self>, _: &mut Ast, _context: AstContext) -> Result<()> {
         Ok(())
     }
 }
 
 pub type ConstValue = Value;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Int(isize),
     Float(f64),
@@ -61,8 +69,8 @@ pub enum Value {
 }
 
 impl Node for Value {
-    fn node_type(node_id: NodeID<Self>, ast: &Ast) -> Result<NodeType> {
-        let value: &Value = ast.get_inner(node_id);
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, _node_usage: NodeUsage) -> Result<NodeType> {
+        let value: &Value = ast.get_body(node_id);
         Ok(match value {
             Value::Int(_) => NodeType::Int,
             Value::Float(_) => NodeType::Float,
@@ -71,39 +79,100 @@ impl Node for Value {
     }
 }
 
-#[derive(Debug)]
-pub struct VariableValue(State<String, NodeID<Variable>>);
+#[derive(Debug, Clone)]
+pub struct FunctionCall {
+    pub variable: NodeID<VariableValue>,
+}
+
+impl FunctionCall {
+    pub fn new(variable: NodeID<VariableValue>) -> Self {
+        Self { variable }
+    }
+}
+
+impl Node for FunctionCall {
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, node_usage: NodeUsage) -> Result<NodeType> {
+        match node_usage {
+            NodeUsage::Type => {
+                let body = ast.get_body(node_id);
+                ast.get_node_type(body.variable, node_usage)
+            }
+            NodeUsage::Call | NodeUsage::Value => {
+                let body = ast.get_body(node_id);
+                ast.get_node_type(body.variable, NodeUsage::Call)
+            }
+        }
+    }
+
+    fn children(&self) -> NodeIterator<'_> {
+        NodeIterator::single(self.variable)
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ExpressionChain {
+    pub lhs: NodeID<Expression>,
+    pub rhs: NodeID<Expression>,
+}
+
+impl ExpressionChain {
+    pub fn new(lhs: NodeID<Expression>, rhs: NodeID<Expression>) -> Self {
+        Self { lhs, rhs }
+    }
+}
+
+impl Node for ExpressionChain {
+    fn children(&self) -> NodeIterator<'_> {
+        NodeIterator::dual(
+            self.lhs,
+            NodeIDContext {
+                node_id: self.rhs.into(),
+                context: AstContext::Chain(self.lhs),
+            },
+        )
+    }
+
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
+        let body = ast.get_body(node_id);
+        ast.get_node_type(body.rhs, usage)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct VariableValue {
+    pub variable: State<String, NodeID<Variable>>,
+}
 
 impl VariableValue {
-    pub fn new(state: State<String, NodeID<Variable>>) -> Self {
-        Self(state)
+    pub fn new(variable: State<String, NodeID<Variable>>) -> Self {
+        Self { variable }
     }
 }
 
 impl Node for VariableValue {
-    fn node_type(node_id: NodeID<Self>, ast: &Ast) -> Result<NodeType> {
-        let variable: &Self = ast.get_inner(node_id);
-        match variable.0 {
-            State::Linked(var) => ast.get_node_type(var),
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, node_usage: NodeUsage) -> Result<NodeType> {
+        let value: &Self = ast.get_body(node_id);
+        match value.variable {
+            State::Linked(var) => ast.get_node_type(var, node_usage),
             _ => Err(Error::TypeNotInferred),
         }
     }
 
-    fn link(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
-        let node: &Self = ast.get_inner(node_id);
-        if let State::Unlinked(var) = &node.0 {
+    fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> Result<()> {
+        let body: &Self = ast.get_body(node_id);
+        if let State::Unlinked(var) = &body.variable {
             let var = ast
-                .closest_variable(node_id, var)?
+                .closest_variable(node_id, var, context)?
                 .ok_or(Error::VariableNotFound)?;
 
-            let node: &mut Self = ast.get_inner_mut(node_id);
-            node.0 = State::Linked(var);
+            let body: &mut Self = ast.get_inner_mut(node_id);
+            body.variable = State::Linked(var);
         }
         Ok(())
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StaticVariableValue(State<String, NodeID<Variable>>);
 
 impl StaticVariableValue {

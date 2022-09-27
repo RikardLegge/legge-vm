@@ -1,5 +1,6 @@
 use crate::node::{
-    FunctionDeclaration, ReferenceType, StaticAssignment, TypeDeclaration, VariableValue,
+    ExpressionChain, FunctionCall, FunctionDeclaration, ReferenceType, StaticAssignment,
+    TypeDeclaration, VariableValue,
 };
 use crate::token::{KeyName, Token};
 use crate::{Ast, Block, Error, Node, NodeType, TokenType};
@@ -37,6 +38,7 @@ where
 {
     pub fn build(mut self) -> Result<Ast<Block>> {
         let block_id = self.ast.new_root_node();
+        self.ast.root = Some(block_id);
         let mut children = vec![];
         while let Some(token) = self.tokens.next() {
             match token.tp {
@@ -49,8 +51,7 @@ where
             }
         }
         let block = Block::new(children, &self.ast);
-        let root = self.ast.push(block_id, block);
-        self.ast.root = Some(root);
+        self.ast.push(block_id, block);
         Ok(self.ast)
     }
 
@@ -67,6 +68,10 @@ where
         self.tokens.peek().ok_or(Error::EOF)
     }
 
+    fn peek_token_type(&mut self) -> Result<&TokenType> {
+        self.tokens.peek().map(|token| &token.tp).ok_or(Error::EOF)
+    }
+
     fn next_token(&mut self) -> Result<Token> {
         loop {
             let token = self.tokens.next().ok_or(Error::EOF)?;
@@ -79,25 +84,42 @@ where
 
     fn expression(&mut self, parent_id: impl Into<NodeID>) -> Result<NodeID<Expression>> {
         let parent_id = parent_id.into();
+        let expression_id = self.ast.new_node(parent_id);
         let next_token = self.next_token()?;
         let expression: Expression = match next_token.tp {
             TokenType::Int(value, _) => Value::Int(value).into(),
             TokenType::Float(value, _) => Value::Float(value).into(),
             TokenType::String(value) => Value::String(value.to_string()).into(),
             TokenType::Name(value) => {
-                Expression::VariableValue(VariableValue::new(State::Unlinked(value.to_string())))
+                let variable = VariableValue::new(State::Unlinked(value.to_string()));
+                match self.peek_token_type()? {
+                    TokenType::Dot => {
+                        self.next_token()?;
+
+                        let variable_id = self.ast.new_node(expression_id);
+                        let variable = self.ast.push(variable_id, variable);
+
+                        let rhs = self.expression(expression_id)?;
+                        ExpressionChain::new(variable.into(), rhs).into()
+                    }
+                    TokenType::LeftBrace => {
+                        self.next_token()?;
+                        assert_eq!(TokenType::RightBrace, self.next_token()?.tp);
+
+                        let variable_id = self.ast.new_node(expression_id);
+                        let variable = self.ast.push(variable_id, variable);
+
+                        FunctionCall::new(variable).into()
+                    }
+                    _ => variable.into(),
+                }
             }
             tp => unimplemented!("{:?}", tp),
         };
-        let expression_id = self.ast.new_node(parent_id);
+
         let lhs = self.ast.push(expression_id, expression);
 
-        let rhs_token = match self.peek_token() {
-            Ok(token) => token,
-            _ => return Ok(lhs),
-        };
-
-        match &rhs_token.tp {
+        match self.peek_token_type()? {
             TokenType::Op(op) => {
                 let op = *op;
                 self.next_token()?;
@@ -180,9 +202,13 @@ where
                 let statement_id = self.ast.new_node(parent_id);
 
                 let field = match self.next_token()?.tp {
-                    TokenType::Name(path) => Some(path.to_string()),
+                    TokenType::Name(path) => path.to_string(),
                     _ => unimplemented!(),
                 };
+
+                let variable_id = self.ast.new_node(statement_id);
+                let variable = Variable::new(field, ReferenceType::VariableDeclaration);
+                let variable = self.ast.push(variable_id, variable);
 
                 match self.next_token()?.tp {
                     TokenType::ConstDeclaration => {}
@@ -193,10 +219,10 @@ where
                 self.expect_end_statement()?;
 
                 let statement = StaticAssignment {
-                    variable: name.to_string().into(),
+                    assign_to: name.to_string().into(),
+                    variable,
                     value,
-                    field,
-                    is_static: false,
+                    is_associated_field: false,
                 };
                 self.ast.push(statement_id, statement).into()
             }

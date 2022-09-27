@@ -1,3 +1,4 @@
+use crate::ast::AstContext;
 use crate::node::{Node, Unknown};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
@@ -8,6 +9,31 @@ use std::marker::PhantomData;
 pub struct NodeID<T = Unknown> {
     id: usize,
     _tp: PhantomData<fn() -> T>,
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(C)]
+pub struct NodeIDContext<T = Unknown> {
+    pub node_id: NodeID<T>,
+    pub context: AstContext,
+}
+
+impl<T> From<NodeIDContext<T>> for NodeID<T> {
+    fn from(node: NodeIDContext<T>) -> Self {
+        node.node_id
+    }
+}
+
+impl<T> From<NodeID<T>> for NodeIDContext
+where
+    T: Node,
+{
+    fn from(node: NodeID<T>) -> Self {
+        Self {
+            node_id: node.into(),
+            context: AstContext::Default,
+        }
+    }
 }
 
 impl<T> PartialEq for NodeID<T> {

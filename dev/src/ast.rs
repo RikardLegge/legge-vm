@@ -1,12 +1,20 @@
 use crate::ast_builder::AstBuilder;
-use crate::node::AstNodeBody;
+use crate::node::{AstNodeBody, NodeUsage};
 use crate::token::Token;
-use crate::{try_cast_node, AstNode, Block, Error, Node, NodeID, NodeType, Result, Variable};
+use crate::{
+    try_cast_node, AstNode, Block, Error, Expression, Node, NodeID, NodeType, Result, Variable,
+};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
 pub fn from_tokens(tokens: Vec<Token>) -> Result<Ast> {
     AstBuilder::new(tokens.into_iter()).build()
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AstContext {
+    Default,
+    Chain(NodeID<Expression>),
 }
 
 pub struct Ast<T = Block, G = ()>
@@ -16,6 +24,19 @@ where
     pub root: Option<NodeID<T>>,
     nodes: Vec<AstNode>,
     guarantees: PhantomData<fn() -> G>,
+}
+
+impl<T, G> Clone for Ast<T, G>
+where
+    T: Node,
+{
+    fn clone(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            nodes: self.nodes.clone(),
+            guarantees: self.guarantees.clone(),
+        }
+    }
 }
 
 impl Debug for Ast<Block> {
@@ -68,18 +89,39 @@ impl Ast {
         write!(f, "{}", pad_start)?;
 
         write!(f, " {:?}", node.id.id())?;
-        if let Ok(tp) = self.get_node_type(node.id) {
-            write!(f, " : {:?}", tp)?;
+
+        fn ignore_void(result: Result<NodeType>) -> Result<NodeType> {
+            match result {
+                Ok(NodeType::Void) => Err(Error::TypeNotInferred),
+                other => other,
+            }
+        }
+        let value_tp = ignore_void(self.get_node_type(node.id, NodeUsage::Value));
+        let call_tp = ignore_void(self.get_node_type(node.id, NodeUsage::Call));
+        let type_tp = ignore_void(self.get_node_type(node.id, NodeUsage::Type));
+        match (&value_tp, &call_tp) {
+            (Ok(value_tp), Ok(call_tp)) if value_tp == call_tp => write!(f, " : {:?}", value_tp)?,
+            _ => {
+                if let Ok(tp) = value_tp {
+                    write!(f, " :value {:?}", tp)?;
+                }
+                if let Ok(tp) = call_tp {
+                    write!(f, " :call {:?}", tp)?;
+                }
+            }
+        }
+        if let Ok(tp) = type_tp {
+            write!(f, " :type {:?}", tp)?;
         }
         if let Some(body) = &node.body {
             write!(f, " = {:?}", body)?;
         }
 
         if children.peek().is_some() {
-            write!(f, " [\n")?;
+            writeln!(f, " [")?;
             for child in children {
-                self.fmt_debug_node(f, level + 1, child)?;
-                write!(f, "\n")?;
+                self.fmt_debug_node(f, level + 1, child.into())?;
+                writeln!(f, "")?;
             }
             write!(f, " ")?;
             write!(f, "{}]", pad_end)?;
@@ -131,14 +173,23 @@ impl Ast {
         &self,
         node_id: impl Into<NodeID>,
         target_ident: &str,
+        context: AstContext,
     ) -> Result<Option<NodeID<Variable>>> {
-        self.walk_blocks_up(node_id, |node| {
-            let block = node.body();
-            if let Some(variable_id) = block.variables.get(target_ident) {
-                return Ok(Some(*variable_id));
+        match context {
+            AstContext::Default => {
+                self.walk_blocks_up(node_id, |node| node.body().has_variable(target_ident))
             }
-            Ok(None)
-        })
+            AstContext::Chain(parent_id) => {
+                let tp = self.get_node_type(parent_id, NodeUsage::Type)?;
+                match tp {
+                    NodeType::Custom(decl) => {
+                        let body = self.get_body(decl);
+                        body.has_variable(target_ident)
+                    }
+                    _ => Ok(None),
+                }
+            }
+        }
     }
 
     pub fn walk_blocks_up<F, NodeType>(
@@ -183,7 +234,10 @@ impl Ast {
     }
 
     pub fn get(&self, node_id: impl Into<NodeID>) -> &AstNode {
-        self.nodes.get(node_id.into().id()).unwrap()
+        let node_id: NodeID = node_id.into();
+        let index = node_id.id();
+        let node = self.nodes.get(index);
+        node.unwrap()
     }
 
     pub fn get_typed<Child>(&self, node_id: NodeID<Child>) -> &AstNode<Child>
@@ -191,18 +245,20 @@ impl Ast {
         Child: Node,
     {
         let node = self.get(node_id);
+        // Safety: Since the node type Child was used to retrieve this element,
+        // the underlying data must match this type.
         unsafe { std::mem::transmute(node) }
     }
 
-    pub fn get_node_type(&self, node_id: impl Into<NodeID>) -> Result<NodeType> {
-        AstNode::node_type(node_id.into(), &self)
+    pub fn get_node_type(&self, node_id: impl Into<NodeID>, usage: NodeUsage) -> Result<NodeType> {
+        AstNode::node_type(node_id.into(), &self, usage)
     }
 
     pub fn get_mut(&mut self, node_id: impl Into<NodeID>) -> &mut AstNode {
         self.nodes.get_mut(node_id.into().id()).unwrap()
     }
 
-    pub fn get_inner<'a, Child>(&'a self, node_id: NodeID<Child>) -> &'a Child
+    pub fn get_body<'a, Child>(&'a self, node_id: NodeID<Child>) -> &'a Child
     where
         &'a Child: TryFrom<&'a AstNodeBody>,
     {

@@ -10,8 +10,16 @@ pub use node_id::*;
 pub use statement::*;
 pub use variable::*;
 
+use crate::ast::AstContext;
 use crate::{Ast, Error, Result};
 use std::fmt::Debug;
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum NodeUsage {
+    Type,
+    Call,
+    Value,
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum NodeType {
@@ -25,8 +33,8 @@ pub enum NodeType {
 
 enum NodeIteratorBody<'a> {
     Empty,
-    Single(NodeID),
-    Dual(NodeID, NodeID),
+    Single(NodeIDContext),
+    Dual(NodeIDContext, NodeIDContext),
     Slice(&'a [NodeID]),
     Chained(Box<NodeIterator<'a>>, Box<NodeIterator<'a>>),
 }
@@ -45,11 +53,14 @@ impl<'a> NodeIterator<'a> {
         Self::new(NodeIteratorBody::Empty)
     }
 
-    pub fn single(first: impl Into<NodeID>) -> NodeIterator<'a> {
+    pub fn single(first: impl Into<NodeIDContext>) -> NodeIterator<'a> {
         Self::new(NodeIteratorBody::Single(first.into()))
     }
 
-    pub fn dual(first: impl Into<NodeID>, second: impl Into<NodeID>) -> NodeIterator<'a> {
+    pub fn dual(
+        first: impl Into<NodeIDContext>,
+        second: impl Into<NodeIDContext>,
+    ) -> NodeIterator<'a> {
         Self::new(NodeIteratorBody::Dual(first.into(), second.into()))
     }
 
@@ -67,7 +78,7 @@ impl<'a> NodeIterator<'a> {
 }
 
 impl<'a> Iterator for NodeIterator<'a> {
-    type Item = NodeID;
+    type Item = NodeIDContext;
 
     fn next(&mut self) -> Option<Self::Item> {
         let result = match self.items {
@@ -76,7 +87,12 @@ impl<'a> Iterator for NodeIterator<'a> {
             NodeIteratorBody::Dual(item, _) if self.index == 0 => Some(item),
             NodeIteratorBody::Dual(_, item) if self.index == 1 => Some(item),
 
-            NodeIteratorBody::Slice(slice) => slice.get(self.index).cloned(),
+            NodeIteratorBody::Slice(slice) => {
+                slice.get(self.index).cloned().map(|node| NodeIDContext {
+                    node_id: node,
+                    context: AstContext::Default,
+                })
+            }
 
             NodeIteratorBody::Chained(ref mut first, ref mut second) => first.chain(second).next(),
 
@@ -89,8 +105,8 @@ impl<'a> Iterator for NodeIterator<'a> {
     }
 }
 
-pub trait Node: Sized {
-    fn node_type(_: NodeID<Self>, _: &Ast) -> Result<NodeType> {
+pub trait Node: Sized + Debug {
+    fn node_type(_node_id: NodeID<Self>, _ast: &Ast, _usage: NodeUsage) -> Result<NodeType> {
         Err(Error::TypeNotInferred)
     }
 
@@ -98,8 +114,12 @@ pub trait Node: Sized {
         NodeIterator::empty()
     }
 
-    fn link(_: NodeID<Self>, _: &mut Ast) -> Result<()> {
+    fn link(_node_id: NodeID<Self>, _ast: &mut Ast, _context: AstContext) -> Result<()> {
         Ok(())
+    }
+
+    fn has_variable(&self, _var: &str) -> Result<Option<NodeID<Variable>>> {
+        Ok(None)
     }
 }
 
@@ -160,7 +180,7 @@ macro_rules! impl_try_from_variant {
 #[macro_export]
 macro_rules! impl_enum_node {
     ( pub enum $enum:ident { $($variant:ident),* $(,)* } ) => {
-        #[derive(Debug)]
+        #[derive(Debug, Clone)]
         pub enum $enum {
              $($variant($variant)),*
         }
@@ -176,6 +196,8 @@ macro_rules! impl_enum_node {
 
             impl From<NodeID<$variant>> for NodeID<$enum> {
                 fn from(node_id: NodeID<$variant>) -> Self {
+                    // Safety: NodeID does not change its representation with this cast.
+                    // Since a variant is a subset of an enum then this will always be ok.
                     unsafe {std::mem::transmute(node_id)}
                 }
             }
@@ -225,12 +247,12 @@ macro_rules! impl_enum_node {
         )*
 
         impl Node for $enum {
-            fn node_type(node_id: NodeID<Self>, ast: &Ast) -> Result<NodeType> {
-                match ast.get_inner(node_id) {
+            fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: $crate::node::NodeUsage) -> Result<NodeType> {
+                match ast.get_body(node_id) {
                     $(
                         $enum::$variant(_) => {
                             let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
-                            $variant::node_type(node_id, ast)
+                            $variant::node_type(node_id, ast, usage)
                         }
                     ),*
                 }
@@ -244,12 +266,12 @@ macro_rules! impl_enum_node {
                 }
             }
 
-            fn link(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
-                match ast.get_inner(node_id) {
+            fn link(node_id: NodeID<Self>, ast: &mut $crate::ast::Ast, context: $crate::ast::AstContext) -> Result<()> {
+                match ast.get_body(node_id) {
                     $(
                         $enum::$variant(_) => {
                             let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
-                            $variant::link(node_id, ast)
+                            $variant::link(node_id, ast, context)
                         }
                     ),*
                 }
@@ -279,35 +301,35 @@ macro_rules! impl_try_from_ast_node {
             }
         )*
 
-        #[derive(Debug)]
+        #[derive(Debug, Clone)]
         pub enum AstNodeBody {
             Unknown(Unknown),
             $($variant($variant)),*
         }
 
         impl AstNode {
-            pub fn link(node_id: NodeID, ast: &mut Ast) -> Result<()> {
+            pub fn link(node_id: NodeID, ast: &mut $crate::ast::Ast, context: $crate::ast::AstContext) -> Result<()> {
                 let node = ast.get(node_id);
                 match node.body.as_ref().unwrap() {
                     AstNodeBody::Unknown(_) => unreachable!(),
                     $(
                         AstNodeBody::$variant(_) => {
                             let node = crate::try_cast_node!(node as $variant).unwrap();
-                            $variant::link(node.id, ast)
+                            $variant::link(node.id, ast, context)
                         }
                     ),*
 
                 }
             }
 
-            pub fn node_type(node_id: NodeID, ast: &Ast) -> Result<NodeType> {
+            pub fn node_type(node_id: NodeID, ast: &Ast, usage: $crate::node::NodeUsage) -> Result<NodeType> {
                 let node = ast.get(node_id);
                 match node.body.as_ref().unwrap() {
                     AstNodeBody::Unknown(_) => unreachable!(),
                     $(
                         AstNodeBody::$variant(_) => {
                             let node = crate::try_cast_node!(node as $variant).unwrap();
-                            $variant::node_type(node.id, ast)
+                            $variant::node_type(node.id, ast, usage)
                         }
                     ),*
 
@@ -330,7 +352,7 @@ macro_rules! impl_try_from_ast_node {
 
 pub type Unknown = ();
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 pub struct AstNode<NodeType = Unknown> {
     pub id: NodeID<NodeType>,

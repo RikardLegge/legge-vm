@@ -19,6 +19,7 @@ pub enum Error {
     VariableNotFound,
     ExpectedEndStatement,
     TypeNotInferred,
+    AstError(Ast, Box<Error>),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -28,14 +29,9 @@ fn main() -> Result<()> {
         r#"
     A -> type {}
     A.value :: 2;
-    // A.value :: (self: A) {
-    //     
-    // };
      
-    a := 1; 
-    a = a + 1; 
-    b := "😇";
-    c := a;
+    a := A(); 
+    b := a.value;
     "#,
     );
     println!(
@@ -55,7 +51,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum State<Unlinked, Linked> {
     Unlinked(Unlinked),
     Linked(Linked),

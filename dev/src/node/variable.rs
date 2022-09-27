@@ -1,14 +1,14 @@
-use crate::node::{AstNodeBody, NodeType, TypeDeclaration};
+use crate::node::{AstNodeBody, NodeType, NodeUsage, TypeDeclaration};
 use crate::{Ast, AstNode, Error, Result};
 use crate::{Node, NodeID};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ReferenceType {
     VariableDeclaration,
     TypeDeclaration,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Variable {
     pub name: String,
     reference_type: ReferenceType,
@@ -35,16 +35,19 @@ impl Variable {
 }
 
 impl Node for Variable {
-    fn node_type(node_id: NodeID<Self>, ast: &Ast) -> Result<NodeType> {
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, node_usage: NodeUsage) -> Result<NodeType> {
         let node = ast.get(node_id);
         let parent_id = node.parent_id.ok_or(Error::InternalError)?;
         let parent = ast.get(parent_id);
         match parent.body.as_ref().unwrap() {
-            AstNodeBody::Statement(statement) => {
-                let value = statement.value().ok_or(Error::InternalError)?;
-                ast.get_node_type(value)
-            }
-            _ => unimplemented!(),
+            AstNodeBody::Statement(statement) => match node_usage {
+                NodeUsage::Type => ast.get_node_type(parent_id, node_usage),
+                NodeUsage::Call | NodeUsage::Value => {
+                    let value = statement.value().ok_or(Error::InternalError)?;
+                    ast.get_node_type(value, node_usage)
+                }
+            },
+            err => unimplemented!("{:?}", err),
         }
     }
 }
