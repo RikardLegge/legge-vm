@@ -6,7 +6,7 @@ mod token;
 
 use crate::ast::Ast;
 use crate::node::{
-    AstNode, Block, Expression, Node, NodeID, NodeType, Operation, Reference, Statement, Value,
+    AstNode, Block, Expression, Node, NodeID, NodeType, Operation, Statement, Value, Variable,
     VariableAssignment, VariableDeclaration,
 };
 use crate::token::TokenType;

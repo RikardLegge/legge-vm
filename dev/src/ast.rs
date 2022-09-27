@@ -1,7 +1,7 @@
 use crate::ast_builder::AstBuilder;
 use crate::node::AstNodeBody;
 use crate::token::Token;
-use crate::{try_cast_node, AstNode, Block, Error, Node, NodeID, NodeType, Reference, Result};
+use crate::{try_cast_node, AstNode, Block, Error, Node, NodeID, NodeType, Result, Variable};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
@@ -131,7 +131,7 @@ impl Ast {
         &self,
         node_id: impl Into<NodeID>,
         target_ident: &str,
-    ) -> Result<Option<NodeID<Reference>>> {
+    ) -> Result<Option<NodeID<Variable>>> {
         self.walk_blocks_up(node_id, |node| {
             let block = node.body();
             if let Some(variable_id) = block.variables.get(target_ident) {

@@ -13,12 +13,14 @@ pub use variable::*;
 use crate::{Ast, Error, Result};
 use std::fmt::Debug;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum NodeType {
     Void,
     Int,
     Float,
     String,
+    Custom(NodeID<TypeDeclaration>),
+    Function(NodeID<FunctionDeclaration>),
 }
 
 enum NodeIteratorBody<'a> {
@@ -172,6 +174,17 @@ macro_rules! impl_enum_node {
                 }
             }
 
+            impl From<NodeID<$variant>> for NodeID<$enum> {
+                fn from(node_id: NodeID<$variant>) -> Self {
+                    unsafe {std::mem::transmute(node_id)}
+                }
+            }
+
+            impl From<$variant> for crate::node::AstNodeBody {
+                fn from(variant: $variant) -> Self {
+                    crate::node::AstNodeBody::$enum($enum::$variant(variant))
+                }
+            }
 
             impl<'a> TryFrom<&'a $crate::node::AstNodeBody> for &'a $variant {
                 type Error = $crate::Error;
@@ -335,4 +348,4 @@ impl<T> AstNode<T> {
     }
 }
 
-impl_try_from_ast_node![Block, Statement, Expression, Reference];
+impl_try_from_ast_node![Block, Statement, Expression, Variable];

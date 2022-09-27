@@ -1,5 +1,5 @@
 use crate::node::NodeIterator;
-use crate::node::{Expression, Node, NodeID, NodeType, Reference};
+use crate::node::{Expression, Node, NodeID, NodeType, Variable};
 use crate::{impl_enum_node, Ast, AstNode, Error, Result, State};
 use std::collections::HashMap;
 
@@ -9,39 +9,54 @@ impl_enum_node!(
         VariableAssignment,
         StaticAssignment,
         TypeDeclaration,
+        FunctionDeclaration,
     }
 );
 
+#[derive(Debug)]
+pub struct FunctionDeclaration {
+    pub arguments: Vec<NodeID<Variable>>,
+    pub returns: NodeType,
+}
+
+impl Node for FunctionDeclaration {
+    fn node_type(node_id: NodeID<Self>, _: &Ast) -> Result<NodeType> {
+        Ok(NodeType::Function(node_id))
+    }
+}
+
 impl Statement {
-    pub fn variable(&self) -> Option<NodeID<Reference>> {
+    pub fn variable(&self) -> Option<NodeID<Variable>> {
         match self {
             Statement::VariableDeclaration(dec) => Some(dec.variable),
             Statement::VariableAssignment(_) => None,
             Statement::TypeDeclaration(dec) => Some(dec.variable),
             Statement::StaticAssignment(_) => None,
+            Statement::FunctionDeclaration(_) => None,
         }
     }
 
-    pub fn value(&self) -> Option<NodeID<Expression>> {
+    pub fn value(&self) -> Option<NodeID> {
         match self {
-            Statement::VariableDeclaration(var) => Some(var.value),
-            Statement::VariableAssignment(var) => Some(var.value),
-            Statement::TypeDeclaration(var) => Some(var.constructor),
+            Statement::VariableDeclaration(var) => Some(var.value.into()),
+            Statement::VariableAssignment(var) => Some(var.value.into()),
+            Statement::TypeDeclaration(var) => Some(var.constructor.into()),
             Statement::StaticAssignment(_) => None,
+            Statement::FunctionDeclaration(_) => None,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct TypeDeclaration {
-    variable: NodeID<Reference>,
-    constructor: NodeID<Expression>,
+    variable: NodeID<Variable>,
+    constructor: NodeID<Statement>,
     fields: Vec<NodeID>,
     associated_values: HashMap<String, NodeID<Expression>>,
 }
 
 impl TypeDeclaration {
-    pub fn new(variable: NodeID<Reference>, constructor: NodeID<Expression>) -> Self {
+    pub fn new(variable: NodeID<Variable>, constructor: NodeID<Statement>) -> Self {
         TypeDeclaration {
             variable,
             constructor,
@@ -52,6 +67,10 @@ impl TypeDeclaration {
 }
 
 impl Node for TypeDeclaration {
+    fn node_type(_: NodeID<Self>, _: &Ast) -> Result<NodeType> {
+        Ok(NodeType::Void)
+    }
+
     fn children(&self) -> NodeIterator<'_> {
         let props = NodeIterator::dual(self.variable, self.constructor);
         let fields = NodeIterator::slice(&self.fields);
@@ -61,12 +80,12 @@ impl Node for TypeDeclaration {
 
 #[derive(Debug)]
 pub struct VariableDeclaration {
-    variable: NodeID<Reference>,
+    variable: NodeID<Variable>,
     value: NodeID<Expression>,
 }
 
 impl VariableDeclaration {
-    pub fn new(variable: NodeID<Reference>, value: NodeID<Expression>) -> Self {
+    pub fn new(variable: NodeID<Variable>, value: NodeID<Expression>) -> Self {
         VariableDeclaration { variable, value }
     }
 }
@@ -83,7 +102,7 @@ impl Node for VariableDeclaration {
 
 #[derive(Debug)]
 pub struct StaticAssignment {
-    pub variable: State<String, NodeID<Reference>>,
+    pub variable: State<String, NodeID<Variable>>,
     pub value: NodeID<Expression>,
     pub field: Option<String>,
     pub is_static: bool,
@@ -96,6 +115,10 @@ impl AstNode<StaticAssignment> {
 }
 
 impl Node for StaticAssignment {
+    fn node_type(_: NodeID<Self>, _: &Ast) -> Result<NodeType> {
+        Ok(NodeType::Void)
+    }
+
     fn children(&self) -> NodeIterator<'_> {
         NodeIterator::single(self.value)
     }
@@ -129,7 +152,7 @@ impl Node for StaticAssignment {
 
 #[derive(Debug)]
 pub struct VariableAssignment {
-    variable: State<String, NodeID<Reference>>,
+    variable: State<String, NodeID<Variable>>,
     value: NodeID<Expression>,
 }
 

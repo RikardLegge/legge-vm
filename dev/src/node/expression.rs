@@ -1,4 +1,4 @@
-use crate::node::{NodeID, NodeIterator, NodeType, Reference};
+use crate::node::{NodeID, NodeIterator, NodeType, Variable};
 use crate::token::ArithmeticOP;
 use crate::{impl_enum_node, Ast, Error, Result};
 use crate::{Node, State};
@@ -8,14 +8,8 @@ impl_enum_node!(
         ConstValue,
         VariableValue,
         Operation,
-        Function,
     }
 );
-
-#[derive(Debug)]
-pub struct Function {}
-
-impl Node for Function {}
 
 #[derive(Debug)]
 pub struct Operation {
@@ -78,10 +72,10 @@ impl Node for Value {
 }
 
 #[derive(Debug)]
-pub struct VariableValue(State<String, NodeID<Reference>>);
+pub struct VariableValue(State<String, NodeID<Variable>>);
 
 impl VariableValue {
-    pub fn new(state: State<String, NodeID<Reference>>) -> Self {
+    pub fn new(state: State<String, NodeID<Variable>>) -> Self {
         Self(state)
     }
 }
@@ -110,10 +104,10 @@ impl Node for VariableValue {
 }
 
 #[derive(Debug)]
-pub struct StaticVariableValue(State<String, NodeID<Reference>>);
+pub struct StaticVariableValue(State<String, NodeID<Variable>>);
 
 impl StaticVariableValue {
-    pub fn new(state: State<String, NodeID<Reference>>) -> Self {
+    pub fn new(state: State<String, NodeID<Variable>>) -> Self {
         Self(state)
     }
 }

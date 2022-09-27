@@ -9,12 +9,12 @@ pub enum ReferenceType {
 }
 
 #[derive(Debug)]
-pub struct Reference {
+pub struct Variable {
     pub name: String,
     reference_type: ReferenceType,
 }
 
-impl AstNode<Reference> {
+impl AstNode<Variable> {
     pub fn type_declaration_id(&self) -> Option<NodeID<TypeDeclaration>> {
         match self.body().reference_type {
             ReferenceType::TypeDeclaration => self
@@ -25,16 +25,16 @@ impl AstNode<Reference> {
     }
 }
 
-impl Reference {
+impl Variable {
     pub fn new(name: String, reference_type: ReferenceType) -> Self {
-        Reference {
+        Variable {
             name,
             reference_type,
         }
     }
 }
 
-impl Node for Reference {
+impl Node for Variable {
     fn node_type(node_id: NodeID<Self>, ast: &Ast) -> Result<NodeType> {
         let node = ast.get(node_id);
         let parent_id = node.parent_id.ok_or(Error::InternalError)?;

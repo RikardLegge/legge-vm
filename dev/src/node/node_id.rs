@@ -4,12 +4,19 @@ use std::marker::PhantomData;
 
 /// NodeID is repr(transparent) to ensure that it's safe to cast between
 /// different marker types.
-#[derive(Eq, PartialEq)]
 #[repr(transparent)]
 pub struct NodeID<T = Unknown> {
     id: usize,
     _tp: PhantomData<fn() -> T>,
 }
+
+impl<T> PartialEq for NodeID<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<T> Eq for NodeID<T> {}
 
 impl<T> Debug for NodeID<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

@@ -1,11 +1,11 @@
 use crate::node::{Node, NodeID, NodeIterator, NodeType, Statement};
-use crate::{Ast, Reference, Result};
+use crate::{Ast, Result, Variable};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 #[derive(Debug)]
 pub struct Block {
-    pub variables: HashMap<String, NodeID<Reference>>,
+    pub variables: HashMap<String, NodeID<Variable>>,
     children: Vec<NodeID<Statement>>,
 }
 
