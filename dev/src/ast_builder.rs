@@ -27,7 +27,7 @@ where
     pub fn new(tokens: Iter) -> Self {
         Self {
             tokens: tokens.peekable(),
-            ast: Ast::new(),
+            ast: Ast::default(),
         }
     }
 }

@@ -15,13 +15,11 @@ pub struct AstNode<NodeType = Unknown> {
 
 impl AstNode {
     pub fn link(node_id: NodeID, ast: &mut Ast, context: AstContext) -> Result<()> {
-        let node_id: NodeID<AstRootNode> = unsafe { std::mem::transmute(node_id) };
-        AstRootNode::link(node_id, ast, context)
+        AstRootNode::link(node_id.into(), ast, context)
     }
 
     pub fn node_type(node_id: NodeID, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
-        let node_id: NodeID<AstRootNode> = unsafe { std::mem::transmute(node_id) };
-        AstRootNode::node_type(node_id, ast, usage)
+        AstRootNode::node_type(node_id.into(), ast, usage)
     }
 }
 

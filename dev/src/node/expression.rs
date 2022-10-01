@@ -1,9 +1,7 @@
 use crate::ast::AstContext;
-use crate::node::{
-    AstRootNode, NodeID, NodeIDContext, NodeIterator, NodeType, NodeUsage, Variable,
-};
+use crate::node::{NodeID, NodeIDContext, NodeIterator, NodeType, NodeUsage, Variable};
 use crate::token::ArithmeticOP;
-use crate::{impl_node, Ast, Error, Expression, Result};
+use crate::{Ast, Error, Expression, Result};
 use crate::{Node, State};
 
 #[derive(Debug, Clone)]
@@ -114,6 +112,11 @@ impl ExpressionChain {
 }
 
 impl Node for ExpressionChain {
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
+        let body = ast.get_body(node_id);
+        ast.get_node_type(body.rhs, usage)
+    }
+
     fn children(&self) -> NodeIterator<'_> {
         NodeIterator::dual(
             self.lhs,
@@ -122,11 +125,6 @@ impl Node for ExpressionChain {
                 context: AstContext::Chain(self.lhs),
             },
         )
-    }
-
-    fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
-        let body = ast.get_body(node_id);
-        ast.get_node_type(body.rhs, usage)
     }
 }
 

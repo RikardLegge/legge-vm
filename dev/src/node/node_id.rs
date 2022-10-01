@@ -72,16 +72,6 @@ where
     T: Node,
 {
     fn from(id: NodeID<T>) -> Self {
-        let id: &Self = (&id).into();
-        *id
-    }
-}
-
-impl<T> From<&NodeID<T>> for &NodeID
-where
-    T: Node,
-{
-    fn from(id: &NodeID<T>) -> Self {
         // Erase the type of the NodeID, this is practical when used as for example keys
         // in a hashmap or when stored in an mixed type array.
         //

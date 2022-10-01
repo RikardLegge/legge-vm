@@ -135,6 +135,9 @@ macro_rules! impl_node_trait {
                 match ast.get_body(node_id) {
                     $(
                         $enum::$variant(_) => {
+                            // Safety: NodeID does not change its representation with this cast.
+                            // Since the data is $variant we can update the node_id representation
+                            // to reflect this fact.
                             let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
                             $variant::node_type(node_id, ast, usage)
                         }
@@ -154,6 +157,9 @@ macro_rules! impl_node_trait {
                 match ast.get_body(node_id) {
                     $(
                         $enum::$variant(_) => {
+                            // Safety: NodeID does not change its representation with this cast.
+                            // Since the data is $variant we can update the node_id representation
+                            // to reflect this fact.
                             let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
                             $variant::link(node_id, ast, context)
                         }
@@ -192,6 +198,7 @@ macro_rules! impl_root_node {
 
         impl Node for $root {
             fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
+                // Safety: Root only has one child, so any $root must also be a $body
                 let node_id: NodeID<$body> = unsafe { std::mem::transmute(node_id) };
                 $body::node_type(node_id, ast, usage)
             }
@@ -201,6 +208,7 @@ macro_rules! impl_root_node {
             }
 
             fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> Result<()> {
+                // Safety: Root only has one child, so any $root must also be a $body
                 let node_id: NodeID<$body> = unsafe { std::mem::transmute(node_id) };
                 $body::link(node_id, ast, context)
             }
@@ -231,6 +239,34 @@ macro_rules! impl_root_node {
         impl From<$body> for $root {
             fn from(body: $body) -> Self {
                 $root(body)
+            }
+        }
+
+        impl From<NodeID> for NodeID<$root> {
+            fn from(node_id: NodeID) -> Self {
+                // Safety: Root only has one child, so any $root must also be a $body
+                unsafe { std::mem::transmute(node_id) }
+            }
+        }
+
+        impl From<NodeID> for NodeID<$body> {
+            fn from(node_id: NodeID) -> Self {
+                // Safety: Root only has one child, so any $root must also be a $body
+                unsafe { std::mem::transmute(node_id) }
+            }
+        }
+
+        impl From<NodeID<$root>> for NodeID<$body> {
+            fn from(node_id: NodeID<$root>) -> Self {
+                // Safety: Root only has one child, so any $root must also be a $body
+                unsafe { std::mem::transmute(node_id) }
+            }
+        }
+
+        impl From<NodeID<$body>> for NodeID<$root> {
+            fn from(node_id: NodeID<$body>) -> Self {
+                // Safety: Root only has one child, so any $root must also be a $body
+                unsafe { std::mem::transmute(node_id) }
             }
         }
     };

@@ -29,6 +29,10 @@ fn main() -> Result<()> {
         r#"
     A -> type {}
     A.value :: 2;
+    
+    // A.fn :: fn() {
+    //     
+    // }
      
     a := A(); 
     b := a.value;

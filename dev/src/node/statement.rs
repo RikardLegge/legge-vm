@@ -1,8 +1,6 @@
 use crate::ast::AstContext;
-use crate::node::{
-    AstRootNode, Expression, Node, NodeID, NodeIterator, NodeType, NodeUsage, Variable,
-};
-use crate::{impl_node, Ast, AstNode, Error, Result, State, Statement};
+use crate::node::{Expression, Node, NodeID, NodeIterator, NodeType, NodeUsage, Variable};
+use crate::{Ast, AstNode, Error, Result, State, Statement};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]

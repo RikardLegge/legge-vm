@@ -30,9 +30,9 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            root: self.root.clone(),
+            root: self.root,
             nodes: self.nodes.clone(),
-            guarantees: self.guarantees.clone(),
+            guarantees: self.guarantees,
         }
     }
 }
@@ -40,7 +40,7 @@ where
 impl Debug for Ast<Block> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(root) = self.root {
-            write!(f, "Ast [\n")?;
+            writeln!(f, "Ast [")?;
             self.fmt_debug_node(f, 0, root.into())
         } else {
             write!(f, "Empty")
@@ -50,11 +50,11 @@ impl Debug for Ast<Block> {
 
 pub trait ValidAst {}
 
-impl<T> Ast<T>
+impl<T> Default for Ast<T>
 where
     T: Node,
 {
-    pub fn new() -> Self {
+    fn default() -> Self {
         Ast {
             root: None,
             nodes: vec![],
@@ -119,7 +119,7 @@ impl Ast {
             writeln!(f, " [")?;
             for child in children {
                 self.fmt_debug_node(f, level + 1, child.into())?;
-                writeln!(f, "")?;
+                writeln!(f)?;
             }
             write!(f, " ")?;
             write!(f, "{}]", pad_end)?;
@@ -249,7 +249,7 @@ impl Ast {
     }
 
     pub fn get_node_type(&self, node_id: impl Into<NodeID>, usage: NodeUsage) -> Result<NodeType> {
-        AstNode::node_type(node_id.into(), &self, usage)
+        AstNode::node_type(node_id.into(), self, usage)
     }
 
     pub fn get_mut(&mut self, node_id: impl Into<NodeID>) -> &mut AstNode {
