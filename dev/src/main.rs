@@ -16,7 +16,7 @@ use std::fmt::Debug;
 pub enum Error {
     EOF,
     InternalError,
-    VariableNotFound,
+    VariableNotFound(String),
     ExpectedEndStatement,
     TypeNotInferred,
     AstError(Ast, Box<Error>),
@@ -30,11 +30,12 @@ fn main() -> Result<()> {
     A -> type {}
     A.value :: 2;
     
-    // A.fn :: fn() {
-    //     
-    // }
+    A.func :: fn() {
+        
+    };
      
     a := A(); 
+    a.func();
     b := a.value;
     "#,
     );

@@ -2,7 +2,7 @@ use crate::ast::AstContext;
 use crate::node::NodeIDContext;
 use crate::NodeID;
 
-enum NodeIteratorBody<'a> {
+pub enum NodeIteratorBody<'a> {
     Empty,
     Single(NodeIDContext),
     Dual(NodeIDContext, NodeIDContext),
@@ -16,7 +16,7 @@ pub struct NodeIterator<'a> {
 }
 
 impl<'a> NodeIterator<'a> {
-    fn new(items: NodeIteratorBody<'a>) -> NodeIterator<'a> {
+    pub fn new(items: NodeIteratorBody<'a>) -> NodeIterator<'a> {
         Self { index: 0, items }
     }
 

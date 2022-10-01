@@ -1,6 +1,7 @@
+use crate::ast::PendingNodeID;
 use crate::node::{
-    ExpressionChain, FunctionCall, FunctionDeclaration, StaticAssignment, TypeDeclaration,
-    VariableValue,
+    EvaluateExpression, ExpressionChain, FunctionCall, FunctionDeclaration, StaticAssignment,
+    TypeDeclaration, VariableValue,
 };
 use crate::token::{KeyName, Token};
 use crate::{Ast, Block, Error, Node, NodeType, TokenType};
@@ -38,7 +39,6 @@ where
 {
     pub fn build(mut self) -> Result<Ast<Block>> {
         let block_id = self.ast.new_root_node();
-        self.ast.root = Some(block_id);
         let mut children = vec![];
         while let Some(token) = self.tokens.next() {
             match token.tp {
@@ -51,7 +51,8 @@ where
             }
         }
         let block = Block::new(children, &self.ast);
-        self.ast.push(block_id, block);
+        let block_id = self.ast.push(block_id, block);
+        self.ast.root = Some(block_id);
         Ok(self.ast)
     }
 
@@ -82,11 +83,17 @@ where
         }
     }
 
-    fn expression(&mut self, parent_id: impl Into<NodeID>) -> Result<NodeID<Expression>> {
+    fn call(&mut self, variable: NodeID<VariableValue>) -> Result<FunctionCall> {
+        assert_eq!(TokenType::LeftBrace, self.next_token()?.tp);
+        assert_eq!(TokenType::RightBrace, self.next_token()?.tp);
+
+        Ok(FunctionCall::new(variable))
+    }
+
+    fn expression(&mut self, parent_id: impl Into<PendingNodeID>) -> Result<NodeID<Expression>> {
         let parent_id = parent_id.into();
         let expression_id = self.ast.new_node(parent_id);
-        let next_token = self.next_token()?;
-        let expression: Expression = match next_token.tp {
+        let expression: Expression = match self.next_token()?.tp {
             TokenType::Int(value, _) => Value::Int(value).into(),
             TokenType::Float(value, _) => Value::Float(value).into(),
             TokenType::String(value) => Value::String(value.to_string()).into(),
@@ -96,23 +103,29 @@ where
                     TokenType::Dot => {
                         self.next_token()?;
 
-                        let variable_id = self.ast.new_node(expression_id);
-                        let variable = self.ast.push(variable_id, variable);
-
+                        let variable = self.ast.push_new_node(expression_id, variable);
                         let rhs = self.expression(expression_id)?;
+
                         ExpressionChain::new(variable.into(), rhs).into()
                     }
                     TokenType::LeftBrace => {
-                        self.next_token()?;
-                        assert_eq!(TokenType::RightBrace, self.next_token()?.tp);
-
-                        let variable_id = self.ast.new_node(expression_id);
-                        let variable = self.ast.push(variable_id, variable);
-
-                        FunctionCall::new(variable).into()
+                        let variable = self.ast.push_new_node(expression_id, variable);
+                        self.call(variable)?.into()
                     }
                     _ => variable.into(),
                 }
+            }
+            TokenType::KeyName(KeyName::Fn) => {
+                assert_eq!(TokenType::LeftBrace, self.next_token()?.tp);
+                assert_eq!(TokenType::RightBrace, self.next_token()?.tp);
+                assert_eq!(TokenType::LeftCurlyBrace, self.next_token()?.tp);
+                assert_eq!(TokenType::RightCurlyBrace, self.next_token()?.tp);
+
+                FunctionDeclaration {
+                    arguments: vec![],
+                    returns: NodeType::Void,
+                }
+                .into()
             }
             tp => unimplemented!("{:?}", tp),
         };
@@ -123,14 +136,16 @@ where
             TokenType::Op(op) => {
                 let op = *op;
                 self.next_token()?;
+
                 let operation_id = self.ast.new_node(parent_id);
-
                 let rhs = self.expression(operation_id)?;
-                let lhs_node = self.ast.get_mut(lhs);
-                lhs_node.parent_id = Some(operation_id.into());
-
                 let operation = Expression::Operation(Operation::new(op, lhs, rhs));
-                Ok(self.ast.push(operation_id, operation))
+                let operation = self.ast.push(operation_id, operation);
+
+                let lhs_node = self.ast.get_mut(lhs);
+                lhs_node.parent_id = Some(operation.into());
+
+                Ok(operation)
             }
             _ => Ok(lhs),
         }
@@ -138,14 +153,14 @@ where
 
     fn new_type(
         &mut self,
-        type_declaration: NodeID<TypeDeclaration>,
+        statement_id: PendingNodeID<TypeDeclaration>,
         variable: NodeID<Variable>,
-    ) -> Result<TypeDeclaration> {
+    ) -> Result<NodeID<TypeDeclaration>> {
         let expr_id = self.ast.new_node(variable);
-        let expr = Statement::FunctionDeclaration(FunctionDeclaration {
+        let expr = FunctionDeclaration {
             arguments: vec![],
-            returns: NodeType::Custom(type_declaration),
-        });
+            returns: NodeType::Void,
+        };
         let expr = self.ast.push(expr_id, expr);
 
         match self.next_token()?.tp {
@@ -156,18 +171,27 @@ where
             _ => unimplemented!(),
         }
 
-        Ok(TypeDeclaration::new(variable, expr))
+        let declaration = TypeDeclaration::new(variable, expr.into());
+        let type_declaration = self.ast.push(statement_id, declaration);
+
+        self.ast.get_inner_mut(expr).returns = NodeType::Custom(type_declaration);
+
+        Ok(type_declaration)
     }
 
-    fn statement_named(&mut self, name: &str, parent_id: NodeID) -> Result<NodeID<Statement>> {
+    fn statement_named(
+        &mut self,
+        name: &str,
+        parent_id: PendingNodeID,
+    ) -> Result<NodeID<Statement>> {
         let next_token = self.next_token()?;
         let id = match next_token.tp {
             TokenType::VariableDeclaration => {
                 let statement_id = self.ast.new_node(parent_id);
 
-                let variable_id = self.ast.new_node(statement_id);
-                let variable = Variable::new(name.to_string());
-                let variable = self.ast.push(variable_id, variable);
+                let variable = self
+                    .ast
+                    .push_new_node(statement_id, Variable::new(name.to_string()));
 
                 let value = self.expression(variable)?;
                 self.expect_end_statement()?;
@@ -191,40 +215,66 @@ where
                     TokenType::KeyName(KeyName::Type) => {}
                     _ => unimplemented!(),
                 }
-                let variable_id = self.ast.new_node(statement_id);
-                let variable = Variable::new(name.to_string());
-                let variable = self.ast.push(variable_id, variable);
+                let variable = self
+                    .ast
+                    .push_new_node(statement_id, Variable::new(name.to_string()));
 
-                let statement = self.new_type(statement_id, variable)?;
-                self.ast.push(statement_id, statement).into()
+                self.new_type(statement_id, variable)?.into()
             }
             TokenType::Dot => {
-                let statement_id = self.ast.new_node(parent_id);
-
                 let field = match self.next_token()?.tp {
                     TokenType::Name(path) => path.to_string(),
                     _ => unimplemented!(),
                 };
 
-                let variable_id = self.ast.new_node(statement_id);
-                let variable = Variable::new(field);
-                let variable = self.ast.push(variable_id, variable);
+                match self.peek_token_type()? {
+                    TokenType::ConstDeclaration => {
+                        self.next_token()?;
+                        let statement_id = self.ast.new_node(parent_id);
 
-                match self.next_token()?.tp {
-                    TokenType::ConstDeclaration => {}
+                        let variable = self.ast.push_new_node(statement_id, Variable::new(field));
+
+                        let value = self.expression(statement_id)?;
+                        self.expect_end_statement()?;
+
+                        let statement = StaticAssignment {
+                            assign_to: name.to_string().into(),
+                            variable,
+                            value,
+                            is_associated_field: false,
+                        };
+                        self.ast.push(statement_id, statement).into()
+                    }
+                    TokenType::LeftBrace => {
+                        let statement_id = self.ast.new_node(parent_id);
+
+                        let chain_id = self.ast.new_node(statement_id);
+
+                        let variable = self.ast.push_new_node(
+                            statement_id,
+                            VariableValue::new(State::Unlinked(name.to_string())),
+                        );
+
+                        let call_id = self.ast.new_node(chain_id);
+                        let field = self
+                            .ast
+                            .push_new_node(call_id, VariableValue::new(State::Unlinked(field)));
+
+                        let call = self.call(field)?;
+                        let call = self.ast.push(call_id, call).into();
+                        self.expect_end_statement()?;
+
+                        let chain = self
+                            .ast
+                            .push(chain_id, ExpressionChain::new(variable.into(), call));
+
+                        let statement = EvaluateExpression {
+                            value: chain.into(),
+                        };
+                        self.ast.push(statement_id, statement).into()
+                    }
                     _ => unimplemented!(),
-                };
-
-                let value = self.expression(statement_id)?;
-                self.expect_end_statement()?;
-
-                let statement = StaticAssignment {
-                    assign_to: name.to_string().into(),
-                    variable,
-                    value,
-                    is_associated_field: false,
-                };
-                self.ast.push(statement_id, statement).into()
+                }
             }
             tt => unimplemented!("{:?}", tt),
         };

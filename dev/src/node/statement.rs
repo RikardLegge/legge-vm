@@ -28,7 +28,7 @@ impl Statement {
             Statement::VariableAssignment(_) => None,
             Statement::TypeDeclaration(dec) => Some(dec.variable),
             Statement::StaticAssignment(_) => None,
-            Statement::FunctionDeclaration(_) => None,
+            Statement::EvaluateExpression(_) => None,
         }
     }
 
@@ -38,7 +38,7 @@ impl Statement {
             Statement::VariableAssignment(var) => Some(var.value.into()),
             Statement::TypeDeclaration(var) => Some(var.constructor.into()),
             Statement::StaticAssignment(var) => Some(var.value.into()),
-            Statement::FunctionDeclaration(_) => None,
+            Statement::EvaluateExpression(var) => Some(var.value.into()),
         }
     }
 }
@@ -46,13 +46,13 @@ impl Statement {
 #[derive(Debug, Clone)]
 pub struct TypeDeclaration {
     variable: NodeID<Variable>,
-    constructor: NodeID<Statement>,
+    constructor: NodeID<Expression>,
     fields: Vec<NodeID>,
     associated_values: HashMap<String, NodeID<Variable>>,
 }
 
 impl TypeDeclaration {
-    pub fn new(variable: NodeID<Variable>, constructor: NodeID<Statement>) -> Self {
+    pub fn new(variable: NodeID<Variable>, constructor: NodeID<Expression>) -> Self {
         TypeDeclaration {
             variable,
             constructor,
@@ -70,7 +70,7 @@ impl Node for TypeDeclaration {
         }
     }
 
-    fn children(&self) -> NodeIterator<'_> {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         let props = NodeIterator::dual(self.variable, self.constructor);
         let fields = NodeIterator::slice(&self.fields);
         NodeIterator::chained(props, fields)
@@ -108,7 +108,7 @@ impl Node for VariableDeclaration {
         }
     }
 
-    fn children(&self) -> NodeIterator<'_> {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::dual(self.variable, self.value)
     }
 }
@@ -138,7 +138,7 @@ impl Node for StaticAssignment {
         }
     }
 
-    fn children(&self) -> NodeIterator<'_> {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::dual(self.variable, self.value)
     }
 
@@ -147,7 +147,7 @@ impl Node for StaticAssignment {
         if let State::Unlinked(variable_name) = &node.assign_to {
             let variable_id = ast
                 .closest_variable(node_id, variable_name, context)?
-                .ok_or(Error::VariableNotFound)?;
+                .ok_or_else(|| Error::VariableNotFound(variable_name.into()))?;
 
             let body: &mut Self = ast.get_inner_mut(node_id);
             body.assign_to = State::Linked(variable_id);
@@ -188,7 +188,7 @@ impl Node for VariableAssignment {
         Ok(NodeType::Void)
     }
 
-    fn children(&self) -> NodeIterator<'_> {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::single(self.value)
     }
 
@@ -197,11 +197,27 @@ impl Node for VariableAssignment {
         if let State::Unlinked(var) = &node.variable {
             let var = ast
                 .closest_variable(node_id, var, context)?
-                .ok_or(Error::VariableNotFound)?;
+                .ok_or_else(|| Error::VariableNotFound(var.into()))?;
 
             let node: &mut Self = ast.get_inner_mut(node_id);
             node.variable = State::Linked(var);
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EvaluateExpression {
+    pub value: NodeID<Expression>,
+}
+
+impl Node for EvaluateExpression {
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
+        let node = ast.get_body(node_id);
+        ast.get_node_type(node.value, usage)
+    }
+
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
+        NodeIterator::single(self.value)
     }
 }

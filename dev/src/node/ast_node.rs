@@ -24,8 +24,8 @@ impl AstNode {
 }
 
 impl<T> AstNode<T> {
-    pub fn children(&self) -> NodeIterator<'_> {
-        self.body.as_ref().unwrap().children()
+    pub fn children(&self, context: AstContext) -> NodeIterator<'_> {
+        self.body.as_ref().unwrap().children(context)
     }
 }
 
@@ -34,7 +34,7 @@ pub trait Node: Sized + Debug {
         Err(Error::TypeNotInferred)
     }
 
-    fn children(&self) -> NodeIterator<'_> {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::empty()
     }
 

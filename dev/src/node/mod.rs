@@ -43,6 +43,7 @@ impl_node!(
         Operation,
         FunctionCall,
         ExpressionChain,
+        FunctionDeclaration,
     }
 );
 
@@ -52,6 +53,6 @@ impl_node!(
         VariableAssignment,
         StaticAssignment,
         TypeDeclaration,
-        FunctionDeclaration,
+        EvaluateExpression,
     }
 );

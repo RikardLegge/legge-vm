@@ -1,3 +1,4 @@
+use crate::ast::AstContext;
 use crate::node::{Node, NodeID, NodeIterator, NodeType, NodeUsage, Statement};
 use crate::{Ast, Result, Variable};
 use std::collections::HashMap;
@@ -29,7 +30,7 @@ impl Node for Block {
         Ok(NodeType::Void)
     }
 
-    fn children(&self) -> NodeIterator<'_> {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::slice(&self.children)
     }
 

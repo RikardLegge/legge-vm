@@ -21,7 +21,7 @@ impl Linker {
         while let Some(task) = self.queue.pop_front() {
             let NodeIDContext { node_id, context } = task;
             let node = self.ast.get(node_id);
-            for child in node.children() {
+            for child in node.children(context) {
                 self.queue.push_back(child);
             }
             match AstNode::link(node_id, &mut self.ast, context) {

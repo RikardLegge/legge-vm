@@ -1,4 +1,5 @@
 use crate::ast::AstContext;
+use crate::node::iterator::NodeIteratorBody;
 use crate::node::{NodeID, NodeIDContext, NodeIterator, NodeType, NodeUsage, Variable};
 use crate::token::ArithmeticOP;
 use crate::{Ast, Error, Expression, Result};
@@ -40,7 +41,7 @@ impl Node for Operation {
         }
     }
 
-    fn children(&self) -> NodeIterator<'_> {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::dual(self.lhs, self.rhs)
     }
 
@@ -94,8 +95,11 @@ impl Node for FunctionCall {
         }
     }
 
-    fn children(&self) -> NodeIterator<'_> {
-        NodeIterator::single(self.variable)
+    fn children(&self, context: AstContext) -> NodeIterator<'_> {
+        NodeIterator::new(NodeIteratorBody::Single(NodeIDContext {
+            node_id: self.variable.into(),
+            context,
+        }))
     }
 }
 
@@ -117,7 +121,7 @@ impl Node for ExpressionChain {
         ast.get_node_type(body.rhs, usage)
     }
 
-    fn children(&self) -> NodeIterator<'_> {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::dual(
             self.lhs,
             NodeIDContext {
@@ -153,7 +157,7 @@ impl Node for VariableValue {
         if let State::Unlinked(var) = &body.variable {
             let var = ast
                 .closest_variable(node_id, var, context)?
-                .ok_or(Error::VariableNotFound)?;
+                .ok_or_else(|| panic!())?; //Error::VariableNotFound(var.into()))?;
 
             let body: &mut Self = ast.get_inner_mut(node_id);
             body.variable = State::Linked(var);

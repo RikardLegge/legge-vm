@@ -145,10 +145,10 @@ macro_rules! impl_node_trait {
                 }
             }
 
-            fn children(&self) -> NodeIterator<'_> {
+            fn children(&self, context: AstContext) -> NodeIterator<'_> {
                 match &self {
                     $(
-                        $enum::$variant(value) => value.children()
+                        $enum::$variant(value) => value.children(context)
                     ),*
                 }
             }
@@ -203,8 +203,8 @@ macro_rules! impl_root_node {
                 $body::node_type(node_id, ast, usage)
             }
 
-            fn children(&self) -> NodeIterator<'_> {
-                self.0.children()
+            fn children(&self, context: AstContext) -> NodeIterator<'_> {
+                self.0.children(context)
             }
 
             fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> Result<()> {
