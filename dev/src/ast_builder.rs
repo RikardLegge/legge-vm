@@ -1,6 +1,6 @@
 use crate::node::{
-    ExpressionChain, FunctionCall, FunctionDeclaration, ReferenceType, StaticAssignment,
-    TypeDeclaration, VariableValue,
+    ExpressionChain, FunctionCall, FunctionDeclaration, StaticAssignment, TypeDeclaration,
+    VariableValue,
 };
 use crate::token::{KeyName, Token};
 use crate::{Ast, Block, Error, Node, NodeType, TokenType};
@@ -127,7 +127,7 @@ where
 
                 let rhs = self.expression(operation_id)?;
                 let lhs_node = self.ast.get_mut(lhs);
-                lhs_node.set_parent(operation_id);
+                lhs_node.parent_id = Some(operation_id.into());
 
                 let operation = Expression::Operation(Operation::new(op, lhs, rhs));
                 Ok(self.ast.push(operation_id, operation))
@@ -166,7 +166,7 @@ where
                 let statement_id = self.ast.new_node(parent_id);
 
                 let variable_id = self.ast.new_node(statement_id);
-                let variable = Variable::new(name.to_string(), ReferenceType::VariableDeclaration);
+                let variable = Variable::new(name.to_string());
                 let variable = self.ast.push(variable_id, variable);
 
                 let value = self.expression(variable)?;
@@ -192,7 +192,7 @@ where
                     _ => unimplemented!(),
                 }
                 let variable_id = self.ast.new_node(statement_id);
-                let variable = Variable::new(name.to_string(), ReferenceType::TypeDeclaration);
+                let variable = Variable::new(name.to_string());
                 let variable = self.ast.push(variable_id, variable);
 
                 let statement = self.new_type(statement_id, variable)?;
@@ -207,7 +207,7 @@ where
                 };
 
                 let variable_id = self.ast.new_node(statement_id);
-                let variable = Variable::new(field, ReferenceType::VariableDeclaration);
+                let variable = Variable::new(field);
                 let variable = self.ast.push(variable_id, variable);
 
                 match self.next_token()?.tp {

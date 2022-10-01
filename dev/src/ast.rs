@@ -1,9 +1,7 @@
 use crate::ast_builder::AstBuilder;
-use crate::node::{AstNodeBody, NodeUsage};
+use crate::node::{AstRootNode, NodeUsage, Unknown};
 use crate::token::Token;
-use crate::{
-    try_cast_node, AstNode, Block, Error, Expression, Node, NodeID, NodeType, Result, Variable,
-};
+use crate::{AstNode, Block, Error, Expression, Node, NodeID, NodeType, Result, Variable};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
@@ -70,7 +68,7 @@ impl Ast {
         &self,
         f: &mut Formatter<'_>,
         level: usize,
-        node_id: NodeID<()>,
+        node_id: NodeID<Unknown>,
     ) -> std::fmt::Result {
         if level > 100 {
             write!(f, "Nesting level too deep!")?;
@@ -150,7 +148,7 @@ impl Ast {
     {
         let index = self.nodes.len();
         let id = NodeID::<Child>::new(index);
-        let node = AstNode {
+        let node = AstNode::<Unknown> {
             id: id.into(),
             parent_id: parent_id.map(|id| id.into()),
             body: None,
@@ -161,7 +159,7 @@ impl Ast {
 
     pub fn push<Child>(&mut self, id: NodeID<Child>, child: Child) -> NodeID<Child>
     where
-        Child: Node + Into<AstNodeBody>,
+        Child: Node + Into<AstRootNode>,
     {
         let body = child.into();
         let node = self.get_mut(id);
@@ -200,7 +198,7 @@ impl Ast {
     where
         F: Fn(&AstNode<Block>) -> Result<Option<NodeID<NodeType>>>,
     {
-        self.walk_up(node_id, |node| match try_cast_node!(node as Block) {
+        self.walk_up(node_id, |node| match node.try_into().ok() {
             Some(block) => test(block),
             None => Ok(None),
         })
@@ -260,20 +258,20 @@ impl Ast {
 
     pub fn get_body<'a, Child>(&'a self, node_id: NodeID<Child>) -> &'a Child
     where
-        &'a Child: TryFrom<&'a AstNodeBody>,
+        &'a Child: TryFrom<&'a AstRootNode>,
     {
         let node = self.nodes.get(node_id.id()).unwrap();
-        let body: &AstNodeBody = node.body.as_ref().unwrap();
+        let body: &AstRootNode = node.body.as_ref().unwrap();
         let inner: &Child = body.try_into().map_err(|_| Error::InternalError).unwrap();
         inner
     }
 
     pub fn get_inner_mut<'a, Child>(&'a mut self, node_id: NodeID<Child>) -> &'a mut Child
     where
-        &'a mut Child: TryFrom<&'a mut AstNodeBody>,
+        &'a mut Child: TryFrom<&'a mut AstRootNode>,
     {
         let node = self.nodes.get_mut(node_id.id()).unwrap();
-        let body: &mut AstNodeBody = node.body.as_mut().unwrap();
+        let body: &mut AstRootNode = node.body.as_mut().unwrap();
         let inner: &mut Child = body.try_into().map_err(|_| Error::InternalError).unwrap();
         inner
     }

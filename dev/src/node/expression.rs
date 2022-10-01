@@ -1,18 +1,10 @@
 use crate::ast::AstContext;
-use crate::node::{NodeID, NodeIDContext, NodeIterator, NodeType, NodeUsage, Variable};
+use crate::node::{
+    AstRootNode, NodeID, NodeIDContext, NodeIterator, NodeType, NodeUsage, Variable,
+};
 use crate::token::ArithmeticOP;
-use crate::{impl_enum_node, Ast, Error, Result};
+use crate::{impl_node, Ast, Error, Expression, Result};
 use crate::{Node, State};
-
-impl_enum_node!(
-    pub enum Expression {
-        ConstValue,
-        VariableValue,
-        Operation,
-        FunctionCall,
-        ExpressionChain,
-    }
-);
 
 #[derive(Debug, Clone)]
 pub struct Operation {

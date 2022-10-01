@@ -1,18 +1,9 @@
 use crate::ast::AstContext;
-use crate::node::{Expression, Node, NodeID, NodeType, Variable};
-use crate::node::{NodeIterator, NodeUsage};
-use crate::{impl_enum_node, Ast, AstNode, Error, Result, State};
+use crate::node::{
+    AstRootNode, Expression, Node, NodeID, NodeIterator, NodeType, NodeUsage, Variable,
+};
+use crate::{impl_node, Ast, AstNode, Error, Result, State, Statement};
 use std::collections::HashMap;
-
-impl_enum_node!(
-    pub enum Statement {
-        VariableDeclaration,
-        VariableAssignment,
-        StaticAssignment,
-        TypeDeclaration,
-        FunctionDeclaration,
-    }
-);
 
 #[derive(Debug, Clone)]
 pub struct FunctionDeclaration {
@@ -21,8 +12,14 @@ pub struct FunctionDeclaration {
 }
 
 impl Node for FunctionDeclaration {
-    fn node_type(node_id: NodeID<Self>, _: &Ast, _node_usage: NodeUsage) -> Result<NodeType> {
-        Ok(NodeType::Function(node_id))
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, node_usage: NodeUsage) -> Result<NodeType> {
+        match node_usage {
+            NodeUsage::Type | NodeUsage::Value => Ok(NodeType::Function(node_id)),
+            NodeUsage::Call => {
+                let body = ast.get_body(node_id);
+                Ok(body.returns.clone())
+            }
+        }
     }
 }
 
@@ -157,8 +154,7 @@ impl Node for StaticAssignment {
             let body: &mut Self = ast.get_inner_mut(node_id);
             body.assign_to = State::Linked(variable_id);
 
-            let variable = ast.get_typed(variable_id);
-            if let Some(type_id) = variable.type_declaration_id() {
+            if let Some(type_id) = AstNode::type_declaration_id(variable_id, ast) {
                 let body = ast.get_inner_mut(node_id);
                 body.is_associated_field = true;
 

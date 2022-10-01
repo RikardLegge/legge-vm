@@ -11,12 +11,23 @@ pub struct NodeID<T = Unknown> {
     _tp: PhantomData<fn() -> T>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 #[repr(C)]
 pub struct NodeIDContext<T = Unknown> {
     pub node_id: NodeID<T>,
     pub context: AstContext,
 }
+
+impl<T> Clone for NodeIDContext<T> {
+    fn clone(&self) -> Self {
+        Self {
+            node_id: self.node_id,
+            context: self.context,
+        }
+    }
+}
+
+impl<T> Copy for NodeIDContext<T> {}
 
 impl<T> From<NodeIDContext<T>> for NodeID<T> {
     fn from(node: NodeIDContext<T>) -> Self {
@@ -56,7 +67,7 @@ impl<T> NodeID<T> {
     }
 }
 
-impl<T> From<NodeID<T>> for NodeID<Unknown>
+impl<T> From<NodeID<T>> for NodeID
 where
     T: Node,
 {
@@ -66,7 +77,7 @@ where
     }
 }
 
-impl<T> From<&NodeID<T>> for &NodeID<Unknown>
+impl<T> From<&NodeID<T>> for &NodeID
 where
     T: Node,
 {
