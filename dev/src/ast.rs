@@ -76,7 +76,7 @@ impl Ast {
         }
         let node = &self.nodes[node_id.id()];
         let mut children = node
-            .body
+            .body()
             .as_ref()
             .unwrap()
             .children(AstContext::Default)
@@ -116,9 +116,7 @@ impl Ast {
         if let Ok(tp) = type_tp {
             write!(f, " :type {:?}", tp)?;
         }
-        if let Some(body) = &node.body {
-            write!(f, " = {:?}", body)?;
-        }
+        write!(f, " = {:?}", node.body())?;
 
         if children.peek().is_some() {
             writeln!(f, " [")?;
@@ -153,11 +151,7 @@ impl Ast {
     {
         let index = self.nodes.len();
         let id = NodeID::<Child>::new(index);
-        let node = AstNode::<Unknown> {
-            id: id.into(),
-            parent_id: parent_id.map(|id| id.into()),
-            body: None,
-        };
+        let node = AstNode::new(id, parent_id);
         self.nodes.push(node);
         id
     }
@@ -168,7 +162,7 @@ impl Ast {
     {
         let body = child.into();
         let node = self.get_mut(id);
-        node.body = Some(body);
+        *node.body_mut() = Some(body);
         id
     }
 
@@ -281,17 +275,17 @@ impl Ast {
         &'a Child: TryFrom<&'a AstRootNode>,
     {
         let node = self.nodes.get(node_id.id()).unwrap();
-        let body: &AstRootNode = node.body.as_ref().unwrap();
+        let body: &AstRootNode = node.body().as_ref().unwrap();
         let inner: &Child = body.try_into().map_err(|_| Error::InternalError).unwrap();
         inner
     }
 
-    pub fn get_inner_mut<'a, Child>(&'a mut self, node_id: NodeID<Child>) -> &'a mut Child
+    pub fn get_body_mut<'a, Child>(&'a mut self, node_id: NodeID<Child>) -> &'a mut Child
     where
         &'a mut Child: TryFrom<&'a mut AstRootNode>,
     {
         let node = self.nodes.get_mut(node_id.id()).unwrap();
-        let body: &mut AstRootNode = node.body.as_mut().unwrap();
+        let body: &mut AstRootNode = node.body_mut().as_mut().unwrap();
         let inner: &mut Child = body.try_into().map_err(|_| Error::InternalError).unwrap();
         inner
     }

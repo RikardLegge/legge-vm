@@ -165,18 +165,18 @@ impl Node for StaticAssignment {
                 .closest_variable(node_id, variable_name, context)?
                 .ok_or_else(|| Error::VariableNotFound(variable_name.into()))?;
 
-            let body = ast.get_inner_mut(node.assign_to);
+            let body = ast.get_body_mut(node.assign_to);
             body.state = State::Linked(variable_id);
 
             if let Some(type_id) = AstNode::type_declaration_id(variable_id, ast) {
-                let body = ast.get_inner_mut(node_id);
+                let body = ast.get_body_mut(node_id);
                 body.is_associated_field = true;
 
                 let body = ast.get_body(node_id);
                 let variable = body.variable;
                 let path = ast.get_body(variable).name.clone();
 
-                let tp = ast.get_inner_mut(type_id);
+                let tp = ast.get_body_mut(type_id);
                 tp.associated_values.insert(path, variable);
             }
         }
@@ -215,7 +215,7 @@ impl Node for VariableAssignment {
                 .closest_variable(node_id, var, context)?
                 .ok_or_else(|| Error::VariableNotFound(var.into()))?;
 
-            let node: &mut Self = ast.get_inner_mut(node_id);
+            let node: &mut Self = ast.get_body_mut(node_id);
             node.variable = State::Linked(var);
         }
         Ok(())

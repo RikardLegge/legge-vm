@@ -26,7 +26,7 @@ impl Node for Return {
             },
         )?;
         if let Some(func) = func {
-            ast.get_inner_mut(node_id).func = State::Linked(func);
+            ast.get_body_mut(node_id).func = State::Linked(func);
             Ok(())
         } else {
             panic!();
@@ -88,7 +88,7 @@ impl Node for Variable {
         let parent_id = node.parent_id.ok_or_else(|| panic!())?;
         let parent = ast.get(parent_id);
 
-        let statement: &Statement = parent.body.as_ref().unwrap().try_into()?;
+        let statement = <&AstNode<Statement>>::try_from(parent)?.body();
         match node_usage {
             NodeUsage::Type => ast.get_node_type(parent_id, node_usage),
             NodeUsage::Call | NodeUsage::Value => {

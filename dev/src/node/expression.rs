@@ -159,7 +159,7 @@ impl Node for VariableValue {
                 .closest_variable(node_id, var, context)?
                 .ok_or_else(|| panic!())?; //Error::VariableNotFound(var.into()))?;
 
-            let body: &mut Self = ast.get_inner_mut(node_id);
+            let body: &mut Self = ast.get_body_mut(node_id);
             body.variable = State::Linked(var);
         }
         Ok(())

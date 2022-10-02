@@ -305,7 +305,7 @@ where
         let declaration = TypeDeclaration::new(variable, expr.into());
         let type_declaration = self.ast.push(statement_id, declaration);
 
-        self.ast.get_inner_mut(expr).returns = NodeType::Custom(type_declaration);
+        self.ast.get_body_mut(expr).returns = NodeType::Custom(type_declaration);
 
         Ok(type_declaration)
     }

@@ -56,6 +56,10 @@ macro_rules! impl_node_variant_id {
             pub fn body(&self) -> &$variant {
                 self.body.as_ref().unwrap().try_into().unwrap()
             }
+
+            pub fn body_mut(&mut self) -> &mut $variant {
+                self.body.as_mut().unwrap().try_into().unwrap()
+            }
         }
     };
 }

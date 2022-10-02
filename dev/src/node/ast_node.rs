@@ -1,33 +1,7 @@
 use crate::ast::AstContext;
-use crate::node::{
-    AstRootNode, FunctionDeclaration, NodeIterator, NodeState, Result, TypeDeclaration, Unknown,
-};
+use crate::node::{FunctionDeclaration, NodeIterator, NodeState, Result, TypeDeclaration};
 use crate::{Ast, Error, NodeID, Variable};
 use std::fmt::Debug;
-
-#[derive(Debug, Clone)]
-#[repr(C)]
-pub struct AstNode<NodeType = Unknown> {
-    pub id: NodeID<NodeType>,
-    pub parent_id: Option<NodeID>,
-    pub body: Option<AstRootNode>,
-}
-
-impl AstNode {
-    pub fn link(node_id: NodeID, ast: &mut Ast, context: AstContext) -> Result<()> {
-        AstRootNode::link(node_id.into(), ast, context)
-    }
-
-    pub fn node_type(node_id: NodeID, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
-        AstRootNode::node_type(node_id.into(), ast, usage)
-    }
-}
-
-impl<T> AstNode<T> {
-    pub fn children(&self, context: AstContext) -> NodeIterator<'_> {
-        self.body.as_ref().unwrap().children(context)
-    }
-}
 
 pub trait Node: Sized + Debug {
     fn node_type(_node_id: NodeID<Self>, _ast: &Ast, _usage: NodeUsage) -> Result<NodeType> {
