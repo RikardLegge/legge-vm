@@ -39,6 +39,7 @@ impl Statement {
             Statement::TypeDeclaration(dec) => Some(dec.variable),
             Statement::StaticAssignment(_) => None,
             Statement::EvaluateExpression(_) => None,
+            Statement::Return(_) => None,
         }
     }
 
@@ -49,6 +50,7 @@ impl Statement {
             Statement::TypeDeclaration(var) => Some(var.constructor.into()),
             Statement::StaticAssignment(var) => Some(var.value.into()),
             Statement::EvaluateExpression(var) => Some(var.value.into()),
+            Statement::Return(var) => var.value.map(Into::into),
         }
     }
 }

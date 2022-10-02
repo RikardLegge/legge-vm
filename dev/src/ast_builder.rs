@@ -1,5 +1,5 @@
 use crate::node::{
-    EvaluateExpression, ExpressionChain, FunctionCall, FunctionDeclaration, NodeState,
+    EvaluateExpression, ExpressionChain, FunctionCall, FunctionDeclaration, NodeState, Return,
     StaticAssignment, TypeDeclaration, VariableValue,
 };
 use crate::token::{KeyName, Token};
@@ -60,7 +60,27 @@ where
                         unreachable!()
                     }
                     TokenType::KeyName(KeyName::Return) => {
-                        unimplemented!()
+                        self.next_token()?;
+                        let return_id = self.ast.new_node(parent_id);
+                        let value = match self.peek_token_type()? {
+                            TokenType::EndStatement => {
+                                self.expect_end_statement()?;
+                                None
+                            }
+                            _ => {
+                                let expr = self.expression(return_id, None)?;
+                                self.expect_end_statement()?;
+                                Some(expr)
+                            }
+                        };
+                        let return_value = self.ast.push(
+                            return_id,
+                            Return {
+                                func: ().into(),
+                                value,
+                            },
+                        );
+                        break Ok(Some(return_value.into()));
                     }
                     TokenType::Comment(_) => {
                         self.next_token()?;

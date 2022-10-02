@@ -34,7 +34,6 @@ impl_node!(
         Expression,
         Variable,
         NodeState,
-        Reference,
     }
 );
 
@@ -56,5 +55,6 @@ impl_node!(
         StaticAssignment,
         TypeDeclaration,
         EvaluateExpression,
+        Return,
     }
 );
