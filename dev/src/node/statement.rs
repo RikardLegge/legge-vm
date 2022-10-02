@@ -1,12 +1,15 @@
 use crate::ast::AstContext;
-use crate::node::{Expression, Node, NodeID, NodeIterator, NodeType, NodeUsage, Variable};
-use crate::{Ast, AstNode, Error, Result, State, Statement};
+use crate::node::{
+    Expression, Node, NodeID, NodeIterator, NodeState, NodeType, NodeUsage, Variable,
+};
+use crate::{Ast, AstNode, Block, Error, Result, State, Statement};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct FunctionDeclaration {
     pub arguments: Vec<NodeID<Variable>>,
     pub returns: NodeType,
+    pub body: NodeID<Block>,
 }
 
 impl Node for FunctionDeclaration {
@@ -18,6 +21,13 @@ impl Node for FunctionDeclaration {
                 Ok(body.returns.clone())
             }
         }
+    }
+
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
+        NodeIterator::chained(
+            NodeIterator::slice(&self.arguments),
+            NodeIterator::single(self.body),
+        )
     }
 }
 
@@ -115,7 +125,7 @@ impl Node for VariableDeclaration {
 
 #[derive(Debug, Clone)]
 pub struct StaticAssignment {
-    pub assign_to: State<String, NodeID<Variable>>,
+    pub assign_to: NodeID<NodeState>,
     pub variable: NodeID<Variable>,
     pub value: NodeID<Expression>,
     pub is_associated_field: bool,
@@ -139,18 +149,22 @@ impl Node for StaticAssignment {
     }
 
     fn children(&self, _context: AstContext) -> NodeIterator<'_> {
-        NodeIterator::dual(self.variable, self.value)
+        NodeIterator::chained(
+            NodeIterator::single(self.assign_to),
+            NodeIterator::dual(self.variable, self.value),
+        )
     }
 
     fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> Result<()> {
         let node: &Self = ast.get_body(node_id);
-        if let State::Unlinked(variable_name) = &node.assign_to {
+        let assign_to = ast.get_body(node.assign_to);
+        if let State::Unlinked(variable_name) = &assign_to.state {
             let variable_id = ast
                 .closest_variable(node_id, variable_name, context)?
                 .ok_or_else(|| Error::VariableNotFound(variable_name.into()))?;
 
-            let body: &mut Self = ast.get_inner_mut(node_id);
-            body.assign_to = State::Linked(variable_id);
+            let body = ast.get_inner_mut(node.assign_to);
+            body.state = State::Linked(variable_id);
 
             if let Some(type_id) = AstNode::type_declaration_id(variable_id, ast) {
                 let body = ast.get_inner_mut(node_id);

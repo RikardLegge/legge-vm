@@ -33,6 +33,8 @@ impl_node!(
         Statement,
         Expression,
         Variable,
+        NodeState,
+        Reference,
     }
 );
 

@@ -64,6 +64,7 @@ pub struct Token<'a> {
 pub enum KeyName {
     Import,
     Type,
+    This,
     If,
     True,
     False,
@@ -80,6 +81,7 @@ impl fmt::Display for KeyName {
         match self {
             Import => write!(f, "import"),
             Type => write!(f, "type"),
+            This => write!(f, "this"),
             If => write!(f, "if"),
             True => write!(f, "true"),
             False => write!(f, "false"),
@@ -122,7 +124,7 @@ impl TryFrom<&str> for ArithmeticOP {
     type Error = ();
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let op = match value.as_ref() {
+        let op = match value {
             "+" => ArithmeticOP::Add,
             "-" => ArithmeticOP::Sub,
             "*" => ArithmeticOP::Mul,
@@ -178,11 +180,12 @@ impl TryFrom<&str> for KeyName {
     type Error = ();
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let keyname = match value.as_ref() {
+        let keyname = match value {
             "fn" => KeyName::Fn,
             "return" => KeyName::Return,
             "if" => KeyName::If,
             "loop" => KeyName::Loop,
+            "self" => KeyName::This,
             "break" => KeyName::Break,
             "continue" => KeyName::Continue,
             "import" => KeyName::Import,

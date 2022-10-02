@@ -30,8 +30,8 @@ fn main() -> Result<()> {
     A -> type {}
     A.value :: 2;
     
-    A.func :: fn() {
-        
+    A.func :: fn(self) -> Int {
+        return 1;
     };
      
     a := A(); 
@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum State<Unlinked, Linked> {
     Unlinked(Unlinked),
     Linked(Linked),

@@ -24,32 +24,6 @@ where
     guarantees: PhantomData<fn() -> G>,
 }
 
-#[repr(transparent)]
-pub struct PendingNodeID<T = Unknown>(NodeID<T>);
-
-impl<T> Clone for PendingNodeID<T> {
-    fn clone(&self) -> Self {
-        PendingNodeID(self.0)
-    }
-}
-
-impl<T> Copy for PendingNodeID<T> {}
-
-impl<T> From<PendingNodeID<T>> for PendingNodeID
-where
-    T: Node,
-{
-    fn from(id: PendingNodeID<T>) -> Self {
-        unsafe { std::mem::transmute(id) }
-    }
-}
-
-impl<T> From<NodeID<T>> for PendingNodeID {
-    fn from(id: NodeID<T>) -> Self {
-        unsafe { std::mem::transmute(id) }
-    }
-}
-
 impl<T, G> Clone for Ast<T, G>
 where
     T: Node,
@@ -158,25 +132,22 @@ impl Ast {
         Ok(())
     }
 
-    pub fn new_node<Child>(&mut self, parent_id: impl Into<PendingNodeID>) -> PendingNodeID<Child>
+    pub fn new_node<Child>(&mut self, parent_id: impl Into<NodeID>) -> NodeID<Child>
     where
         Child: Node,
     {
         self.new_node_internal(Some(parent_id))
     }
 
-    pub fn new_root_node<Child>(&mut self) -> PendingNodeID<Child>
+    pub fn new_root_node<Child>(&mut self) -> NodeID<Child>
     where
         Child: Node,
     {
-        let parent: Option<PendingNodeID> = None;
+        let parent: Option<NodeID> = None;
         self.new_node_internal(parent)
     }
 
-    fn new_node_internal<Child>(
-        &mut self,
-        parent_id: Option<impl Into<PendingNodeID>>,
-    ) -> PendingNodeID<Child>
+    fn new_node_internal<Child>(&mut self, parent_id: Option<impl Into<NodeID>>) -> NodeID<Child>
     where
         Child: Node,
     {
@@ -184,19 +155,18 @@ impl Ast {
         let id = NodeID::<Child>::new(index);
         let node = AstNode::<Unknown> {
             id: id.into(),
-            parent_id: parent_id.map(|id| id.into().0),
+            parent_id: parent_id.map(|id| id.into()),
             body: None,
         };
         self.nodes.push(node);
-        PendingNodeID(id)
+        id
     }
 
-    pub fn push<Child>(&mut self, id: PendingNodeID<Child>, child: Child) -> NodeID<Child>
+    pub fn push<Child>(&mut self, id: NodeID<Child>, child: Child) -> NodeID<Child>
     where
         Child: Node + Into<AstRootNode>,
     {
         let body = child.into();
-        let id = id.0;
         let node = self.get_mut(id);
         node.body = Some(body);
         id
@@ -204,7 +174,7 @@ impl Ast {
 
     pub fn push_new_node<Child>(
         &mut self,
-        parent_id: impl Into<PendingNodeID>,
+        parent_id: impl Into<NodeID>,
         child: Child,
     ) -> NodeID<Child>
     where
@@ -296,7 +266,10 @@ impl Ast {
     }
 
     pub fn get_node_type(&self, node_id: impl Into<NodeID>, usage: NodeUsage) -> Result<NodeType> {
-        AstNode::node_type(node_id.into(), self, usage)
+        match AstNode::node_type(node_id.into(), self, usage)? {
+            NodeType::Indirect(target_id) => self.get_node_type(target_id, usage),
+            tp => Ok(tp),
+        }
     }
 
     pub fn get_mut(&mut self, node_id: impl Into<NodeID>) -> &mut AstNode {
