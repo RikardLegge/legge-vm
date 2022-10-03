@@ -1,3 +1,5 @@
+extern crate core;
+
 mod ast;
 mod ast_builder;
 mod linker;
@@ -27,7 +29,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 fn main() -> Result<()> {
     let tokens = token::from_chars(
         r#"
-    A -> type {}
+    A -> type {};
     A.value :: 2;
     
     A.func :: fn(self) -> Int {

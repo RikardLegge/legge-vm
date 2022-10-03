@@ -1,5 +1,5 @@
 use crate::ast::AstContext;
-use crate::node::{FunctionDeclaration, NodeIterator, NodeState, Result, TypeDeclaration};
+use crate::node::{FunctionDeclaration, NodeIterator, Result, TypeDeclaration, VariableValue};
 use crate::{Ast, Error, NodeID, Variable};
 use std::fmt::Debug;
 
@@ -35,7 +35,7 @@ pub enum NodeType {
     Float,
     String,
     Boolean,
-    Indirect(NodeID<NodeState>),
+    Indirect(NodeID<VariableValue>),
     Custom(NodeID<TypeDeclaration>),
     Function(NodeID<FunctionDeclaration>),
 }

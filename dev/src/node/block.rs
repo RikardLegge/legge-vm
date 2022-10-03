@@ -7,7 +7,7 @@ use std::fmt::Debug;
 #[derive(Debug, Clone)]
 pub struct Block {
     pub variables: HashMap<String, NodeID<Variable>>,
-    children: Vec<NodeID<Statement>>,
+    pub children: Vec<NodeID<Statement>>,
 }
 
 impl Block {

@@ -1,6 +1,6 @@
 use crate::ast::AstContext;
 use crate::node::{FunctionDeclaration, NodeIterator, NodeType, NodeUsage, TypeDeclaration};
-use crate::{Ast, AstNode, Error, Expression, Result, State, Statement};
+use crate::{Ast, AstNode, Expression, Result, State, Statement};
 use crate::{Node, NodeID};
 
 #[derive(Debug, Clone)]
@@ -30,26 +30,6 @@ impl Node for Return {
             Ok(())
         } else {
             panic!();
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct NodeState {
-    pub state: State<String, NodeID<Variable>>,
-}
-
-impl Node for NodeState {
-    fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
-        let body = ast.get_body(node_id);
-        match &body.state {
-            State::Unlinked(_) => Err(Error::TypeNotInferred),
-            State::Linked(linked_id) => match usage {
-                NodeUsage::Type | NodeUsage::Value => {
-                    ast.get_node_type(*linked_id, NodeUsage::Type)
-                }
-                NodeUsage::Call => Err(Error::TypeNotInferred),
-            },
         }
     }
 }

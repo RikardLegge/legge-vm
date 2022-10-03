@@ -1,5 +1,5 @@
 use crate::node::{
-    EvaluateExpression, ExpressionChain, FunctionCall, FunctionDeclaration, NodeState, Return,
+    AstRootNode, EvaluateExpression, ExpressionChain, FunctionCall, FunctionDeclaration, Return,
     StaticAssignment, TypeDeclaration, VariableValue,
 };
 use crate::token::{KeyName, Token};
@@ -15,7 +15,7 @@ where
     Iter: Iterator<Item = Token<'a>>,
     T: Node,
 {
-    tokens: Peekable<Iter>,
+    tokens: TokenReader<'a, Iter>,
     ast: Ast<T>,
 }
 
@@ -26,7 +26,9 @@ where
 {
     pub fn new(tokens: Iter) -> Self {
         Self {
-            tokens: tokens.peekable(),
+            tokens: TokenReader {
+                tokens: tokens.peekable(),
+            },
             ast: Ast::default(),
         }
     }
@@ -39,51 +41,129 @@ where
     pub fn build(mut self) -> Result<Ast<Block>> {
         let block_id = self.ast.new_root_node();
         let mut children = vec![];
-        while let Some(statement) = self.statement(block_id)? {
+
+        let mut builder = Builder::new(&mut self.ast, &mut self.tokens, block_id);
+        while let Some(statement) = builder.statement()? {
             children.push(statement);
         }
+
         let block = Block::new(children, &self.ast);
         let block_id = self.ast.push(block_id, block);
         self.ast.root = Some(block_id);
         Ok(self.ast)
     }
+}
 
-    fn statement(&mut self, parent_id: NodeID<Block>) -> Result<Option<NodeID<Statement>>> {
+pub struct TokenReader<'a, Iter>
+where
+    Iter: Iterator<Item = Token<'a>>,
+{
+    tokens: Peekable<Iter>,
+}
+
+impl<'a, Iter> TokenReader<'a, Iter>
+where
+    Iter: Iterator<Item = Token<'a>>,
+{
+    fn expect_end_statement(&mut self) -> Result<()> {
+        match self.next_type()? {
+            TokenType::EndStatement => Ok(()),
+            _ => {
+                panic!();
+                // Err(Error::ExpectedEndStatement)
+            }
+        }
+    }
+
+    fn peek(&mut self) -> Result<&Token<'a>> {
         loop {
-            if let Ok(token_tp) = self.peek_token_type() {
+            let token = self.tokens.peek().ok_or(Error::EOF)?;
+            match &token.tp {
+                TokenType::Comment(_) => {
+                    self.tokens.next().unwrap();
+                    continue;
+                }
+                _ => return Ok(self.tokens.peek().unwrap()),
+            }
+        }
+    }
+
+    fn peek_type(&mut self) -> Result<&TokenType<'a>> {
+        self.peek().map(|token| &token.tp)
+    }
+
+    fn next_type(&mut self) -> Result<TokenType<'a>> {
+        self.next().map(|token| token.tp)
+    }
+
+    fn next(&mut self) -> Result<Token<'a>> {
+        self.peek()?;
+        self.tokens.next().ok_or(Error::EOF)
+    }
+}
+
+struct Builder<'ast, 'token, Type, TokenIter>
+where
+    NodeID<Type>: Into<NodeID>,
+    Type: Node + Into<AstRootNode>,
+    TokenIter: Iterator<Item = Token<'token>>,
+{
+    id: NodeID<Type>,
+    ast: &'ast mut Ast,
+    tokens: &'ast mut TokenReader<'token, TokenIter>,
+}
+
+impl<'ast, 'token, Type, TokenIter> Builder<'ast, 'token, Type, TokenIter>
+where
+    NodeID<Type>: Into<NodeID>,
+    Type: Node + Into<AstRootNode>,
+    TokenIter: Iterator<Item = Token<'token>>,
+{
+    fn new(
+        ast: &'ast mut Ast,
+        tokens: &'ast mut TokenReader<'token, TokenIter>,
+        parent_id: NodeID<Type>,
+    ) -> Self {
+        let id = parent_id;
+        Builder { id, ast, tokens }
+    }
+
+    fn statement(&mut self) -> Result<Option<NodeID<Statement>>> {
+        loop {
+            if let Ok(token_tp) = self.tokens.peek_type() {
                 match token_tp {
                     TokenType::Name(_) => {
-                        if let TokenType::Name(name) = self.tokens.next().unwrap().tp {
-                            let statement = self.statement_named(name, parent_id);
+                        if let Ok(TokenType::Name(name)) = self.tokens.next_type() {
+                            let statement = self.statement_named(name.to_string());
                             break Some(statement).transpose();
                         }
                         unreachable!()
                     }
                     TokenType::KeyName(KeyName::Return) => {
-                        self.next_token()?;
-                        let return_id = self.ast.new_node(parent_id);
-                        let value = match self.peek_token_type()? {
-                            TokenType::EndStatement => {
-                                self.expect_end_statement()?;
-                                None
-                            }
-                            _ => {
-                                let expr = self.expression(return_id, None)?;
-                                self.expect_end_statement()?;
-                                Some(expr)
-                            }
-                        };
-                        let return_value = self.ast.push(
-                            return_id,
-                            Return {
+                        self.tokens.next()?;
+                        let return_value = self.node::<Return>(|mut builder| {
+                            let value = match builder.tokens.peek_type()? {
+                                TokenType::EndStatement => {
+                                    builder.tokens.expect_end_statement()?;
+                                    None
+                                }
+                                _ => {
+                                    let expr = builder.expression(None)?;
+                                    builder.tokens.expect_end_statement()?;
+                                    Some(expr)
+                                }
+                            };
+
+                            Ok(Return {
                                 func: ().into(),
                                 value,
-                            },
-                        );
+                            })
+                        })?;
+
                         break Ok(Some(return_value.into()));
                     }
                     TokenType::Comment(_) => {
-                        self.next_token()?;
+                        self.tokens.next()?;
                     }
                     _ => break Ok(None),
                 }
@@ -93,42 +173,116 @@ where
         }
     }
 
-    fn expect_end_statement(&mut self) -> Result<()> {
-        let token = self.next_token()?;
-        if let TokenType::EndStatement = token.tp {
-            Ok(())
-        } else {
-            Err(Error::ExpectedEndStatement)
-        }
-    }
+    fn expression(&mut self, this: Option<NodeType>) -> Result<NodeID<Expression>> {
+        let lhs: NodeID<Expression> = match self.tokens.next_type()? {
+            TokenType::Int(value, _) => self.const_value(Value::Int(value)).into(),
+            TokenType::Float(value, _) => self.const_value(Value::Float(value)).into(),
+            TokenType::String(value) => self.const_value(Value::String(value.to_string())).into(),
+            TokenType::Name(value) => match self.tokens.peek_type()? {
+                TokenType::Dot => {
+                    self.tokens.next()?;
+                    self.node::<ExpressionChain>(move |mut builder| {
+                        let lhs = builder.variable_value(value.to_string()).into();
+                        let rhs = builder.expression(None)?;
 
-    fn peek_token(&mut self) -> Result<&Token> {
-        self.tokens.peek().ok_or(Error::EOF)
-    }
+                        Ok(ExpressionChain::new(lhs, rhs))
+                    })?
+                    .into()
+                }
+                TokenType::LeftBrace => self.call(value.to_string())?.into(),
+                _ => self.variable_value(value.to_string()).into(),
+            },
+            TokenType::KeyName(KeyName::Fn) => self
+                .node::<FunctionDeclaration>(|mut builder| {
+                    let arguments = if let TokenType::LeftBrace = builder.tokens.peek_type()? {
+                        builder.arguments_with_types(this)?
+                    } else {
+                        vec![]
+                    };
 
-    fn peek_token_type(&mut self) -> Result<&TokenType> {
-        self.peek_token().map(|token| &token.tp)
-    }
+                    let returns = if let TokenType::ReturnTypes = builder.tokens.peek_type()? {
+                        builder.tokens.next()?;
+                        builder.tp()?
+                    } else {
+                        NodeType::Void
+                    };
 
-    fn next_token(&mut self) -> Result<Token> {
-        loop {
-            let token = self.tokens.next().ok_or(Error::EOF)?;
-            match token.tp {
-                TokenType::Comment(_) => continue,
-                _ => break Ok(token),
+                    assert_eq!(TokenType::LeftCurlyBrace, builder.tokens.next()?.tp);
+
+                    let body = builder.node::<Block>(move |mut builder| {
+                        let mut children = vec![];
+                        loop {
+                            if let TokenType::RightCurlyBrace = builder.tokens.peek_type()? {
+                                builder.tokens.next()?;
+                                break;
+                            }
+                            match builder.statement()? {
+                                None => break,
+                                Some(statement) => children.push(statement),
+                            }
+                        }
+                        Ok(Block::new(children, builder.ast))
+                    })?;
+
+                    Ok(FunctionDeclaration {
+                        arguments,
+                        returns,
+                        body,
+                    })
+                })?
+                .into(),
+            tp => unimplemented!("{:?}", tp),
+        };
+
+        match self.tokens.peek_type()? {
+            TokenType::Op(op) => {
+                let op = *op;
+                self.tokens.next()?;
+
+                let operation = self.node::<Operation>(|mut builder| {
+                    let rhs = builder.expression(None)?;
+                    Ok(Operation::new(op, lhs, rhs))
+                })?;
+
+                let lhs_node = self.ast.get_mut(lhs);
+                lhs_node.parent_id = Some(operation.into());
+
+                Ok(operation.into())
             }
+            _ => Ok(lhs),
         }
     }
 
-    fn call(&mut self, variable: NodeID<VariableValue>) -> Result<FunctionCall> {
-        assert_eq!(TokenType::LeftBrace, self.next_token()?.tp);
-        assert_eq!(TokenType::RightBrace, self.next_token()?.tp);
+    fn call(&mut self, name: String) -> Result<NodeID<FunctionCall>> {
+        assert_eq!(TokenType::LeftBrace, self.tokens.next()?.tp);
+        assert_eq!(TokenType::RightBrace, self.tokens.next()?.tp);
 
-        Ok(FunctionCall::new(variable))
+        self.node::<FunctionCall>(|mut builder| {
+            let variable = builder.variable_value(name);
+            Ok(FunctionCall::new(variable))
+        })
+    }
+
+    fn variable(&mut self, name: String) -> NodeID<Variable> {
+        let parent_id = self.id.into();
+        let variable = Variable::new(name);
+        self.ast.push_new_node(parent_id, variable)
+    }
+
+    fn typed_variable(&mut self, name: String, tp: NodeType) -> NodeID<Variable> {
+        let parent_id = self.id.into();
+        let variable = Variable { name, tp: Some(tp) };
+        self.ast.push_new_node(parent_id, variable)
+    }
+
+    fn variable_value(&mut self, name: String) -> NodeID<VariableValue> {
+        let parent_id = self.id.into();
+        let variable = VariableValue::new(State::Unlinked(name));
+        self.ast.push_new_node(parent_id, variable)
     }
 
     fn tp(&mut self) -> Result<NodeType> {
-        let tp = match self.next_token()?.tp {
+        let tp = match self.tokens.next_type()? {
             TokenType::Name("Int") => NodeType::Int,
             TokenType::Name("Float") => NodeType::Float,
             TokenType::Name("String") => NodeType::String,
@@ -138,42 +292,29 @@ where
         Ok(tp)
     }
 
-    fn arguments_with_types(
-        &mut self,
-        parent_id: NodeID<Expression>,
-        this: Option<NodeType>,
-    ) -> Result<Vec<NodeID<Variable>>> {
-        let mut arguments = vec![];
+    fn arguments_with_types(&mut self, this: Option<NodeType>) -> Result<Vec<NodeID<Variable>>> {
+        assert_eq!(self.tokens.next_type()?, TokenType::LeftBrace);
 
-        let mut expect_separator = if let Some(this) = this {
-            if let TokenType::KeyName(KeyName::This) = self.peek_token_type()? {
-                self.next_token()?;
-                let variable = self.ast.push_new_node(
-                    parent_id,
-                    Variable {
-                        name: "self".into(),
-                        tp: Some(this),
-                    },
-                );
+        let mut arguments = vec![];
+        let mut expect_separator = false;
+
+        if let Some(this) = this {
+            if let TokenType::KeyName(KeyName::This) = self.tokens.peek_type()? {
+                self.tokens.next()?;
+                let variable = self.typed_variable("self".to_string(), this);
                 arguments.push(variable);
-                true
-            } else {
-                false
+                expect_separator = true
             }
-        } else {
-            false
         };
 
         loop {
-            match (expect_separator, self.next_token()?.tp) {
-                (false, TokenType::Name(arg)) => {
-                    let name = arg.into();
+            match (expect_separator, self.tokens.next()?.tp) {
+                (false, TokenType::Name(name)) => {
+                    assert_eq!(TokenType::TypeDeclaration, self.tokens.next()?.tp);
 
-                    assert_eq!(TokenType::TypeDeclaration, self.next_token()?.tp);
+                    let tp = self.tp()?;
+                    let variable = self.typed_variable(name.to_string(), tp);
 
-                    let tp = Some(self.tp()?);
-
-                    let variable = self.ast.push_new_node(parent_id, Variable { name, tp });
                     arguments.push(variable);
                     expect_separator = true;
                 }
@@ -187,236 +328,115 @@ where
         Ok(arguments)
     }
 
-    fn expression(
+    fn node<ChildNodeType>(
         &mut self,
-        parent_id: impl Into<NodeID>,
-        this: Option<NodeType>,
-    ) -> Result<NodeID<Expression>> {
-        let parent_id = parent_id.into();
-        let expression_id = self.ast.new_node(parent_id);
-        let expression: Expression = match self.next_token()?.tp {
-            TokenType::Int(value, _) => Value::Int(value).into(),
-            TokenType::Float(value, _) => Value::Float(value).into(),
-            TokenType::String(value) => Value::String(value.to_string()).into(),
-            TokenType::Name(value) => {
-                let variable = VariableValue::new(State::Unlinked(value.to_string()));
-                match self.peek_token_type()? {
-                    TokenType::Dot => {
-                        self.next_token()?;
-
-                        let variable = self.ast.push_new_node(expression_id, variable);
-                        let rhs = self.expression(expression_id, None)?;
-
-                        ExpressionChain::new(variable.into(), rhs).into()
-                    }
-                    TokenType::LeftBrace => {
-                        let variable = self.ast.push_new_node(expression_id, variable);
-                        self.call(variable)?.into()
-                    }
-                    _ => variable.into(),
-                }
-            }
-            TokenType::KeyName(KeyName::Fn) => {
-                let arguments = if let TokenType::LeftBrace = self.peek_token_type()? {
-                    self.next_token()?;
-                    self.arguments_with_types(expression_id, this)?
-                } else {
-                    vec![]
-                };
-
-                let returns = if let TokenType::ReturnTypes = self.peek_token_type()? {
-                    self.next_token()?;
-                    self.tp()?
-                } else {
-                    NodeType::Void
-                };
-
-                assert_eq!(TokenType::LeftCurlyBrace, self.next_token()?.tp);
-                let body_id = self.ast.new_node(expression_id);
-                let mut children = vec![];
-                loop {
-                    if let TokenType::RightCurlyBrace = self.peek_token_type()? {
-                        self.next_token()?;
-                        break;
-                    }
-                    match self.statement(body_id)? {
-                        None => break,
-                        Some(statement) => children.push(statement),
-                    }
-                }
-                let body = self.ast.push(body_id, Block::new(children, &self.ast));
-
-                FunctionDeclaration {
-                    arguments,
-                    returns,
-                    body,
-                }
-                .into()
-            }
-            tp => unimplemented!("{:?}", tp),
+        evaluate: impl FnOnce(Builder<'_, 'token, ChildNodeType, TokenIter>) -> Result<ChildNodeType>,
+    ) -> Result<NodeID<ChildNodeType>>
+    where
+        ChildNodeType: Node + Into<AstRootNode>,
+    {
+        let id = self.ast.new_node(self.id);
+        let builder = Builder::<ChildNodeType, TokenIter> {
+            id,
+            ast: self.ast,
+            tokens: self.tokens,
         };
-
-        let lhs = self.ast.push(expression_id, expression);
-
-        match self.peek_token_type()? {
-            TokenType::Op(op) => {
-                let op = *op;
-                self.next_token()?;
-
-                let operation_id = self.ast.new_node(parent_id);
-                let rhs = self.expression(operation_id, None)?;
-                let operation = Expression::Operation(Operation::new(op, lhs, rhs));
-                let operation = self.ast.push(operation_id, operation);
-
-                let lhs_node = self.ast.get_mut(lhs);
-                lhs_node.parent_id = Some(operation.into());
-
-                Ok(operation)
-            }
-            _ => Ok(lhs),
-        }
+        let value = evaluate(builder)?;
+        Ok(self.ast.push(id, value))
     }
 
-    fn new_type(
-        &mut self,
-        statement_id: NodeID<TypeDeclaration>,
-        variable: NodeID<Variable>,
-    ) -> Result<NodeID<TypeDeclaration>> {
-        let expr_id = self.ast.new_node(variable);
-        let body = self
-            .ast
-            .push_new_node(expr_id, Block::new(vec![], &self.ast));
-
-        let expr = FunctionDeclaration {
-            arguments: vec![],
-            body,
-            returns: NodeType::Void,
-        };
-        let expr = self.ast.push(expr_id, expr);
-
-        match self.next_token()?.tp {
-            TokenType::LeftCurlyBrace => match self.next_token()?.tp {
-                TokenType::RightCurlyBrace => {}
-                _ => unimplemented!(),
-            },
-            _ => unimplemented!(),
-        }
-
-        let declaration = TypeDeclaration::new(variable, expr.into());
-        let type_declaration = self.ast.push(statement_id, declaration);
-
-        self.ast.get_body_mut(expr).returns = NodeType::Custom(type_declaration);
-
-        Ok(type_declaration)
+    fn const_value<ChildNodeType>(&mut self, value: ChildNodeType) -> NodeID<ChildNodeType>
+    where
+        ChildNodeType: Node + Into<AstRootNode>,
+    {
+        let id = self.ast.new_node(self.id);
+        self.ast.push(id, value)
     }
 
-    fn statement_named(
+    fn type_constructor(
         &mut self,
-        name: &str,
-        parent_id: NodeID<Block>,
-    ) -> Result<NodeID<Statement>> {
-        let next_token = self.next_token()?;
-        let id = match next_token.tp {
-            TokenType::VariableDeclaration => {
-                let statement_id = self.ast.new_node(parent_id);
+        tp_id: NodeID<TypeDeclaration>,
+    ) -> Result<NodeID<FunctionDeclaration>> {
+        self.node::<FunctionDeclaration>(move |mut builder| {
+            let body = builder.const_value(Block::new(vec![], builder.ast));
+            Ok(FunctionDeclaration {
+                arguments: vec![],
+                body,
+                returns: NodeType::Custom(tp_id),
+            })
+        })
+    }
 
-                let variable = self
-                    .ast
-                    .push_new_node(statement_id, Variable::new(name.to_string()));
+    fn statement_named(&mut self, name: String) -> Result<NodeID<Statement>> {
+        let id = match self.tokens.next_type()? {
+            TokenType::VariableDeclaration => self
+                .node::<VariableDeclaration>(move |mut builder| {
+                    let variable = builder.variable(name);
+                    let value = builder.expression(None)?;
+                    Ok(VariableDeclaration::new(variable, value))
+                })?
+                .into(),
+            TokenType::Assignment => self
+                .node::<VariableAssignment>(move |mut builder| {
+                    let value = builder.expression(None)?;
+                    Ok(VariableAssignment::new(name, value))
+                })?
+                .into(),
+            TokenType::ReturnTypes => self
+                .node::<TypeDeclaration>(move |mut builder| {
+                    let variable = builder.variable(name);
 
-                let value = self.expression(variable, None)?;
-                self.expect_end_statement()?;
+                    assert_eq!(
+                        builder.tokens.next_type()?,
+                        TokenType::KeyName(KeyName::Type)
+                    );
 
-                let statement = VariableDeclaration::new(variable, value);
-                self.ast.push(statement_id, statement).into()
-            }
-            TokenType::Assignment => {
-                let statement_id = self.ast.new_node(parent_id);
+                    let constructor = builder.type_constructor(builder.id)?;
 
-                let value = self.expression(statement_id, None)?;
-                self.expect_end_statement()?;
+                    assert_eq!(builder.tokens.next_type()?, TokenType::LeftCurlyBrace);
+                    assert_eq!(builder.tokens.next_type()?, TokenType::RightCurlyBrace);
 
-                let statement = VariableAssignment::new(name.to_string(), value);
-                self.ast.push(statement_id, statement).into()
-            }
-            TokenType::ReturnTypes => {
-                let statement_id = self.ast.new_node(parent_id);
-
-                match self.next_token()?.tp {
-                    TokenType::KeyName(KeyName::Type) => {}
-                    _ => unimplemented!(),
-                }
-                let variable = self
-                    .ast
-                    .push_new_node(statement_id, Variable::new(name.to_string()));
-
-                self.new_type(statement_id, variable)?.into()
-            }
+                    Ok(TypeDeclaration::new(variable, constructor.into()))
+                })?
+                .into(),
             TokenType::Dot => {
-                let field = match self.next_token()?.tp {
+                let field = match self.tokens.next_type()? {
                     TokenType::Name(path) => path.to_string(),
                     _ => unimplemented!(),
                 };
 
-                match self.peek_token_type()? {
+                match self.tokens.peek_type()? {
                     TokenType::ConstDeclaration => {
-                        self.next_token()?;
-                        let statement_id = self.ast.new_node(parent_id);
+                        self.tokens.next()?;
 
-                        let assign_to = self.ast.push_new_node(
-                            statement_id,
-                            NodeState {
-                                state: name.to_string().into(),
-                            },
-                        );
+                        self.node::<StaticAssignment>(move |mut builder| {
+                            let assign_to = builder.variable_value(name);
+                            let variable = builder.variable(field);
 
-                        let variable = self.ast.push_new_node(statement_id, Variable::new(field));
-                        let this = Some(NodeType::Indirect(assign_to));
+                            let this = Some(NodeType::Indirect(assign_to));
+                            let value = builder.expression(this)?;
 
-                        let value = self.expression(statement_id, this)?;
-                        self.expect_end_statement()?;
-
-                        let statement = StaticAssignment {
-                            assign_to,
-                            variable,
-                            value,
-                            is_associated_field: false,
-                        };
-                        self.ast.push(statement_id, statement).into()
+                            Ok(StaticAssignment::new(assign_to, variable, value))
+                        })?
+                        .into()
                     }
-                    TokenType::LeftBrace => {
-                        let statement_id = self.ast.new_node(parent_id);
+                    TokenType::LeftBrace => self
+                        .node::<EvaluateExpression>(move |mut builder| {
+                            let chain = builder.node::<ExpressionChain>(move |mut builder| {
+                                let variable = builder.variable_value(name);
+                                let call = builder.call(field)?;
 
-                        let chain_id = self.ast.new_node(statement_id);
-
-                        let variable = self.ast.push_new_node(
-                            statement_id,
-                            VariableValue::new(State::Unlinked(name.to_string())),
-                        );
-
-                        let call_id = self.ast.new_node(chain_id);
-                        let field = self
-                            .ast
-                            .push_new_node(call_id, VariableValue::new(State::Unlinked(field)));
-
-                        let call = self.call(field)?;
-                        let call = self.ast.push(call_id, call).into();
-                        self.expect_end_statement()?;
-
-                        let chain = self
-                            .ast
-                            .push(chain_id, ExpressionChain::new(variable.into(), call));
-
-                        let statement = EvaluateExpression {
-                            value: chain.into(),
-                        };
-                        self.ast.push(statement_id, statement).into()
-                    }
+                                Ok(ExpressionChain::new(variable.into(), call.into()))
+                            })?;
+                            Ok(EvaluateExpression::new(chain))
+                        })?
+                        .into(),
                     _ => unimplemented!(),
                 }
             }
             tt => unimplemented!("{:?}", tt),
         };
+        self.tokens.expect_end_statement()?;
         Ok(id)
     }
 }

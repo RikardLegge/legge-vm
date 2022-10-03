@@ -1,6 +1,6 @@
 use crate::ast::AstContext;
 use crate::node::{
-    Expression, Node, NodeID, NodeIterator, NodeState, NodeType, NodeUsage, Variable,
+    Expression, Node, NodeID, NodeIterator, NodeType, NodeUsage, Variable, VariableValue,
 };
 use crate::{Ast, AstNode, Block, Error, Result, State, Statement};
 use std::collections::HashMap;
@@ -127,7 +127,7 @@ impl Node for VariableDeclaration {
 
 #[derive(Debug, Clone)]
 pub struct StaticAssignment {
-    pub assign_to: NodeID<NodeState>,
+    pub assign_to: NodeID<VariableValue>,
     pub variable: NodeID<Variable>,
     pub value: NodeID<Expression>,
     pub is_associated_field: bool,
@@ -136,6 +136,21 @@ pub struct StaticAssignment {
 impl AstNode<StaticAssignment> {
     pub fn parent_id(&self) -> NodeID {
         self.parent_id.unwrap()
+    }
+}
+
+impl StaticAssignment {
+    pub fn new(
+        assign_to: NodeID<VariableValue>,
+        variable: NodeID<Variable>,
+        value: NodeID<Expression>,
+    ) -> Self {
+        StaticAssignment {
+            assign_to,
+            variable,
+            value,
+            is_associated_field: false,
+        }
     }
 }
 
@@ -160,13 +175,13 @@ impl Node for StaticAssignment {
     fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> Result<()> {
         let node: &Self = ast.get_body(node_id);
         let assign_to = ast.get_body(node.assign_to);
-        if let State::Unlinked(variable_name) = &assign_to.state {
+        if let State::Unlinked(variable_name) = &assign_to.variable {
             let variable_id = ast
                 .closest_variable(node_id, variable_name, context)?
                 .ok_or_else(|| Error::VariableNotFound(variable_name.into()))?;
 
             let body = ast.get_body_mut(node.assign_to);
-            body.state = State::Linked(variable_id);
+            body.variable = State::Linked(variable_id);
 
             if let Some(type_id) = AstNode::type_declaration_id(variable_id, ast) {
                 let body = ast.get_body_mut(node_id);
@@ -235,5 +250,13 @@ impl Node for EvaluateExpression {
 
     fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::single(self.value)
+    }
+}
+
+impl EvaluateExpression {
+    pub fn new(value: impl Into<NodeID<Expression>>) -> Self {
+        EvaluateExpression {
+            value: value.into(),
+        }
     }
 }
