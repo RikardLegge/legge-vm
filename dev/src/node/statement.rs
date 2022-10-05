@@ -90,7 +90,7 @@ impl Node for TypeDeclaration {
 
     fn has_variable(&self, var: &str) -> Result<Option<NodeID<Variable>>> {
         if let Some(variable_id) = self.associated_values.get(var) {
-            Ok(Some((*variable_id).into()))
+            Ok(Some(*variable_id))
         } else {
             Ok(None)
         }
@@ -234,6 +234,24 @@ impl Node for VariableAssignment {
             node.variable = State::Linked(var);
         }
         Ok(())
+    }
+
+    fn check(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
+        let node = ast.get_body(node_id);
+
+        let variable_id: NodeID<Variable> = (&node.variable)
+            .try_into()
+            .map_err(|_| Error::UnlinkedNode(node_id.into()))?;
+        let lhs = ast.get_node_type(variable_id, NodeUsage::Type)?;
+
+        let value_id = node.value;
+        let rhs = ast.get_node_type(value_id, NodeUsage::Value)?;
+
+        if lhs == rhs {
+            Ok(())
+        } else {
+            Err(Error::TypeMissmatch(variable_id.into(), value_id.into()))
+        }
     }
 }
 

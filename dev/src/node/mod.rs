@@ -40,6 +40,10 @@ impl AstNode {
         }
     }
 
+    pub fn check(node_id: NodeID, ast: &mut Ast) -> Result<()> {
+        AstRootNode::check(node_id.into(), ast)
+    }
+
     pub fn link(node_id: NodeID, ast: &mut Ast, context: AstContext) -> Result<()> {
         AstRootNode::link(node_id.into(), ast, context)
     }

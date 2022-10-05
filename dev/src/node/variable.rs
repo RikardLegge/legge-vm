@@ -1,6 +1,6 @@
 use crate::ast::AstContext;
 use crate::node::{FunctionDeclaration, NodeIterator, NodeType, NodeUsage, TypeDeclaration};
-use crate::{Ast, AstNode, Expression, Result, State, Statement};
+use crate::{Ast, AstNode, Expression, Result, State, Statement, VariableDeclaration};
 use crate::{Node, NodeID};
 
 #[derive(Debug, Clone)]
@@ -48,6 +48,16 @@ impl AstNode<Variable> {
         let node = ast.get(node_id);
         let parent = ast.get(node.parent_id?);
         let declaration: &AstNode<TypeDeclaration> = parent.try_into().ok()?;
+        Some(declaration.id)
+    }
+
+    pub fn variable_declaration_id(
+        node_id: NodeID<Variable>,
+        ast: &Ast,
+    ) -> Option<NodeID<VariableDeclaration>> {
+        let node = ast.get(node_id);
+        let parent = ast.get(node.parent_id?);
+        let declaration: &AstNode<VariableDeclaration> = parent.try_into().ok()?;
         Some(declaration.id)
     }
 }

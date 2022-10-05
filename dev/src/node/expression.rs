@@ -2,7 +2,7 @@ use crate::ast::AstContext;
 use crate::node::iterator::NodeIteratorBody;
 use crate::node::{NodeID, NodeIDContext, NodeIterator, NodeType, NodeUsage, Variable};
 use crate::token::ArithmeticOP;
-use crate::{Ast, Error, Expression, Result};
+use crate::{Ast, AstNode, Error, Expression, Result};
 use crate::{Node, State};
 
 #[derive(Debug, Clone)]
@@ -73,11 +73,12 @@ impl Node for Value {
 #[derive(Debug, Clone)]
 pub struct FunctionCall {
     pub variable: NodeID<VariableValue>,
+    pub args: Vec<NodeID<Expression>>,
 }
 
 impl FunctionCall {
-    pub fn new(variable: NodeID<VariableValue>) -> Self {
-        Self { variable }
+    pub fn new(variable: NodeID<VariableValue>, args: Vec<NodeID<Expression>>) -> Self {
+        Self { variable, args }
     }
 }
 
@@ -95,11 +96,48 @@ impl Node for FunctionCall {
         }
     }
 
+    fn check(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
+        let call = ast.get_body(node_id);
+
+        let var_id: NodeID<Variable> = (&ast.get_body(call.variable).variable)
+            .try_into()
+            .map_err(|_| Error::UnlinkedNode(call.variable.into()))?;
+        let var_tp = ast.get_node_type(var_id, NodeUsage::Value)?;
+
+        let func_id = match var_tp {
+            NodeType::Function(func_id) => func_id,
+            _ => return Err(Error::TypeMissmatch(node_id.into(), var_id.into())),
+        };
+        let func = ast.get_body(func_id);
+
+        if func.arguments.len() != call.args.len() {
+            return Err(Error::TypeMissmatch(node_id.into(), func_id.into()));
+        }
+
+        for (func_arg_id, call_arg_id) in func
+            .arguments
+            .iter()
+            .map(ToOwned::to_owned)
+            .zip(call.args.iter().map(ToOwned::to_owned))
+        {
+            let func_arg_tp = ast.get_node_type(func_arg_id, NodeUsage::Type)?;
+            let call_arg_tp = ast.get_node_type(call_arg_id, NodeUsage::Type)?;
+
+            if func_arg_tp != call_arg_tp {
+                return Err(Error::TypeMissmatch(func_arg_id.into(), call_arg_id.into()));
+            }
+        }
+
+        Ok(())
+    }
+
     fn children(&self, context: AstContext) -> NodeIterator<'_> {
-        NodeIterator::new(NodeIteratorBody::Single(NodeIDContext {
+        let variable = NodeIterator::new(NodeIteratorBody::Single(NodeIDContext {
             node_id: self.variable.into(),
             context,
-        }))
+        }));
+        let arguments = NodeIterator::slice(&self.args);
+        NodeIterator::chained(variable, arguments)
     }
 }
 
@@ -107,11 +145,16 @@ impl Node for FunctionCall {
 pub struct ExpressionChain {
     pub lhs: NodeID<Expression>,
     pub rhs: NodeID<Expression>,
+    linked: bool,
 }
 
 impl ExpressionChain {
     pub fn new(lhs: NodeID<Expression>, rhs: NodeID<Expression>) -> Self {
-        Self { lhs, rhs }
+        Self {
+            lhs,
+            rhs,
+            linked: false,
+        }
     }
 }
 
@@ -119,6 +162,36 @@ impl Node for ExpressionChain {
     fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
         let body = ast.get_body(node_id);
         ast.get_node_type(body.rhs, usage)
+    }
+
+    fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> Result<()> {
+        let node = ast.get_body(node_id);
+
+        if node.linked {
+            return Ok(());
+        }
+        let lhs_id = node.lhs;
+        let lhs = ast.get_body(lhs_id);
+        let lhs_is_variable = match lhs {
+            Expression::VariableValue(value) => {
+                let variable_id: NodeID<Variable> = (&value.variable)
+                    .try_into()
+                    .map_err(|_| Error::UnlinkedNode(lhs_id.into()))?;
+
+                <AstNode<Variable>>::variable_declaration_id(variable_id, ast).is_some()
+            }
+            _ => false,
+        };
+
+        if lhs_is_variable {
+            let rhs = ast.get_body_mut(node.rhs);
+            if let Expression::FunctionCall(call) = rhs {
+                call.args.insert(0, lhs_id);
+            }
+        }
+
+        ast.get_body_mut(node_id).linked = true;
+        Ok(())
     }
 
     fn children(&self, _context: AstContext) -> NodeIterator<'_> {
@@ -148,7 +221,7 @@ impl Node for VariableValue {
         let value: &Self = ast.get_body(node_id);
         match value.variable {
             State::Linked(var) => ast.get_node_type(var, node_usage),
-            _ => Err(Error::TypeNotInferred),
+            _ => Err(Error::UnlinkedNode(node_id.into())),
         }
     }
 

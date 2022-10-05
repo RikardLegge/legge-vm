@@ -43,8 +43,14 @@ where
         let mut children = vec![];
 
         let mut builder = Builder::new(&mut self.ast, &mut self.tokens, block_id);
-        while let Some(statement) = builder.statement()? {
-            children.push(statement);
+        loop {
+            match builder.statement() {
+                Ok(statement) => {
+                    children.push(statement);
+                }
+                Err(Error::EOF) => break,
+                Err(err) => return Err(err),
+            }
         }
 
         let block = Block::new(children, &self.ast);
@@ -128,48 +134,46 @@ where
         Builder { id, ast, tokens }
     }
 
-    fn statement(&mut self) -> Result<Option<NodeID<Statement>>> {
-        loop {
-            if let Ok(token_tp) = self.tokens.peek_type() {
-                match token_tp {
-                    TokenType::Name(_) => {
-                        if let Ok(TokenType::Name(name)) = self.tokens.next_type() {
-                            let statement = self.statement_named(name.to_string());
-                            break Some(statement).transpose();
-                        }
-                        unreachable!()
-                    }
-                    TokenType::KeyName(KeyName::Return) => {
-                        self.tokens.next()?;
-                        let return_value = self.node::<Return>(|mut builder| {
-                            let value = match builder.tokens.peek_type()? {
-                                TokenType::EndStatement => {
-                                    builder.tokens.expect_end_statement()?;
-                                    None
-                                }
-                                _ => {
-                                    let expr = builder.expression(None)?;
-                                    builder.tokens.expect_end_statement()?;
-                                    Some(expr)
-                                }
-                            };
-
-                            Ok(Return {
-                                func: ().into(),
-                                value,
-                            })
-                        })?;
-
-                        break Ok(Some(return_value.into()));
-                    }
-                    TokenType::Comment(_) => {
-                        self.tokens.next()?;
-                    }
-                    _ => break Ok(None),
+    fn statement(&mut self) -> Result<NodeID<Statement>> {
+        match self.tokens.peek_type()? {
+            TokenType::Name(_) => {
+                if let Ok(TokenType::Name(name)) = self.tokens.next_type() {
+                    self.statement_named(name.to_string())
+                } else {
+                    unreachable!()
                 }
-            } else {
-                break Ok(None);
             }
+            TokenType::KeyName(KeyName::Return) => {
+                self.tokens.next()?;
+                let return_value = self.node::<Return>(|mut builder| {
+                    let value = match builder.tokens.peek_type()? {
+                        TokenType::EndStatement => {
+                            builder.tokens.expect_end_statement()?;
+                            None
+                        }
+                        _ => {
+                            let expr = builder.expression(None)?;
+                            builder.tokens.expect_end_statement()?;
+                            Some(expr)
+                        }
+                    };
+
+                    Ok(Return {
+                        func: ().into(),
+                        value,
+                    })
+                })?;
+
+                Ok(return_value.into())
+            }
+            _ => {
+                let expression = self.node::<EvaluateExpression>(|mut builder| {
+                    let value = builder.expression(None)?;
+                    Ok(EvaluateExpression { value })
+                })?;
+                Ok(expression.into())
+            }
+            _ => Err(Error::UnexpectedToken),
         }
     }
 
@@ -213,16 +217,15 @@ where
                         let mut children = vec![];
                         loop {
                             if let TokenType::RightCurlyBrace = builder.tokens.peek_type()? {
-                                builder.tokens.next()?;
                                 break;
                             }
-                            match builder.statement()? {
-                                None => break,
-                                Some(statement) => children.push(statement),
-                            }
+                            let statement = builder.statement()?;
+                            children.push(statement);
                         }
                         Ok(Block::new(children, builder.ast))
                     })?;
+
+                    assert_eq!(TokenType::RightCurlyBrace, builder.tokens.next()?.tp);
 
                     Ok(FunctionDeclaration {
                         arguments,
@@ -254,12 +257,27 @@ where
     }
 
     fn call(&mut self, name: String) -> Result<NodeID<FunctionCall>> {
-        assert_eq!(TokenType::LeftBrace, self.tokens.next()?.tp);
-        assert_eq!(TokenType::RightBrace, self.tokens.next()?.tp);
-
         self.node::<FunctionCall>(|mut builder| {
+            assert_eq!(TokenType::LeftBrace, builder.tokens.next()?.tp);
+
+            let mut args = vec![];
+            loop {
+                if let TokenType::RightBrace = builder.tokens.peek_type()? {
+                    break;
+                }
+
+                let arg = builder.expression(None)?;
+                args.push(arg);
+
+                if let TokenType::ListSeparator = builder.tokens.peek_type()? {
+                    builder.tokens.next_type()?;
+                }
+            }
+
+            assert_eq!(TokenType::RightBrace, builder.tokens.next()?.tp);
+
             let variable = builder.variable_value(name);
-            Ok(FunctionCall::new(variable))
+            Ok(FunctionCall::new(variable, args))
         })
     }
 
@@ -296,35 +314,41 @@ where
         assert_eq!(self.tokens.next_type()?, TokenType::LeftBrace);
 
         let mut arguments = vec![];
-        let mut expect_separator = false;
 
         if let Some(this) = this {
             if let TokenType::KeyName(KeyName::This) = self.tokens.peek_type()? {
                 self.tokens.next()?;
                 let variable = self.typed_variable("self".to_string(), this);
                 arguments.push(variable);
-                expect_separator = true
+
+                if let TokenType::ListSeparator = self.tokens.peek_type()? {
+                    self.tokens.next()?;
+                }
             }
         };
 
         loop {
-            match (expect_separator, self.tokens.next()?.tp) {
-                (false, TokenType::Name(name)) => {
-                    assert_eq!(TokenType::TypeDeclaration, self.tokens.next()?.tp);
+            if let TokenType::RightBrace = self.tokens.peek_type()? {
+                break;
+            }
 
-                    let tp = self.tp()?;
-                    let variable = self.typed_variable(name.to_string(), tp);
+            if let TokenType::Name(name) = self.tokens.peek_type()? {
+                let name = name.to_string();
+                assert_eq!(TokenType::TypeDeclaration, self.tokens.next()?.tp);
 
-                    arguments.push(variable);
-                    expect_separator = true;
+                let tp = self.tp()?;
+                let variable = self.typed_variable(name, tp);
+
+                arguments.push(variable);
+
+                if let TokenType::ListSeparator = self.tokens.peek_type()? {
+                    self.tokens.next()?;
                 }
-                (true, TokenType::ListSeparator) => {
-                    expect_separator = false;
-                }
-                (_, TokenType::RightBrace) => break,
-                _ => unimplemented!(),
             }
         }
+
+        assert_eq!(self.tokens.next_type()?, TokenType::RightBrace);
+
         Ok(arguments)
     }
 
@@ -358,7 +382,15 @@ where
         tp_id: NodeID<TypeDeclaration>,
     ) -> Result<NodeID<FunctionDeclaration>> {
         self.node::<FunctionDeclaration>(move |mut builder| {
-            let body = builder.const_value(Block::new(vec![], builder.ast));
+            let body = builder.node::<Block>(|mut builder| {
+                let ret = builder
+                    .const_value(Return {
+                        func: ().into(),
+                        value: None,
+                    })
+                    .into();
+                Ok(Block::new(vec![ret], builder.ast))
+            })?;
             Ok(FunctionDeclaration {
                 arguments: vec![],
                 body,

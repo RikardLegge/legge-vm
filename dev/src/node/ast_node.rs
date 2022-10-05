@@ -4,8 +4,8 @@ use crate::{Ast, Error, NodeID, Variable};
 use std::fmt::Debug;
 
 pub trait Node: Sized + Debug {
-    fn node_type(_node_id: NodeID<Self>, _ast: &Ast, _usage: NodeUsage) -> Result<NodeType> {
-        Err(Error::TypeNotInferred)
+    fn node_type(node_id: NodeID<Self>, _ast: &Ast, _usage: NodeUsage) -> Result<NodeType> {
+        Err(Error::TypeNotInferred(node_id.into()))
     }
 
     fn children(&self, _context: AstContext) -> NodeIterator<'_> {
@@ -13,6 +13,10 @@ pub trait Node: Sized + Debug {
     }
 
     fn link(_node_id: NodeID<Self>, _ast: &mut Ast, _context: AstContext) -> Result<()> {
+        Ok(())
+    }
+
+    fn check(_node_id: NodeID<Self>, _ast: &mut Ast) -> Result<()> {
         Ok(())
     }
 

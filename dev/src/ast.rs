@@ -95,7 +95,7 @@ impl Ast {
 
         fn ignore_void(result: Result<NodeType>) -> Result<NodeType> {
             match result {
-                Ok(NodeType::Void) => Err(Error::TypeNotInferred),
+                Ok(NodeType::Void) => Err(Error::TypeNotInferred(NodeID::new(0))),
                 other => other,
             }
         }

@@ -170,6 +170,20 @@ macro_rules! impl_node_trait {
                     ),*
                 }
             }
+
+            fn check(node_id: NodeID<Self>, ast: &mut $crate::ast::Ast) -> Result<()> {
+                match ast.get_body(node_id) {
+                    $(
+                        $enum::$variant(_) => {
+                            // Safety: NodeID does not change its representation with this cast.
+                            // Since the data is $variant we can update the node_id representation
+                            // to reflect this fact.
+                            let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
+                            $variant::check(node_id, ast)
+                        }
+                    ),*
+                }
+            }
         }
     };
 }
@@ -215,6 +229,12 @@ macro_rules! impl_root_node {
                 // Safety: Root only has one child, so any $root must also be a $body
                 let node_id: NodeID<$body> = unsafe { std::mem::transmute(node_id) };
                 $body::link(node_id, ast, context)
+            }
+
+            fn check(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
+                // Safety: Root only has one child, so any $root must also be a $body
+                let node_id: NodeID<$body> = unsafe { std::mem::transmute(node_id) };
+                $body::check(node_id, ast)
             }
 
             fn has_variable(&self, var: &str) -> Result<Option<NodeID<Variable>>> {
