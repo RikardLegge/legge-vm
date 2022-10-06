@@ -1,6 +1,8 @@
 use crate::ast::AstContext;
 use crate::node::iterator::NodeIteratorBody;
-use crate::node::{NodeID, NodeIDContext, NodeIterator, NodeType, NodeUsage, Variable};
+use crate::node::{
+    NodeID, NodeIDContext, NodeIterator, NodeType, NodeUsage, TypeDeclaration, Variable,
+};
 use crate::token::ArithmeticOP;
 use crate::{Ast, AstNode, Error, Expression, Result};
 use crate::{Node, State};
@@ -57,6 +59,7 @@ pub enum Value {
     Int(isize),
     Float(f64),
     String(String),
+    Custom(NodeID<TypeDeclaration>),
 }
 
 impl Node for Value {
@@ -66,6 +69,7 @@ impl Node for Value {
             Value::Int(_) => NodeType::Int,
             Value::Float(_) => NodeType::Float,
             Value::String(_) => NodeType::String,
+            Value::Custom(id) => NodeType::Custom(*id),
         })
     }
 }
@@ -172,21 +176,27 @@ impl Node for ExpressionChain {
         }
         let lhs_id = node.lhs;
         let lhs = ast.get_body(lhs_id);
-        let lhs_is_variable = match lhs {
+        let lhs_variable = match lhs {
             Expression::VariableValue(value) => {
                 let variable_id: NodeID<Variable> = (&value.variable)
                     .try_into()
                     .map_err(|_| Error::UnlinkedNode(lhs_id.into()))?;
 
-                <AstNode<Variable>>::variable_declaration_id(variable_id, ast).is_some()
+                <AstNode<Variable>>::variable_declaration_id(variable_id, ast).map(|_| variable_id)
             }
-            _ => false,
+            _ => None,
         };
 
-        if lhs_is_variable {
-            let rhs = ast.get_body_mut(node.rhs);
-            if let Expression::FunctionCall(call) = rhs {
-                call.args.insert(0, lhs_id);
+        // If the lhs of the expression is a variable, not a type for example,
+        // then we want to insert the variable as an implicit first parameter in the call.
+        if let Some(variable_id) = lhs_variable {
+            let rhs = ast.get(node.rhs);
+            if let Ok(rhs) = <&AstNode<FunctionCall>>::try_from(rhs) {
+                let value =
+                    ast.push_new_node(node.rhs, VariableValue::new(State::Linked(variable_id)));
+
+                let call = ast.get_body_mut(rhs.id);
+                call.args.insert(0, value.into());
             }
         }
 

@@ -192,9 +192,17 @@ macro_rules! impl_node_trait {
 macro_rules! impl_node {
     ( pub enum $root:ident => $enum:ident { $($variant:ident),* $(,)* } ) => {
 
-        #[derive(Debug, Clone)]
+        #[derive(Clone)]
         pub enum $enum {
           $($variant($variant)),*
+        }
+
+        impl Debug for $enum {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    $($enum::$variant(child) => child.fmt(f) ),*
+                }
+            }
         }
 
         $crate::impl_node_trait!(impl $enum for { $($variant),* });
@@ -210,9 +218,15 @@ macro_rules! impl_node {
 #[macro_export]
 macro_rules! impl_root_node {
     ( pub struct $root:ident($body:ident) ) => {
-        #[derive(Debug, Clone)]
+        #[derive(Clone)]
         #[repr(transparent)]
         pub struct $root($body);
+
+        impl Debug for $root {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                self.0.fmt(f)
+            }
+        }
 
         impl Node for $root {
             fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {

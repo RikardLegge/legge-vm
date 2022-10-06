@@ -1,6 +1,6 @@
 use crate::node::{
-    AstRootNode, EvaluateExpression, ExpressionChain, FunctionCall, FunctionDeclaration, Return,
-    StaticAssignment, TypeDeclaration, VariableValue,
+    AstRootNode, ConstValue, EvaluateExpression, ExpressionChain, FunctionCall,
+    FunctionDeclaration, Return, StaticAssignment, TypeDeclaration, VariableValue,
 };
 use crate::token::{KeyName, Token};
 use crate::{Ast, Block, Error, Node, NodeType, TokenType};
@@ -258,6 +258,8 @@ where
 
     fn call(&mut self, name: String) -> Result<NodeID<FunctionCall>> {
         self.node::<FunctionCall>(|mut builder| {
+            let variable = builder.variable_value(name);
+
             assert_eq!(TokenType::LeftBrace, builder.tokens.next()?.tp);
 
             let mut args = vec![];
@@ -276,7 +278,6 @@ where
 
             assert_eq!(TokenType::RightBrace, builder.tokens.next()?.tp);
 
-            let variable = builder.variable_value(name);
             Ok(FunctionCall::new(variable, args))
         })
     }
@@ -384,10 +385,13 @@ where
         self.node::<FunctionDeclaration>(move |mut builder| {
             let body = builder.node::<Block>(|mut builder| {
                 let ret = builder
-                    .const_value(Return {
-                        func: ().into(),
-                        value: None,
-                    })
+                    .node::<Return>(|mut builder| {
+                        let value = builder.const_value(Value::Custom(tp_id));
+                        Ok(Return {
+                            func: ().into(),
+                            value: Some(value.into()),
+                        })
+                    })?
                     .into();
                 Ok(Block::new(vec![ret], builder.ast))
             })?;

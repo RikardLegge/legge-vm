@@ -18,7 +18,7 @@ pub use variable::*;
 
 use crate::ast::AstContext;
 use crate::{impl_node, impl_root_node, Ast, Error, Result};
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Unknown();

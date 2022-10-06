@@ -1,6 +1,6 @@
 use crate::ast::AstContext;
 use crate::node::{FunctionDeclaration, NodeIterator, NodeType, NodeUsage, TypeDeclaration};
-use crate::{Ast, AstNode, Expression, Result, State, Statement, VariableDeclaration};
+use crate::{Ast, AstNode, Error, Expression, Result, State, Statement, VariableDeclaration};
 use crate::{Node, NodeID};
 
 #[derive(Debug, Clone)]
@@ -30,6 +30,30 @@ impl Node for Return {
             Ok(())
         } else {
             panic!();
+        }
+    }
+
+    fn check(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
+        let body = ast.get_body(node_id);
+        let func: NodeID<FunctionDeclaration> = (&body.func)
+            .try_into()
+            .map_err(|_| Error::UnlinkedNode(node_id.into()))?;
+
+        let expected_return = &ast.get_body(func).returns;
+        let got_return = body
+            .value
+            .map(|id| ast.get_node_type(id, NodeUsage::Value))
+            .transpose()?
+            .unwrap_or(NodeType::Void);
+
+        if &got_return == expected_return {
+            Ok(())
+        } else {
+            let return_stmt_id = body
+                .value
+                .map(|id| id.into())
+                .unwrap_or_else(|| node_id.into());
+            Err(Error::TypeMissmatch(func.into(), return_stmt_id))
         }
     }
 }

@@ -116,7 +116,9 @@ impl Ast {
         if let Ok(tp) = type_tp {
             write!(f, " :type {:?}", tp)?;
         }
-        write!(f, " = {:?}", node.body())?;
+        if let Some(body) = node.body() {
+            write!(f, " = {:?}", body)?;
+        }
 
         if children.peek().is_some() {
             writeln!(f, " [")?;
