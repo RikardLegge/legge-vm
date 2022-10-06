@@ -8,7 +8,6 @@ use crate::{
     Expression, NodeID, Operation, Result, State, Statement, Value, Variable, VariableAssignment,
     VariableDeclaration,
 };
-use std::collections::HashMap;
 use std::iter::Peekable;
 
 pub struct AstBuilder<'a, Iter, T>
@@ -181,8 +180,25 @@ where
             _ => {
                 let expression = self.node::<EvaluateExpression>(|mut builder| {
                     let value = builder.expression(None)?;
-                    Ok(EvaluateExpression { value })
+
+                    let has_end_statement = match builder.tokens.peek_type() {
+                        Ok(TokenType::RightCurlyBrace) => false,
+                        Ok(TokenType::EndStatement) => {
+                            builder.tokens.next()?;
+                            true
+                        }
+                        _ => {
+                            builder.tokens.expect_end_statement()?;
+                            true
+                        }
+                    };
+
+                    Ok(EvaluateExpression {
+                        value,
+                        has_end_statement,
+                    })
                 })?;
+
                 Ok(expression.into())
             }
             _ => Err(Error::UnexpectedToken),

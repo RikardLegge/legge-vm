@@ -40,13 +40,15 @@ fn main() -> Result<()> {
         return 1;
     };
     
-    if 1 == 1 {
-    
-    } else
+    c := if 1 == 1 {
+        1
+    } else {
+        2
+    };
     
     loop {
-        break;
-    }
+        break 2;
+    };
      
     a := A(); 
     a.func();

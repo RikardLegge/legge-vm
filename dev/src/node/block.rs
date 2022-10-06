@@ -1,6 +1,6 @@
 use crate::ast::AstContext;
 use crate::node::{Node, NodeID, NodeIterator, NodeType, NodeUsage, Statement};
-use crate::{Ast, Result, Variable};
+use crate::{Ast, Error, Result, Variable};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
@@ -26,8 +26,19 @@ impl Block {
 }
 
 impl Node for Block {
-    fn node_type(_: NodeID<Self>, _: &Ast, _usage: NodeUsage) -> Result<NodeType> {
-        Ok(NodeType::Void)
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
+        match usage {
+            NodeUsage::Type => Err(Error::InternalError),
+            NodeUsage::Call => Err(Error::InternalError),
+            NodeUsage::Value => {
+                let node = ast.get_typed(node_id);
+                let last = node.body().children.last();
+                match last {
+                    None => Ok(NodeType::Void),
+                    Some(last) => ast.get_node_type(*last, usage),
+                }
+            }
+        }
     }
 
     fn children(&self, _context: AstContext) -> NodeIterator<'_> {
@@ -36,7 +47,7 @@ impl Node for Block {
 
     fn has_variable(&self, var: &str) -> Result<Option<NodeID<Variable>>> {
         if let Some(variable_id) = self.variables.get(var) {
-            Ok(Some((*variable_id).into()))
+            Ok(Some(*variable_id))
         } else {
             Ok(None)
         }

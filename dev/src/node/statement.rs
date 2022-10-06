@@ -286,6 +286,7 @@ impl Node for VariableAssignment {
 #[derive(Debug, Clone)]
 pub struct EvaluateExpression {
     pub value: NodeID<Expression>,
+    pub has_end_statement: bool,
 }
 
 impl Node for EvaluateExpression {
@@ -303,6 +304,7 @@ impl EvaluateExpression {
     pub fn new(value: impl Into<NodeID<Expression>>) -> Self {
         EvaluateExpression {
             value: value.into(),
+            has_end_statement: true,
         }
     }
 }
