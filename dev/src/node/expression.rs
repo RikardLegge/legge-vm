@@ -34,12 +34,20 @@ impl Node for Operation {
                 let lhs_type = ast.get_node_type(op.lhs, NodeUsage::Value)?;
                 let rhs_type = ast.get_node_type(op.lhs, NodeUsage::Value)?;
                 if lhs_type == rhs_type {
-                    Ok(lhs_type)
+                    match op.op {
+                        ArithmeticOP::Add
+                        | ArithmeticOP::Sub
+                        | ArithmeticOP::Mul
+                        | ArithmeticOP::Div => Ok(lhs_type),
+                        ArithmeticOP::Eq | ArithmeticOP::GEq | ArithmeticOP::LEq => {
+                            Ok(NodeType::Boolean)
+                        }
+                    }
                 } else {
-                    unimplemented!()
+                    Err(Error::TypeMissmatch(op.lhs.into(), op.rhs.into()))
                 }
             }
-            _ => unimplemented!(),
+            _ => Err(Error::InternalError),
         }
     }
 

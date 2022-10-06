@@ -1,6 +1,6 @@
 use crate::node::{
-    AstRootNode, ConstValue, EvaluateExpression, ExpressionChain, FunctionCall,
-    FunctionDeclaration, Return, StaticAssignment, TypeDeclaration, VariableValue,
+    AstRootNode, Break, EvaluateExpression, ExpressionChain, FunctionCall, FunctionDeclaration, If,
+    Loop, Return, StaticAssignment, TypeDeclaration, VariableValue,
 };
 use crate::token::{KeyName, Token};
 use crate::{Ast, Block, Error, Node, NodeType, TokenType};
@@ -8,6 +8,7 @@ use crate::{
     Expression, NodeID, Operation, Result, State, Statement, Value, Variable, VariableAssignment,
     VariableDeclaration,
 };
+use std::collections::HashMap;
 use std::iter::Peekable;
 
 pub struct AstBuilder<'a, Iter, T>
@@ -143,20 +144,31 @@ where
                     unreachable!()
                 }
             }
+            TokenType::KeyName(KeyName::Break) => {
+                self.tokens.next()?;
+                let break_value = self.node::<Break>(|mut builder| {
+                    let value = match builder.tokens.peek_type()? {
+                        TokenType::EndStatement => None,
+                        _ => Some(builder.expression(None)?),
+                    };
+                    builder.tokens.expect_end_statement()?;
+
+                    Ok(Break {
+                        r#loop: ().into(),
+                        value,
+                    })
+                })?;
+
+                Ok(break_value.into())
+            }
             TokenType::KeyName(KeyName::Return) => {
                 self.tokens.next()?;
                 let return_value = self.node::<Return>(|mut builder| {
                     let value = match builder.tokens.peek_type()? {
-                        TokenType::EndStatement => {
-                            builder.tokens.expect_end_statement()?;
-                            None
-                        }
-                        _ => {
-                            let expr = builder.expression(None)?;
-                            builder.tokens.expect_end_statement()?;
-                            Some(expr)
-                        }
+                        TokenType::EndStatement => None,
+                        _ => Some(builder.expression(None)?),
                     };
+                    builder.tokens.expect_end_statement()?;
 
                     Ok(Return {
                         func: ().into(),
@@ -196,6 +208,22 @@ where
                 TokenType::LeftBrace => self.call(value.to_string())?.into(),
                 _ => self.variable_value(value.to_string()).into(),
             },
+            TokenType::LeftCurlyBrace => self
+                .node::<Block>(|mut builder| {
+                    let mut children = vec![];
+                    loop {
+                        if let TokenType::RightCurlyBrace = builder.tokens.peek_type()? {
+                            break;
+                        }
+                        let statement = builder.statement()?;
+                        children.push(statement);
+                    }
+
+                    assert_eq!(TokenType::RightCurlyBrace, builder.tokens.next()?.tp);
+
+                    Ok(Block::new(children, builder.ast))
+                })?
+                .into(),
             TokenType::KeyName(KeyName::Fn) => self
                 .node::<FunctionDeclaration>(|mut builder| {
                     let arguments = if let TokenType::LeftBrace = builder.tokens.peek_type()? {
@@ -232,6 +260,59 @@ where
                         returns,
                         body,
                     })
+                })?
+                .into(),
+            TokenType::KeyName(KeyName::Loop) => self
+                .node::<Loop>(|mut builder| {
+                    assert_eq!(TokenType::LeftCurlyBrace, builder.tokens.next()?.tp);
+
+                    let body = builder.node::<Block>(move |mut builder| {
+                        let mut children = vec![];
+                        loop {
+                            if let TokenType::RightCurlyBrace = builder.tokens.peek_type()? {
+                                break;
+                            }
+                            let statement = builder.statement()?;
+                            children.push(statement);
+                        }
+                        Ok(Block::new(children, builder.ast))
+                    })?;
+
+                    assert_eq!(TokenType::RightCurlyBrace, builder.tokens.next()?.tp);
+
+                    Ok(Loop { body })
+                })?
+                .into(),
+            TokenType::KeyName(KeyName::If) => self
+                .node::<If>(|mut builder| {
+                    let cond = builder.expression(None)?;
+
+                    assert_eq!(TokenType::LeftCurlyBrace, builder.tokens.next()?.tp);
+
+                    let body = builder.node::<Block>(move |mut builder| {
+                        let mut children = vec![];
+                        loop {
+                            if let TokenType::RightCurlyBrace = builder.tokens.peek_type()? {
+                                break;
+                            }
+                            let statement = builder.statement()?;
+                            children.push(statement);
+                        }
+                        Ok(Block::new(children, builder.ast))
+                    })?;
+
+                    assert_eq!(TokenType::RightCurlyBrace, builder.tokens.next()?.tp);
+
+                    let r#else = match builder.tokens.peek_type()? {
+                        &TokenType::KeyName(KeyName::Else) => {
+                            builder.tokens.next()?;
+                            let expr = builder.expression(None)?;
+                            Some(expr)
+                        }
+                        _ => None,
+                    };
+
+                    Ok(If { cond, body, r#else })
                 })?
                 .into(),
             tp => unimplemented!("{:?}", tp),

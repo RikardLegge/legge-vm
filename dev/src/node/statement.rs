@@ -1,6 +1,6 @@
 use crate::ast::AstContext;
 use crate::node::{
-    Expression, Node, NodeID, NodeIterator, NodeType, NodeUsage, Variable, VariableValue,
+    Expression, Node, NodeID, NodeIterator, NodeType, NodeUsage, Return, Variable, VariableValue,
 };
 use crate::{Ast, AstNode, Block, Error, Result, State, Statement};
 use std::collections::HashMap;
@@ -29,6 +29,32 @@ impl Node for FunctionDeclaration {
             NodeIterator::single(self.body),
         )
     }
+
+    fn check(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
+        let node = ast.get_body(node_id);
+        let body = ast.get_body(node.body);
+
+        let last = body.children.last();
+
+        match last {
+            None if node.returns == NodeType::Void => Ok(()),
+            None => Err(Error::TypeMissmatch(node_id.into(), node.body.into())),
+            Some(last_id) => {
+                let last = ast.get(*last_id);
+                let last: Result<&AstNode<Return>, Error> = last.try_into();
+                match last {
+                    Ok(_) => {
+                        // We don't have to check the value of the return here since the return will
+                        // be checked separately. Since we know that this is a return statement, we
+                        // should be ok!
+                        Ok(())
+                    }
+                    Err(_) if node.returns == NodeType::Void => Ok(()),
+                    Err(_) => Err(Error::TypeMissmatch(node_id.into(), (*last_id).into())),
+                }
+            }
+        }
+    }
 }
 
 impl Statement {
@@ -40,6 +66,7 @@ impl Statement {
             Statement::StaticAssignment(_) => None,
             Statement::EvaluateExpression(_) => None,
             Statement::Return(_) => None,
+            Statement::Break(_) => None,
         }
     }
 
@@ -51,6 +78,7 @@ impl Statement {
             Statement::StaticAssignment(var) => Some(var.value.into()),
             Statement::EvaluateExpression(var) => Some(var.value.into()),
             Statement::Return(var) => var.value.map(Into::into),
+            Statement::Break(var) => var.value.map(Into::into),
         }
     }
 }

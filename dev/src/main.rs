@@ -39,6 +39,14 @@ fn main() -> Result<()> {
     A.func :: fn(self) -> Int {
         return 1;
     };
+    
+    if 1 == 1 {
+    
+    } else
+    
+    loop {
+        break;
+    }
      
     a := A(); 
     a.func();

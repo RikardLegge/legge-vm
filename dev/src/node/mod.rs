@@ -2,6 +2,7 @@ mod ast_node;
 mod block;
 mod expression;
 mod iterator;
+mod r#loop;
 mod macros;
 mod node_id;
 mod statement;
@@ -13,6 +14,7 @@ pub use iterator::NodeIterator;
 pub use block::*;
 pub use expression::*;
 pub use node_id::*;
+pub use r#loop::*;
 pub use statement::*;
 pub use variable::*;
 
@@ -76,7 +78,6 @@ impl_root_node!(
 
 impl_node!(
     pub enum AstRootNode => AstNodeBody {
-        Block,
         Statement,
         Expression,
         Variable,
@@ -90,6 +91,9 @@ impl_node!(
         Operation,
         FunctionCall,
         ExpressionChain,
+        Loop,
+        If,
+        Block,
         FunctionDeclaration,
     }
 );
@@ -102,5 +106,6 @@ impl_node!(
         TypeDeclaration,
         EvaluateExpression,
         Return,
+        Break,
     }
 );

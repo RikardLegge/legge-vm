@@ -1,7 +1,35 @@
 use crate::ast::AstContext;
-use crate::node::{FunctionDeclaration, NodeIterator, NodeType, NodeUsage, TypeDeclaration};
+use crate::node::{FunctionDeclaration, Loop, NodeIterator, NodeType, NodeUsage, TypeDeclaration};
 use crate::{Ast, AstNode, Error, Expression, Result, State, Statement, VariableDeclaration};
 use crate::{Node, NodeID};
+
+#[derive(Debug, Clone)]
+pub struct Break {
+    pub r#loop: State<(), NodeID<Loop>>,
+    pub value: Option<NodeID<Expression>>,
+}
+
+impl Node for Break {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
+        match self.value {
+            Some(value) => NodeIterator::single(value),
+            None => NodeIterator::empty(),
+        }
+    }
+
+    fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> Result<()> {
+        let func = ast.walk_up(node_id, |node| match <&AstNode<Loop>>::try_from(node) {
+            Ok(node) => Ok(Some(node.id)),
+            Err(_) => Ok(None),
+        })?;
+        if let Some(func) = func {
+            ast.get_body_mut(node_id).r#loop = State::Linked(func);
+            Ok(())
+        } else {
+            panic!();
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Return {
