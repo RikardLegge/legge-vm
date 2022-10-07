@@ -1,6 +1,6 @@
 use crate::ast::AstContext;
 use crate::node::{NodeIterator, NodeUsage};
-use crate::{Ast, Block, Error, Expression, Node, NodeID, NodeType, Variable};
+use crate::{Ast, Block, Error, Expression, Node, NodeID, NodeType};
 
 #[derive(Debug, Clone)]
 pub struct If {
@@ -51,9 +51,19 @@ impl Node for If {
 #[derive(Debug, Clone)]
 pub struct Loop {
     pub body: NodeID<Block>,
+    pub value: Option<NodeType>,
 }
 
 impl Node for Loop {
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, _usage: NodeUsage) -> crate::Result<NodeType> {
+        let node = ast.get_body(node_id);
+        if let Some(value) = &node.value {
+            Ok(value.clone())
+        } else {
+            Err(Error::TypeNotInferred(node_id.into()))
+        }
+    }
+
     fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::single(self.body)
     }

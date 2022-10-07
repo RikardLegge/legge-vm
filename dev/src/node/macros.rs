@@ -136,17 +136,36 @@ macro_rules! impl_node_trait {
 
       impl Node for $enum {
             fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: $crate::node::NodeUsage) -> Result<NodeType> {
-                match ast.get_body(node_id) {
+                let node = ast.get(node_id);
+                let cached = match usage {
+                    NodeUsage::Type => node.node_type.tp.get(),
+                    NodeUsage::Call => node.node_type.call.get(),
+                    NodeUsage::Value => node.node_type.value.get(),
+                };
+
+                if let Some(cached_type) = cached{
+                    return Ok(cached_type.clone());
+                }
+
+                let node_type = match ast.get_body(node_id) {
                     $(
                         $enum::$variant(_) => {
                             // Safety: NodeID does not change its representation with this cast.
                             // Since the data is $variant we can update the node_id representation
                             // to reflect this fact.
                             let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
-                            $variant::node_type(node_id, ast, usage)
+                            $variant::node_type(node_id, ast, usage)?
                         }
                     ),*
-                }
+                };
+
+                let ret = node_type.clone();
+                let _ = match usage {
+                    NodeUsage::Type => node.node_type.tp.set(node_type),
+                    NodeUsage::Call => node.node_type.call.set(node_type),
+                    NodeUsage::Value => node.node_type.value.set(node_type),
+                };
+                Ok(ret)
             }
 
             fn children(&self, context: AstContext) -> NodeIterator<'_> {

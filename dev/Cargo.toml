@@ -6,6 +6,7 @@ authors = ["Rikard Legge <rikard@legge.se>"]
 
 [dependencies]
 tokio = { version = "1.13", features = ["rt-multi-thread", "io-util", "sync", "fs", "macros"] }
+once_cell = "1.15"
 
 [profile.release]
 panic = "abort"

@@ -18,15 +18,59 @@ impl Node for Break {
     }
 
     fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> Result<()> {
-        let func = ast.walk_up(node_id, |node| match <&AstNode<Loop>>::try_from(node) {
-            Ok(node) => Ok(Some(node.id)),
-            Err(_) => Ok(None),
-        })?;
-        if let Some(func) = func {
-            ast.get_body_mut(node_id).r#loop = State::Linked(func);
+        let node = ast.get_body(node_id);
+        let loop_id = match node.r#loop {
+            State::Unlinked(_) => {
+                let loop_id =
+                    ast.walk_up(node_id, |node| match <&AstNode<Loop>>::try_from(node) {
+                        Ok(node) => Ok(Some(node.id)),
+                        Err(_) => Ok(None),
+                    })?;
+                if let Some(loop_id) = loop_id {
+                    ast.get_body_mut(node_id).r#loop = State::Linked(loop_id);
+                    loop_id
+                } else {
+                    unimplemented!();
+                }
+            }
+            State::Linked(id) => id,
+        };
+
+        let loop_node = ast.get_body(loop_id);
+        if loop_node.value.is_none() {
+            let node = ast.get_body(node_id);
+            let tp = if let Some(value) = node.value {
+                ast.get_node_type(value, NodeUsage::Value)?
+            } else {
+                NodeType::Void
+            };
+            let loop_node = ast.get_body_mut(loop_id);
+            loop_node.value = Some(tp);
+        };
+
+        Ok(())
+    }
+
+    fn check(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
+        let node = ast.get_body(node_id);
+        let tp = if let Some(value) = node.value {
+            ast.get_node_type(value, NodeUsage::Value)?
+        } else {
+            NodeType::Void
+        };
+        let loop_id: NodeID<Loop> = (&node.r#loop)
+            .try_into()
+            .map_err(|_| Error::UnlinkedNode(node_id.into()))?;
+        let loop_tp = ast
+            .get_body(loop_id)
+            .value
+            .as_ref()
+            .ok_or_else(|| Error::TypeNotInferred(loop_id.into()))?;
+
+        if &tp == loop_tp {
             Ok(())
         } else {
-            panic!();
+            Err(Error::TypeMissmatch(node_id.into(), loop_id.into()))
         }
     }
 }

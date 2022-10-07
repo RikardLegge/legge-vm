@@ -20,16 +20,25 @@ pub use variable::*;
 
 use crate::ast::AstContext;
 use crate::{impl_node, impl_root_node, Ast, Error, Result};
+use once_cell::unsync::OnceCell;
 use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Unknown();
 
 #[derive(Debug, Clone)]
+struct NodeTypeUsages {
+    tp: OnceCell<NodeType>,
+    call: OnceCell<NodeType>,
+    value: OnceCell<NodeType>,
+}
+
+#[derive(Debug, Clone)]
 #[repr(C)]
-pub struct AstNode<NodeType = Unknown> {
-    pub id: NodeID<NodeType>,
+pub struct AstNode<Type = Unknown> {
+    pub id: NodeID<Type>,
     pub parent_id: Option<NodeID>,
+    node_type: NodeTypeUsages,
     body: Option<AstRootNode>,
 }
 
@@ -38,6 +47,11 @@ impl AstNode {
         AstNode {
             id: id.into(),
             parent_id: parent_id.map(|id| id.into()),
+            node_type: NodeTypeUsages {
+                tp: OnceCell::new(),
+                call: OnceCell::new(),
+                value: OnceCell::new(),
+            },
             body: None,
         }
     }

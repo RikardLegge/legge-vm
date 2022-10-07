@@ -293,10 +293,11 @@ where
                         }
                         Ok(Block::new(children, builder.ast))
                     })?;
+                    let value = None;
 
                     assert_eq!(TokenType::RightCurlyBrace, builder.tokens.next()?.tp);
 
-                    Ok(Loop { body })
+                    Ok(Loop { body, value })
                 })?
                 .into(),
             TokenType::KeyName(KeyName::If) => self

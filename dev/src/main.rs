@@ -42,8 +42,8 @@ fn main() -> Result<()> {
     
     c := if 1 == 1 {
         1
-    } else {
-        2
+    } else loop {
+        break 2;
     };
     
     loop {
