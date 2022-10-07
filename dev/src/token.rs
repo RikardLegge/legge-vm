@@ -201,34 +201,6 @@ impl TryFrom<&str> for KeyName {
     }
 }
 
-impl<'a> TokenType<'a> {
-    pub fn is(&'a self, other: &Self) -> bool {
-        use TokenType::*;
-        matches!(
-            (self, other),
-            (Comment(..), Comment(..))
-                | (Name(..), Name(..))
-                | (KeyName(..), KeyName(..))
-                | (String(..), String(..))
-                | (Int(..), Int(..))
-                | (Float(..), Float(..))
-                | (Op(..), Op(..))
-                | (LeftCurlyBrace, LeftCurlyBrace)
-                | (ListSeparator, ListSeparator)
-                | (EndStatement, EndStatement)
-                | (Dot, Dot)
-                | (LeftBrace, LeftBrace)
-                | (RightBrace, RightBrace)
-                | (ConstDeclaration, ConstDeclaration)
-                | (VariableDeclaration, VariableDeclaration)
-                | (TypeDeclaration, TypeDeclaration)
-                | (Assignment, Assignment)
-                | (ReturnTypes, ReturnTypes)
-                | (RightCurlyBrace, RightCurlyBrace)
-        )
-    }
-}
-
 impl<'a> fmt::Display for TokenType<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use TokenType::*;

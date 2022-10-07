@@ -201,7 +201,6 @@ where
 
                 Ok(expression.into())
             }
-            _ => Err(Error::UnexpectedToken),
         }
     }
 
@@ -502,22 +501,39 @@ where
     }
 
     fn statement_named(&mut self, name: String) -> Result<NodeID<Statement>> {
-        let id = match self.tokens.next_type()? {
+        let id = match self.tokens.peek_type()? {
             TokenType::VariableDeclaration => self
                 .node::<VariableDeclaration>(move |mut builder| {
+                    builder.tokens.next()?;
                     let variable = builder.variable(name);
                     let value = builder.expression(None)?;
-                    Ok(VariableDeclaration::new(variable, value))
+                    Ok(VariableDeclaration::new(variable, value, false))
+                })?
+                .into(),
+            TokenType::ConstDeclaration => self
+                .node::<VariableDeclaration>(move |mut builder| {
+                    builder.tokens.next()?;
+                    let variable = builder.variable(name);
+                    let value = builder.expression(None)?;
+                    Ok(VariableDeclaration::new(variable, value, true))
                 })?
                 .into(),
             TokenType::Assignment => self
                 .node::<VariableAssignment>(move |mut builder| {
+                    builder.tokens.next()?;
                     let value = builder.expression(None)?;
                     Ok(VariableAssignment::new(name, value))
                 })?
                 .into(),
+            TokenType::LeftBrace => self
+                .node::<EvaluateExpression>(|mut builder| {
+                    let call = builder.call(name)?;
+                    Ok(EvaluateExpression::new(call))
+                })?
+                .into(),
             TokenType::ReturnTypes => self
                 .node::<TypeDeclaration>(move |mut builder| {
+                    builder.tokens.next()?;
                     let variable = builder.variable(name);
 
                     assert_eq!(
@@ -534,6 +550,7 @@ where
                 })?
                 .into(),
             TokenType::Dot => {
+                self.tokens.next()?;
                 let field = match self.tokens.next_type()? {
                     TokenType::Name(path) => path.to_string(),
                     _ => unimplemented!(),

@@ -256,14 +256,3 @@ impl Node for VariableValue {
         Ok(())
     }
 }
-
-#[derive(Debug, Clone)]
-pub struct StaticVariableValue(State<String, NodeID<Variable>>);
-
-impl StaticVariableValue {
-    pub fn new(state: State<String, NodeID<Variable>>) -> Self {
-        Self(state)
-    }
-}
-
-impl Node for StaticVariableValue {}

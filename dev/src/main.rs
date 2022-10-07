@@ -36,6 +36,11 @@ fn main() -> Result<()> {
     A -> type {};
     A.value :: 2;
     
+    test();
+    
+    test :: fn () {
+    };
+    
     A.func :: fn(self) -> Int {
         return 1;
     };

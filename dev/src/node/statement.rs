@@ -129,11 +129,16 @@ impl Node for TypeDeclaration {
 pub struct VariableDeclaration {
     variable: NodeID<Variable>,
     value: NodeID<Expression>,
+    is_const: bool,
 }
 
 impl VariableDeclaration {
-    pub fn new(variable: NodeID<Variable>, value: NodeID<Expression>) -> Self {
-        VariableDeclaration { variable, value }
+    pub fn new(variable: NodeID<Variable>, value: NodeID<Expression>, is_const: bool) -> Self {
+        VariableDeclaration {
+            variable,
+            value,
+            is_const,
+        }
     }
 }
 
@@ -270,12 +275,12 @@ impl Node for VariableAssignment {
         let variable_id: NodeID<Variable> = (&node.variable)
             .try_into()
             .map_err(|_| Error::UnlinkedNode(node_id.into()))?;
-        let lhs = ast.get_node_type(variable_id, NodeUsage::Type)?;
+        let lhs_tp = ast.get_node_type(variable_id, NodeUsage::Type)?;
 
         let value_id = node.value;
-        let rhs = ast.get_node_type(value_id, NodeUsage::Value)?;
+        let rhs_tp = ast.get_node_type(value_id, NodeUsage::Value)?;
 
-        if lhs == rhs {
+        if lhs_tp == rhs_tp {
             Ok(())
         } else {
             Err(Error::TypeMissmatch(variable_id.into(), value_id.into()))

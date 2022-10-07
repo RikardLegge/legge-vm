@@ -159,13 +159,19 @@ macro_rules! impl_node_trait {
                     ),*
                 };
 
-                let ret = node_type.clone();
-                let _ = match usage {
-                    NodeUsage::Type => node.node_type.tp.set(node_type),
-                    NodeUsage::Call => node.node_type.call.set(node_type),
-                    NodeUsage::Value => node.node_type.value.set(node_type),
+                match usage {
+                    NodeUsage::Type if node.node_type.tp.get().is_none() => {
+                        let _ = node.node_type.tp.set(node_type.clone());
+                    },
+                    NodeUsage::Call if node.node_type.call.get().is_none() => {
+                        let _ = node.node_type.call.set(node_type.clone());
+                    },
+                    NodeUsage::Value if node.node_type.tp.get().is_none() => {
+                        let _ = node.node_type.value.set(node_type.clone());
+                    },
+                    _ => {}
                 };
-                Ok(ret)
+                Ok(node_type)
             }
 
             fn children(&self, context: AstContext) -> NodeIterator<'_> {
