@@ -8,7 +8,7 @@ macro_rules! build_ast_node_child {
         Empty = $empty:ident,
         $enum:ident $rest:tt
     ) => {
-        build_ast_node_child!(
+        $crate::build_ast_node_child!(
             Root = $root,
             Variants = $variants,
             Storage = $storage,
@@ -44,7 +44,7 @@ macro_rules! build_ast_node_child {
         ]
     ) => {
         $(
-            build_ast_node_child!(
+            $crate::build_ast_node_child!(
                 Root = $root,
                 Variants = $variants,
                 Storage = $storage,
@@ -56,7 +56,7 @@ macro_rules! build_ast_node_child {
         )*
 
         #[derive(Debug)]
-        struct $enum {}
+        pub struct $enum();
         // enum $enum {
         //     $($variant_name( $variant_name )),*
         // }
@@ -67,7 +67,7 @@ macro_rules! build_ast_node_child {
             type Data = $empty;
 
             unsafe fn variant() -> Self::Variants {
-                Self::Variants::$enum($enum {})
+                Self::Variants::$enum($enum())
             }
         }
     };
@@ -82,7 +82,7 @@ macro_rules! build_ast_node_child {
     ) => {
 
         #[derive(Debug)]
-        struct $leaf {}
+        pub struct $leaf();
 
         impl $crate::ast::NodeBody for $leaf {
             type Root = $root;
@@ -90,7 +90,7 @@ macro_rules! build_ast_node_child {
             type Data = $data;
 
             unsafe fn variant() -> Self::Variants {
-                Self::Variants::$leaf($leaf {})
+                Self::Variants::$leaf($leaf())
             }
         }
 
@@ -98,7 +98,7 @@ macro_rules! build_ast_node_child {
             type Node = $leaf;
         }
 
-        impl_storage_conversions!($leaf($data) for $storage);
+        $crate::impl_storage_conversions!($leaf($data) for $storage);
     };
 }
 
@@ -149,7 +149,7 @@ macro_rules! impl_storage_conversions {
 #[macro_export]
 macro_rules! get_ast_variants {
     (@root $rest:tt) => {
-        test [ get_ast_variants!($rest) ]
+        test [ $crate::get_ast_variants!($rest) ]
     };
     ($rest:tt) => {
         $item,
@@ -165,7 +165,7 @@ macro_rules! build_ast {
         $root:ident $rest:tt
     ) => {
 
-        build_ast_node_child!(
+        $crate::build_ast_node_child!(
             Root = $root,
             Variants = $variants,
             Storage = $storage,
@@ -174,7 +174,7 @@ macro_rules! build_ast {
             $root $rest
         );
 
-        impl_storage_conversions!($empty($empty) for $storage);
+        $crate::impl_storage_conversions!($empty($empty) for $storage);
 
         impl Default for $storage {
             fn default() -> Self {
