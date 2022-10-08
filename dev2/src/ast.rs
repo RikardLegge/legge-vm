@@ -13,8 +13,7 @@ pub trait NodeBody {
 
     // Each node type must implement this and ensure that it returns
     // the correct variant.
-    // TODO: Maybe mark it unsafe?
-    fn variant() -> Self::Variants;
+    unsafe fn variant() -> Self::Variants;
 }
 
 pub trait NodeDataStorage {
@@ -68,15 +67,16 @@ impl<Root: NodeBody> Ast<Root> {
     {
         let index = self.nodes.len();
         let id = NodeID::new(index);
+        let variant = unsafe { <T::Node as NodeBody>::variant() }.into();
         let node = AstNode::<Root> {
             id,
-            variant: <T::Node as NodeBody>::variant().into(),
+            variant,
             parent_id,
-            data: None,
+            data: Default::default(),
         };
         self.nodes.push(node);
         let data = body(self).into();
-        self.nodes[index].data = Some(data);
+        self.nodes[index].data = data;
         NodeID::new(index)
     }
 
@@ -85,7 +85,6 @@ impl<Root: NodeBody> Ast<Root> {
         T::Data: Into<<Root::Root as NodeDataStorage>::Storage>,
     {
         let node = &self.nodes[id.0];
-        assert!(node.data.is_some());
         let node: &AstNode<T> = unsafe { std::mem::transmute(node) };
         node
     }
@@ -95,7 +94,6 @@ impl<Root: NodeBody> Ast<Root> {
         T::Data: Into<<Root::Root as NodeDataStorage>::Storage>,
     {
         let node = &mut self.nodes[id.0];
-        assert!(node.data.is_some());
         let node: &mut AstNode<T> = unsafe { std::mem::transmute(node) };
         node
     }
@@ -144,7 +142,7 @@ pub struct AstNode<Body: NodeBody> {
     pub id: NodeID<Body>,
     pub parent_id: Option<NodeID<Body::Root>>,
     variant: Body::Variants,
-    data: Option<<Body::Root as NodeDataStorage>::Storage>,
+    data: <Body::Root as NodeDataStorage>::Storage,
 }
 
 impl<Body: NodeBody> AstNode<Body> {
@@ -165,7 +163,7 @@ impl<Body: NodeBody> AstNode<Body> {
         <&'a <Body::Root as NodeDataStorage>::Storage as TryInto<&'a Body::Data>>::Error: Debug,
         Body::Data: NodeData,
     {
-        let storage: &<Body::Root as NodeDataStorage>::Storage = self.data.as_ref().unwrap();
+        let storage: &<Body::Root as NodeDataStorage>::Storage = &self.data;
         let body: &Body::Data = storage.try_into().unwrap();
         body
     }
@@ -177,7 +175,7 @@ impl<Body: NodeBody> AstNode<Body> {
             Debug,
         Body::Data: NodeData,
     {
-        let storage: &mut <Body::Root as NodeDataStorage>::Storage = self.data.as_mut().unwrap();
+        let storage: &mut <Body::Root as NodeDataStorage>::Storage = &mut self.data;
         let body: &mut Body::Data = storage.try_into().unwrap();
         body
     }
