@@ -1,5 +1,3 @@
-extern crate core;
-
 mod ast;
 mod ast_builder;
 mod checker;
@@ -7,12 +5,6 @@ mod linker;
 mod node;
 mod token;
 
-use crate::ast::Ast;
-use crate::node::{
-    AstNode, Block, Expression, Node, NodeID, NodeType, Operation, Statement, Value, Variable,
-    VariableAssignment, VariableDeclaration,
-};
-use crate::token::TokenType;
 use std::fmt::Debug;
 
 #[derive(Debug)]
@@ -22,10 +14,10 @@ pub enum Error {
     VariableNotFound(String),
     ExpectedEndStatement,
     UnexpectedToken,
-    TypeNotInferred(NodeID),
-    TypeMissmatch(NodeID, NodeID),
-    UnlinkedNode(NodeID),
-    AstError(Ast, Box<Error>),
+    TypeNotInferred(ast::NodeID),
+    TypeMissmatch(ast::NodeID, ast::NodeID),
+    UnlinkedNode(ast::NodeID),
+    AstError(node::Ast, Box<Error>),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -70,7 +62,7 @@ fn main() -> Result<()> {
             .join(",\n  ")
     );
 
-    let ast = ast::from_tokens(tokens);
+    let ast = ast_builder::from_tokens(tokens);
     println!("{:?}", ast);
 
     let ast = linker::link_ast(ast?)?;
@@ -86,10 +78,12 @@ pub enum State<Unlinked, Linked> {
     Linked(Linked),
 }
 
-impl<'a, Unlinked, T> TryFrom<&'a State<Unlinked, NodeID<T>>> for NodeID<T> {
+impl<'a, Unlinked, T> TryFrom<&'a State<Unlinked, ast::NodeID<T>>> for ast::NodeID<T> {
     type Error = ();
 
-    fn try_from(value: &'a State<Unlinked, NodeID<T>>) -> std::result::Result<Self, Self::Error> {
+    fn try_from(
+        value: &'a State<Unlinked, ast::NodeID<T>>,
+    ) -> std::result::Result<Self, Self::Error> {
         match value {
             State::Unlinked(_) => Err(()),
             State::Linked(inner) => Ok(*inner),

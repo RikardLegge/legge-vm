@@ -1,5 +1,6 @@
-use crate::node::NodeIDContext;
-use crate::{Ast, AstNode, Error, Result};
+use crate::ast::{AnyNode, AstNode, NodeIDContext};
+use crate::node::{Ast, AstContext, AstRootNode};
+use crate::{Error, Result};
 use std::collections::VecDeque;
 
 pub fn link_ast(ast: Ast) -> Result<Ast> {
@@ -13,7 +14,7 @@ pub fn link_ast(ast: Ast) -> Result<Ast> {
 
 pub struct Linker {
     ast: Ast,
-    queue: VecDeque<NodeIDContext>,
+    queue: VecDeque<NodeIDContext<AstContext>>,
 }
 
 impl Linker {
@@ -24,7 +25,7 @@ impl Linker {
             for child in node.children(context) {
                 self.queue.push_back(child);
             }
-            match AstNode::link(node_id, &mut self.ast, context) {
+            match AstNode::<AnyNode, AstRootNode>::link(node_id, &mut self.ast, context) {
                 Ok(_) => continue,
                 Err(Error::TypeNotInferred(_)) | Err(Error::UnlinkedNode(_)) => {
                     self.queue.push_back(task)

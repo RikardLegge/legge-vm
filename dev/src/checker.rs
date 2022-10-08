@@ -1,5 +1,6 @@
-use crate::node::NodeIDContext;
-use crate::{Ast, AstNode, Result};
+use crate::ast::{AnyNode, AstNode, NodeIDContext};
+use crate::node::{Ast, AstContext, AstRootNode};
+use crate::Result;
 use std::collections::VecDeque;
 
 pub fn check(ast: Ast) -> Result<Ast> {
@@ -13,7 +14,7 @@ pub fn check(ast: Ast) -> Result<Ast> {
 
 pub struct Checker {
     ast: Ast,
-    queue: VecDeque<NodeIDContext>,
+    queue: VecDeque<NodeIDContext<AstContext>>,
 }
 
 impl Checker {
@@ -24,7 +25,7 @@ impl Checker {
             for child in node.children(context) {
                 self.queue.push_back(child);
             }
-            match AstNode::check(node_id, &mut self.ast) {
+            match AstNode::<AnyNode, AstRootNode>::check(node_id, &mut self.ast) {
                 Ok(_) => continue,
                 Err(err) => unimplemented!("{:?}", err),
             }

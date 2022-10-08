@@ -1,88 +1,55 @@
-mod ast_node;
-mod block;
 mod expression;
-mod iterator;
-mod r#loop;
-mod macros;
-mod node_id;
 mod statement;
 mod variable;
 
-pub use ast_node::{Node, NodeType, NodeUsage};
-pub use iterator::NodeIterator;
-
-pub use block::*;
 pub use expression::*;
-pub use node_id::*;
-pub use r#loop::*;
 pub use statement::*;
 pub use variable::*;
 
-use crate::ast::AstContext;
-use crate::{impl_node, impl_root_node, Ast, Error, Result};
-use once_cell::unsync::OnceCell;
-use std::fmt::{Debug, Formatter};
+use crate::ast::{AnyNode, NodeBody, NodeID, NodeUsage};
+use crate::{impl_node, impl_root_node, Error};
 
-#[derive(Debug, Copy, Clone)]
-pub struct Unknown();
+pub type Ast = crate::ast::Ast<AstRootNode>;
+pub type AstNode<T = AnyNode> = crate::ast::AstNode<T, AstRootNode>;
 
-#[derive(Debug, Clone)]
-struct NodeTypeUsages {
-    tp: OnceCell<NodeType>,
-    call: OnceCell<NodeType>,
-    value: OnceCell<NodeType>,
+#[derive(Debug, Default, Clone, Copy)]
+pub enum AstContext {
+    #[default]
+    Default,
+    Chain(NodeID),
 }
 
-#[derive(Debug, Clone)]
-#[repr(C)]
-pub struct AstNode<Type = Unknown> {
-    pub id: NodeID<Type>,
-    pub parent_id: Option<NodeID>,
-    node_type: NodeTypeUsages,
-    body: Option<AstRootNode>,
-}
-
-impl AstNode {
-    pub fn new(id: impl Into<NodeID>, parent_id: Option<impl Into<NodeID>>) -> AstNode {
-        AstNode {
-            id: id.into(),
-            parent_id: parent_id.map(|id| id.into()),
-            node_type: NodeTypeUsages {
-                tp: OnceCell::new(),
-                call: OnceCell::new(),
-                value: OnceCell::new(),
-            },
-            body: None,
+pub fn closest_variable(
+    ast: &Ast,
+    node_id: impl Into<NodeID>,
+    target_ident: &str,
+    context: AstContext,
+) -> crate::Result<Option<NodeID<Variable>>> {
+    match context {
+        AstContext::Default => ast.walk_up_closest::<Block, Variable>(node_id, |node| {
+            node.body().has_variable(target_ident)
+        }),
+        AstContext::Chain(parent_id) => {
+            let tp = get_node_type(ast, parent_id, NodeUsage::Type)?;
+            match tp {
+                NodeType::Custom(decl) => {
+                    let body = ast.get_body(decl);
+                    body.has_variable(target_ident)
+                }
+                _ => Ok(None),
+            }
         }
     }
-
-    pub fn check(node_id: NodeID, ast: &mut Ast) -> Result<()> {
-        AstRootNode::check(node_id.into(), ast)
-    }
-
-    pub fn link(node_id: NodeID, ast: &mut Ast, context: AstContext) -> Result<()> {
-        AstRootNode::link(node_id.into(), ast, context)
-    }
-
-    pub fn node_type(node_id: NodeID, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
-        AstRootNode::node_type(node_id.into(), ast, usage)
-    }
-
-    pub fn body(&self) -> &Option<AstRootNode> {
-        &self.body
-    }
-
-    pub fn body_mut(&mut self) -> &mut Option<AstRootNode> {
-        &mut self.body
-    }
 }
 
-impl<T> AstNode<T> {
-    pub fn children(&self, context: AstContext) -> NodeIterator<'_> {
-        match self.body.as_ref() {
-            None => NodeIterator::empty(),
-            Some(body) => body.children(context),
-        }
+pub fn get_node_type(
+    ast: &Ast,
+    node_id: impl Into<NodeID>,
+    usage: NodeUsage,
+) -> crate::Result<NodeType> {
+    match AstNode::node_type(node_id.into(), ast, usage)? {
+        NodeType::Indirect(target_id) => get_node_type(ast, target_id, usage),
+        tp => Ok(tp),
     }
 }
 
@@ -100,7 +67,7 @@ impl_node!(
 
 impl_node!(
     pub enum AstRootNode => Expression {
-        ConstValue,
+        Value,
         VariableValue,
         Operation,
         FunctionCall,
@@ -123,3 +90,15 @@ impl_node!(
         Break,
     }
 );
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum NodeType {
+    Void,
+    Int,
+    Float,
+    String,
+    Boolean,
+    Indirect(NodeID<VariableValue>),
+    Custom(NodeID<TypeDeclaration>),
+    Function(NodeID<FunctionDeclaration>),
+}

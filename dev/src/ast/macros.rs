@@ -1,6 +1,6 @@
 #[macro_export]
 macro_rules! impl_node_variant {
-    ( impl $enum:ident for $variant:ident throws $error:ident :: $error_variant:ident ) => {
+    ( impl $root:ident =>  $enum:ident for $variant:ident throws $error:ident :: $error_variant:ident ) => {
         impl<'a> TryFrom<&'a $enum> for &'a $variant {
             type Error = $error;
 
@@ -43,16 +43,16 @@ macro_rules! impl_node_variant {
 }
 #[macro_export]
 macro_rules! impl_node_variant_id {
-    ( impl $enum:ident for $variant:ident throws $error:ident :: $error_variant:ident) => {
-        impl From<NodeID<$variant>> for NodeID<$enum> {
-            fn from(node_id: NodeID<$variant>) -> Self {
+    ( impl $root:ident =>  $enum:ident for $variant:ident throws $error:ident :: $error_variant:ident) => {
+        impl From<NodeID<$variant>> for $crate::ast::NodeID<$enum> {
+            fn from(node_id: $crate::ast::NodeID<$variant>) -> Self {
                 // Safety: NodeID does not change its representation with this cast.
                 // Since a variant is a subset of an enum then this will always be ok.
                 unsafe { std::mem::transmute(node_id) }
             }
         }
 
-        impl $crate::node::AstNode<$variant> {
+        impl<Body: $crate::ast::NodeBody> $crate::ast::AstNode<$variant, Body> {
             pub fn body(&self) -> &$variant {
                 self.body.as_ref().unwrap().try_into().unwrap()
             }
@@ -109,17 +109,21 @@ macro_rules! impl_node_variant_root {
             }
         }
 
-        impl TryFrom<&$crate::node::AstNode> for &$crate::node::AstNode<$variant> {
+        impl<Body: $crate::ast::NodeBody> TryFrom<&$crate::ast::AstNode<AnyNode, Body>>
+            for &$crate::ast::AstNode<$variant, Body>
+        {
             type Error = $error;
 
-            fn try_from(node: &$crate::node::AstNode) -> std::result::Result<Self, Self::Error> {
+            fn try_from(
+                node: &$crate::ast::AstNode<AnyNode, Body>,
+            ) -> std::result::Result<Self, Self::Error> {
                 let body = node.body.as_ref().ok_or($error::$error_variant)?;
                 match <&$variant>::try_from(body) {
                     Ok(_) => {
                         // Safety: The node must have a body of type $ty, since AstNode
                         // is repr(C), it must adhere to the C layout ABI and therefore
                         // the marker trait <T> will not change the binary representation.
-                        let node: &$crate::node::AstNode<$variant> =
+                        let node: &$crate::ast::AstNode<$variant> =
                             unsafe { std::mem::transmute(node) };
                         Ok(node)
                     }
@@ -132,15 +136,20 @@ macro_rules! impl_node_variant_root {
 
 #[macro_export]
 macro_rules! impl_node_trait {
-    ( impl $enum:ident for { $($variant:ident),* $(,)* } ) => {
+    ( impl $root:ident =>  $enum:ident for { $($variant:ident),* $(,)* } ) => {
 
-      impl Node for $enum {
-            fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: $crate::node::NodeUsage) -> Result<NodeType> {
+      impl $crate::ast::NodeBody for $enum {
+            type Root = $root;
+            type NodeType = NodeType;
+            type AstContext = AstContext;
+            type Variable = Variable;
+
+            fn node_type(node_id: $crate::ast::NodeID<Self>, ast: &$crate::ast::Ast<$root>, usage: $crate::ast::NodeUsage) -> $crate::Result<NodeType> {
                 let node = ast.get(node_id);
                 let cached = match usage {
-                    NodeUsage::Type => node.node_type.tp.get(),
-                    NodeUsage::Call => node.node_type.call.get(),
-                    NodeUsage::Value => node.node_type.value.get(),
+                    $crate::ast::NodeUsage::Type => node.node_type.tp.get(),
+                    $crate::ast::NodeUsage::Call => node.node_type.call.get(),
+                    $crate::ast::NodeUsage::Value => node.node_type.value.get(),
                 };
 
                 if let Some(cached_type) = cached{
@@ -153,20 +162,20 @@ macro_rules! impl_node_trait {
                             // Safety: NodeID does not change its representation with this cast.
                             // Since the data is $variant we can update the node_id representation
                             // to reflect this fact.
-                            let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
+                            let node_id: $crate::ast::NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
                             $variant::node_type(node_id, ast, usage)?
                         }
                     ),*
                 };
 
                 match usage {
-                    NodeUsage::Type if node.node_type.tp.get().is_none() => {
+                    $crate::ast::NodeUsage::Type if node.node_type.tp.get().is_none() => {
                         let _ = node.node_type.tp.set(node_type.clone());
                     },
-                    NodeUsage::Call if node.node_type.call.get().is_none() => {
+                    $crate::ast::NodeUsage::Call if node.node_type.call.get().is_none() => {
                         let _ = node.node_type.call.set(node_type.clone());
                     },
-                    NodeUsage::Value if node.node_type.tp.get().is_none() => {
+                    $crate::ast::NodeUsage::Value if node.node_type.tp.get().is_none() => {
                         let _ = node.node_type.value.set(node_type.clone());
                     },
                     _ => {}
@@ -174,7 +183,7 @@ macro_rules! impl_node_trait {
                 Ok(node_type)
             }
 
-            fn children(&self, context: AstContext) -> NodeIterator<'_> {
+            fn children(&self, context: Self::AstContext) -> $crate::ast::NodeIterator<'_, Self::AstContext> {
                 match &self {
                     $(
                         $enum::$variant(value) => value.children(context)
@@ -182,28 +191,28 @@ macro_rules! impl_node_trait {
                 }
             }
 
-            fn link(node_id: NodeID<Self>, ast: &mut $crate::ast::Ast, context: $crate::ast::AstContext) -> Result<()> {
+            fn link(node_id: $crate::ast::NodeID<Self>, ast: &mut $crate::ast::Ast<$root>, context: Self::AstContext) -> $crate::Result<()> {
                 match ast.get_body(node_id) {
                     $(
                         $enum::$variant(_) => {
                             // Safety: NodeID does not change its representation with this cast.
                             // Since the data is $variant we can update the node_id representation
                             // to reflect this fact.
-                            let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
+                            let node_id: $crate::ast::NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
                             $variant::link(node_id, ast, context)
                         }
                     ),*
                 }
             }
 
-            fn check(node_id: NodeID<Self>, ast: &mut $crate::ast::Ast) -> Result<()> {
+            fn check(node_id: $crate::ast::NodeID<Self>, ast: &mut $crate::ast::Ast<$root>) -> $crate::Result<()> {
                 match ast.get_body(node_id) {
                     $(
                         $enum::$variant(_) => {
                             // Safety: NodeID does not change its representation with this cast.
                             // Since the data is $variant we can update the node_id representation
                             // to reflect this fact.
-                            let node_id: NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
+                            let node_id: $crate::ast::NodeID<$variant> = unsafe {std::mem::transmute(node_id) };
                             $variant::check(node_id, ast)
                         }
                     ),*
@@ -222,18 +231,18 @@ macro_rules! impl_node {
           $($variant($variant)),*
         }
 
-        impl Debug for $enum {
-            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        impl core::fmt::Debug for $enum {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 match self {
                     $($enum::$variant(child) => child.fmt(f) ),*
                 }
             }
         }
 
-        $crate::impl_node_trait!(impl $enum for { $($variant),* });
+        $crate::impl_node_trait!(impl $root => $enum for { $($variant),* });
         $(
-            $crate::impl_node_variant!(impl $enum for $variant throws Error::InternalError);
-            $crate::impl_node_variant_id!(impl $enum for $variant throws Error::InternalError);
+            $crate::impl_node_variant!(impl $root => $enum for $variant throws Error::InternalError);
+            $crate::impl_node_variant_id!(impl $root => $enum for $variant throws Error::InternalError);
             $crate::impl_node_variant_root!(impl $root for $enum::$variant throws Error::InternalError);
         )*
 
@@ -247,36 +256,55 @@ macro_rules! impl_root_node {
         #[repr(transparent)]
         pub struct $root($body);
 
-        impl Debug for $root {
-            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        impl core::fmt::Debug for $root {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 self.0.fmt(f)
             }
         }
 
-        impl Node for $root {
-            fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
+        impl $crate::ast::NodeBody for $root {
+            type Root = $root;
+            type NodeType = NodeType;
+            type AstContext = AstContext;
+            type Variable = Variable;
+
+            fn node_type(
+                node_id: $crate::ast::NodeID<Self>,
+                ast: &$crate::ast::Ast<$root>,
+                usage: $crate::ast::NodeUsage,
+            ) -> $crate::Result<NodeType> {
                 // Safety: Root only has one child, so any $root must also be a $body
-                let node_id: NodeID<$body> = unsafe { std::mem::transmute(node_id) };
+                let node_id: $crate::ast::NodeID<$body> = unsafe { std::mem::transmute(node_id) };
                 $body::node_type(node_id, ast, usage)
             }
 
-            fn children(&self, context: AstContext) -> NodeIterator<'_> {
+            fn children(
+                &self,
+                context: Self::AstContext,
+            ) -> $crate::ast::NodeIterator<'_, Self::AstContext> {
                 self.0.children(context)
             }
 
-            fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> Result<()> {
+            fn link(
+                node_id: $crate::ast::NodeID<Self>,
+                ast: &mut $crate::ast::Ast<$root>,
+                context: Self::AstContext,
+            ) -> $crate::Result<()> {
                 // Safety: Root only has one child, so any $root must also be a $body
-                let node_id: NodeID<$body> = unsafe { std::mem::transmute(node_id) };
+                let node_id: $crate::ast::NodeID<$body> = unsafe { std::mem::transmute(node_id) };
                 $body::link(node_id, ast, context)
             }
 
-            fn check(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
+            fn check(
+                node_id: $crate::ast::NodeID<Self>,
+                ast: &mut $crate::ast::Ast<$root>,
+            ) -> $crate::Result<()> {
                 // Safety: Root only has one child, so any $root must also be a $body
-                let node_id: NodeID<$body> = unsafe { std::mem::transmute(node_id) };
+                let node_id: $crate::ast::NodeID<$body> = unsafe { std::mem::transmute(node_id) };
                 $body::check(node_id, ast)
             }
 
-            fn has_variable(&self, var: &str) -> Result<Option<NodeID<Variable>>> {
+            fn has_variable(&self, var: &str) -> $crate::Result<Option<NodeID<Variable>>> {
                 self.0.has_variable(var)
             }
         }
@@ -305,29 +333,29 @@ macro_rules! impl_root_node {
             }
         }
 
-        impl From<NodeID> for NodeID<$root> {
+        impl From<NodeID> for $crate::ast::NodeID<$root> {
             fn from(node_id: NodeID) -> Self {
                 // Safety: Root only has one child, so any $root must also be a $body
                 unsafe { std::mem::transmute(node_id) }
             }
         }
 
-        impl From<NodeID> for NodeID<$body> {
+        impl From<NodeID> for $crate::ast::NodeID<$body> {
             fn from(node_id: NodeID) -> Self {
                 // Safety: Root only has one child, so any $root must also be a $body
                 unsafe { std::mem::transmute(node_id) }
             }
         }
 
-        impl From<NodeID<$root>> for NodeID<$body> {
-            fn from(node_id: NodeID<$root>) -> Self {
+        impl From<NodeID<$root>> for $crate::ast::NodeID<$body> {
+            fn from(node_id: $crate::ast::NodeID<$root>) -> Self {
                 // Safety: Root only has one child, so any $root must also be a $body
                 unsafe { std::mem::transmute(node_id) }
             }
         }
 
-        impl From<NodeID<$body>> for NodeID<$root> {
-            fn from(node_id: NodeID<$body>) -> Self {
+        impl From<NodeID<$body>> for $crate::ast::NodeID<$root> {
+            fn from(node_id: $crate::ast::NodeID<$body>) -> Self {
                 // Safety: Root only has one child, so any $root must also be a $body
                 unsafe { std::mem::transmute(node_id) }
             }

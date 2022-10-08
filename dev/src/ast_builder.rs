@@ -1,28 +1,28 @@
+use crate::ast::{NodeBody, NodeID};
 use crate::node::{
-    AstRootNode, Break, EvaluateExpression, ExpressionChain, FunctionCall, FunctionDeclaration, If,
-    Loop, Return, StaticAssignment, TypeDeclaration, VariableValue,
+    Ast, AstRootNode, Block, Break, EvaluateExpression, Expression, ExpressionChain, FunctionCall,
+    FunctionDeclaration, If, Loop, NodeType, Operation, Return, Statement, StaticAssignment,
+    TypeDeclaration, Value, Variable, VariableAssignment, VariableDeclaration, VariableValue,
 };
-use crate::token::{KeyName, Token};
-use crate::{Ast, Block, Error, Node, NodeType, TokenType};
-use crate::{
-    Expression, NodeID, Operation, Result, State, Statement, Value, Variable, VariableAssignment,
-    VariableDeclaration,
-};
+use crate::token::{KeyName, Token, TokenType};
+use crate::{Error, Result, State};
 use std::iter::Peekable;
 
-pub struct AstBuilder<'a, Iter, T>
-where
-    Iter: Iterator<Item = Token<'a>>,
-    T: Node,
-{
-    tokens: TokenReader<'a, Iter>,
-    ast: Ast<T>,
+pub fn from_tokens(tokens: Vec<Token>) -> Result<Ast> {
+    AstBuilder::new(tokens.into_iter()).build()
 }
 
-impl<'a, Iter, T> AstBuilder<'a, Iter, T>
+pub struct AstBuilder<'a, Iter>
 where
     Iter: Iterator<Item = Token<'a>>,
-    T: Node,
+{
+    tokens: TokenReader<'a, Iter>,
+    ast: Ast,
+}
+
+impl<'a, Iter> AstBuilder<'a, Iter>
+where
+    Iter: Iterator<Item = Token<'a>>,
 {
     pub fn new(tokens: Iter) -> Self {
         Self {
@@ -34,11 +34,11 @@ where
     }
 }
 
-impl<'a, Iter> AstBuilder<'a, Iter, Block>
+impl<'a, Iter> AstBuilder<'a, Iter>
 where
     Iter: Iterator<Item = Token<'a>>,
 {
-    pub fn build(mut self) -> Result<Ast<Block>> {
+    pub fn build(mut self) -> Result<Ast> {
         let block_id = self.ast.new_root_node();
         let mut children = vec![];
 
@@ -55,7 +55,7 @@ where
 
         let block = Block::new(children, &self.ast);
         let block_id = self.ast.push(block_id, block);
-        self.ast.root = Some(block_id);
+        self.ast.root = Some(block_id.into());
         Ok(self.ast)
     }
 }
@@ -111,7 +111,7 @@ where
 struct Builder<'ast, 'token, Type, TokenIter>
 where
     NodeID<Type>: Into<NodeID>,
-    Type: Node + Into<AstRootNode>,
+    Type: NodeBody + Into<AstRootNode>,
     TokenIter: Iterator<Item = Token<'token>>,
 {
     id: NodeID<Type>,
@@ -122,7 +122,7 @@ where
 impl<'ast, 'token, Type, TokenIter> Builder<'ast, 'token, Type, TokenIter>
 where
     NodeID<Type>: Into<NodeID>,
-    Type: Node + Into<AstRootNode>,
+    Type: NodeBody + Into<AstRootNode>,
     TokenIter: Iterator<Item = Token<'token>>,
 {
     fn new(
@@ -455,7 +455,7 @@ where
         evaluate: impl FnOnce(Builder<'_, 'token, ChildNodeType, TokenIter>) -> Result<ChildNodeType>,
     ) -> Result<NodeID<ChildNodeType>>
     where
-        ChildNodeType: Node + Into<AstRootNode>,
+        ChildNodeType: NodeBody + Into<AstRootNode>,
     {
         let id = self.ast.new_node(self.id);
         let builder = Builder::<ChildNodeType, TokenIter> {
@@ -469,7 +469,7 @@ where
 
     fn const_value<ChildNodeType>(&mut self, value: ChildNodeType) -> NodeID<ChildNodeType>
     where
-        ChildNodeType: Node + Into<AstRootNode>,
+        ChildNodeType: NodeBody + Into<AstRootNode>,
     {
         let id = self.ast.new_node(self.id);
         self.ast.push(id, value)
