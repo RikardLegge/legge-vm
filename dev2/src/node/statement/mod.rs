@@ -1,11 +1,17 @@
+mod evaluate_expression;
+mod static_assignment;
 mod stmt_break;
 mod stmt_return;
 mod type_declaration;
+mod variable_assignment;
 mod variable_declaration;
 
+pub use evaluate_expression::*;
+pub use static_assignment::*;
 pub use stmt_break::*;
 pub use stmt_return::*;
 pub use type_declaration::*;
+pub use variable_assignment::*;
 pub use variable_declaration::*;
 
 use crate::ast::{AstNode, AstNodeRef};

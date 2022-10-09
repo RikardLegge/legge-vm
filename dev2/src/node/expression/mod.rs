@@ -1,10 +1,12 @@
 mod block;
 mod function_declaration;
 mod r#loop;
+mod variable_value;
 
 pub use block::*;
 pub use function_declaration::*;
 pub use r#loop::*;
+pub use variable_value::*;
 
 use crate::ast::AstNodeRef;
 use crate::node::{Ast, Expression, Result};

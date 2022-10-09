@@ -4,9 +4,12 @@ mod variable;
 
 pub use crate::node::variable::*;
 
-use crate::node::expression::{BlockStorage, FunctionDeclarationStorage, LoopStorage};
+use crate::node::expression::{
+    BlockStorage, FunctionDeclarationStorage, LoopStorage, VariableValueStorage,
+};
 use crate::node::statement::{
-    BreakStorage, ReturnStorage, TypeDeclarationStorage, VariableDeclarationStorage,
+    BreakStorage, EvaluateExpressionStorage, ReturnStorage, StaticAssignmentStorage,
+    TypeDeclarationStorage, VariableAssignmentStorage, VariableDeclarationStorage,
 };
 use crate::types::{NodeType, NodeUsage, Types};
 use crate::{ast, build_ast};
@@ -26,14 +29,18 @@ build_ast! {
         Expression [
             Block(BlockStorage),
             Loop(LoopStorage),
-            FunctionDeclaration(FunctionDeclarationStorage)
+            FunctionDeclaration(FunctionDeclarationStorage),
+            VariableValue(VariableValueStorage),
         ],
         Statement [
             VariableDeclaration(VariableDeclarationStorage),
             TypeDeclaration(TypeDeclarationStorage),
             Return(ReturnStorage),
-            Break(BreakStorage)
-        ]
+            Break(BreakStorage),
+            EvaluateExpression(EvaluateExpressionStorage),
+            VariableAssignment(VariableAssignmentStorage),
+            StaticAssignment(StaticAssignmentStorage),
+        ],
     ]
 }
 
@@ -46,12 +53,16 @@ pub enum Storage {
     Block(BlockStorage),
     Loop(LoopStorage),
     FunctionDeclaration(FunctionDeclarationStorage),
+    VariableValue(VariableValueStorage),
 
     Statement(()),
     VariableDeclaration(VariableDeclarationStorage),
     TypeDeclaration(TypeDeclarationStorage),
     Return(ReturnStorage),
     Break(BreakStorage),
+    EvaluateExpression(EvaluateExpressionStorage),
+    VariableAssignment(VariableAssignmentStorage),
+    StaticAssignment(StaticAssignmentStorage),
 
     Variable(VariableStorage),
 }
@@ -64,10 +75,11 @@ macro_rules! reified {
         $crate::reified! {@matches $node
             Any |
             Expression |
-                Block | FunctionDeclaration | Loop |
+                Block | FunctionDeclaration | Loop | VariableValue |
             Statement |
                 VariableDeclaration | TypeDeclaration |
-                Return | Break |
+                Return | Break | EvaluateExpression |
+                VariableAssignment | StaticAssignment |
             Variable
                 => { $node $($rest)* }
         }
