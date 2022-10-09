@@ -1,7 +1,7 @@
 use crate::ast::AstNodeRef;
-use crate::node::{Ast, Types, Value};
+use crate::node::{Any, Ast, Types, Value};
 
-impl Types for AstNodeRef<Value> {
+impl Types<Any> for AstNodeRef<Value> {
     fn get_type(&self, _ast: &Ast) {
         println!("Value")
     }

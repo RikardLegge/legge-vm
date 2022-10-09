@@ -2,7 +2,7 @@ mod expression;
 mod statement;
 
 pub use crate::node::expression::{CallStorage, ValueStorage};
-use crate::node::plugins::Types;
+use crate::types::Types;
 use crate::{ast, build_ast};
 
 pub type Ast = ast::Ast<Any>;
@@ -84,28 +84,9 @@ macro_rules! reified {
     };
 }
 
-impl Types for ast::AstNodeRef<Any> {
+impl Types<Any> for ast::AstNodeRef<Any> {
     fn get_type(&self, ast: &Ast) {
         let node = ast.get(self.id);
         reified! {node.get_type(ast)};
-    }
-}
-
-pub mod plugins {
-    use super::Ast;
-    use crate::ast::{AstNode, AstNodeRef, NodeBody};
-
-    // Example of dynamically adding methods to the AST, which respect the node types
-    pub trait Types {
-        fn get_type(&self, ast: &Ast);
-    }
-
-    impl<Any: NodeBody> Types for AstNode<Any>
-    where
-        AstNodeRef<Any>: Types,
-    {
-        fn get_type(&self, ast: &Ast) {
-            self.get_ref().get_type(ast)
-        }
     }
 }
