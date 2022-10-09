@@ -7,7 +7,7 @@ pub fn run() {
     let mut ast = node::Ast::new();
 
     // Create a new node of type Value
-    let id = ast.node(None, |_| node::ValueStorage());
+    let id = ast.node(None, |_, _| node::ValueStorage());
 
     // Erase the type of the node handle
     let id: node::NodeID = id.into();
