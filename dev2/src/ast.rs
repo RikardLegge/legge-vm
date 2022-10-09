@@ -26,7 +26,16 @@ pub unsafe trait NodeData {
 
 // A typed array index into the Ast
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct NodeID<T: NodeBody + ?Sized>(usize, PhantomData<T>);
+
+impl<T: NodeBody> PartialEq<Self> for NodeID<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T: NodeBody> Eq for NodeID<T> {}
 
 impl<T: NodeBody> Clone for NodeID<T> {
     fn clone(&self) -> Self {
