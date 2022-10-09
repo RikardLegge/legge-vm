@@ -7,4 +7,4 @@ impl Types for AstNodeRef<Call> {
     }
 }
 
-pub struct CallData();
+pub struct CallStorage();
