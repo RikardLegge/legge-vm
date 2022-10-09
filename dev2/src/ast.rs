@@ -103,6 +103,26 @@ impl<Any: NodeBody<Root = Any> + NodeDataStorage> Ast<Any> {
         node
     }
 
+    pub fn body<'a, T: NodeBody + 'a>(&'a self, id: NodeID<T>) -> &'a T::Data
+    where
+        NodeID<T>: Into<NodeID<Any>>,
+        T::Data: NodeData,
+        &'a <T::Root as NodeDataStorage>::Storage: TryInto<&'a T::Data>,
+        <&'a <T::Root as NodeDataStorage>::Storage as TryInto<&'a T::Data>>::Error: Debug,
+    {
+        self.get(id).body()
+    }
+
+    pub fn body_mut<'a, T: NodeBody + 'a>(&'a mut self, id: NodeID<T>) -> &'a mut T::Data
+    where
+        NodeID<T>: Into<NodeID<Any>>,
+        T::Data: NodeData,
+        &'a mut <T::Root as NodeDataStorage>::Storage: TryInto<&'a mut T::Data>,
+        <&'a mut <T::Root as NodeDataStorage>::Storage as TryInto<&'a mut T::Data>>::Error: Debug,
+    {
+        self.get_mut(id).body_mut()
+    }
+
     pub fn walk_up<T: NodeBody>(
         &self,
         node_id: impl Into<NodeID<Any>>,
@@ -161,9 +181,9 @@ impl<Body: NodeBody> AstNode<Body> {
 
     pub fn body<'a>(&'a self) -> &'a Body::Data
     where
+        Body::Data: NodeData,
         &'a <Body::Root as NodeDataStorage>::Storage: TryInto<&'a Body::Data>,
         <&'a <Body::Root as NodeDataStorage>::Storage as TryInto<&'a Body::Data>>::Error: Debug,
-        Body::Data: NodeData,
     {
         let storage: &<Body::Root as NodeDataStorage>::Storage = &self.data;
         let body: &Body::Data = storage.try_into().unwrap();
@@ -172,10 +192,10 @@ impl<Body: NodeBody> AstNode<Body> {
 
     pub fn body_mut<'a>(&'a mut self) -> &'a mut Body::Data
     where
-        &'a mut Body::Data: TryFrom<&'a mut <Body::Root as NodeDataStorage>::Storage>,
+        Body::Data: NodeData,
+        &'a mut <Body::Root as NodeDataStorage>::Storage: TryInto<&'a mut Body::Data>,
         <&'a mut <Body::Root as NodeDataStorage>::Storage as TryInto<&'a mut Body::Data>>::Error:
             Debug,
-        Body::Data: NodeData,
     {
         let storage: &mut <Body::Root as NodeDataStorage>::Storage = &mut self.data;
         let body: &mut Body::Data = storage.try_into().unwrap();
