@@ -6,6 +6,7 @@ mod leggevm;
 mod linker;
 mod macros;
 mod node;
+mod state;
 mod types;
 
 fn main() {

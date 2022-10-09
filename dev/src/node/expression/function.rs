@@ -2,18 +2,18 @@ use crate::ast::{NodeBody, NodeID, NodeIterator, NodeUsage};
 use crate::node::{Ast, AstContext, AstNode, AstRootNode, Block, NodeType, Return, Variable};
 use crate::Error;
 
-#[derive(Debug, Clone)]
-pub struct FunctionDeclaration {
-    pub arguments: Vec<NodeID<Variable>>,
-    pub returns: NodeType,
-    pub body: NodeID<Block>,
-}
-
-impl NodeBody for FunctionDeclaration {
-    type Root = AstRootNode;
-    type NodeType = NodeType;
-    type AstContext = AstContext;
-    type Variable = Variable;
+// #[derive(Debug, Clone)]
+// pub struct FunctionDeclaration {
+//     pub arguments: Vec<NodeID<Variable>>,
+//     pub returns: NodeType,
+//     pub body: NodeID<Block>,
+// }
+//
+// impl NodeBody for FunctionDeclaration {
+//     type Root = AstRootNode;
+//     type NodeType = NodeType;
+//     type AstContext = AstContext;
+//     type Variable = Variable;
 
     fn node_type(
         node_id: NodeID<Self>,
@@ -21,20 +21,20 @@ impl NodeBody for FunctionDeclaration {
         node_usage: NodeUsage,
     ) -> crate::Result<NodeType> {
         match node_usage {
-            NodeUsage::Type | NodeUsage::Value => Ok(NodeType::Function(node_id)),
+            // NodeUsage::Type | NodeUsage::Value => Ok(NodeType::Function(node_id)),
             NodeUsage::Call => {
                 let body = ast.get_body(node_id);
                 Ok(body.returns.clone())
             }
         }
     }
-
-    fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
-        NodeIterator::chained(
-            NodeIterator::slice(&self.arguments),
-            NodeIterator::single(self.body),
-        )
-    }
+    //
+    // fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
+    //     NodeIterator::chained(
+    //         NodeIterator::slice(&self.arguments),
+    //         NodeIterator::single(self.body),
+    //     )
+    // }
 
     fn check(node_id: NodeID<Self>, ast: &mut Ast) -> crate::Result<()> {
         let node = ast.get_body(node_id);

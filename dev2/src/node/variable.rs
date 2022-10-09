@@ -5,8 +5,8 @@ use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 
 pub struct VariableStorage {
-    name: String,
-    tp: Option<NodeType>,
+    pub name: String,
+    pub tp: Option<NodeType>,
 }
 
 impl VariableStorage {

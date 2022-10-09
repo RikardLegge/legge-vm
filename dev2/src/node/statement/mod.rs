@@ -1,6 +1,10 @@
+mod stmt_break;
+mod stmt_return;
 mod type_declaration;
 mod variable_declaration;
 
+pub use stmt_break::*;
+pub use stmt_return::*;
 pub use type_declaration::*;
 pub use variable_declaration::*;
 

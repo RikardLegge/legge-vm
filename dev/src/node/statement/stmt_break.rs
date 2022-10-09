@@ -4,24 +4,24 @@ use crate::node::{
 };
 use crate::{Error, State};
 
-#[derive(Debug, Clone)]
-pub struct Break {
-    pub r#loop: State<(), NodeID<Loop>>,
-    pub value: Option<NodeID<Expression>>,
-}
-
-impl NodeBody for Break {
-    type Root = AstRootNode;
-    type NodeType = NodeType;
-    type AstContext = AstContext;
-    type Variable = Variable;
-
-    fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
-        match self.value {
-            Some(value) => NodeIterator::single(value),
-            None => NodeIterator::empty(),
-        }
-    }
+// #[derive(Debug, Clone)]
+// pub struct Break {
+//     pub r#loop: State<(), NodeID<Loop>>,
+//     pub value: Option<NodeID<Expression>>,
+// }
+//
+// impl NodeBody for Break {
+//     type Root = AstRootNode;
+//     type NodeType = NodeType;
+//     type AstContext = AstContext;
+//     type Variable = Variable;
+//
+//     fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
+//         match self.value {
+//             Some(value) => NodeIterator::single(value),
+//             None => NodeIterator::empty(),
+//         }
+//     }
 
     fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> crate::Result<()> {
         let node = ast.get_body(node_id);
