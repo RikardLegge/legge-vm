@@ -1,49 +1,52 @@
-use crate::ast::{NodeBody, NodeID, NodeIDContext, NodeIterator, NodeUsage};
-use crate::node::{
-    get_node_type, Ast, AstContext, AstNode, AstRootNode, Expression, FunctionCall, NodeType,
-    Variable, VariableValue,
-};
-use crate::{Error, Result, State};
+// use crate::ast::{NodeBody, NodeID, NodeIDContext, NodeIterator, NodeUsage};
+// use crate::node::{
+//     get_node_type, Ast, AstContext, AstNode, AstRootNode, Expression, FunctionCall, NodeType,
+//     Variable, VariableValue,
+// };
+// use crate::{Error, Result, State};
+// 
+// #[derive(Copy, Clone, Debug)]
+// pub struct ExpressionChain {
+//     pub lhs: NodeID<Expression>,
+//     pub rhs: NodeID<Expression>,
+//     linked: bool,
+// }
+// 
+// impl ExpressionChain {
+//     pub fn new(lhs: NodeID<Expression>, rhs: NodeID<Expression>) -> Self {
+//         Self {
+//             lhs,
+//             rhs,
+//             linked: false,
+//         }
+//     }
+// }
+// 
+// impl NodeBody for ExpressionChain {
+//     type Root = AstRootNode;
+//     type NodeType = NodeType;
+//     type AstContext = AstContext;
+//     type Variable = Variable;
+// 
+//     fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
+//         let body = ast.get_body(node_id);
+//         get_node_type(ast, body.rhs, usage)
+//     }
+// 
+//     fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
+//         NodeIterator::dual(
+//             self.lhs,
+//             NodeIDContext {
+//                 node_id: self.rhs.into(),
+//                 context: AstContext::Chain(self.lhs.into()),
+//             },
+//         )
+//     }
 
-#[derive(Copy, Clone, Debug)]
-pub struct ExpressionChain {
-    pub lhs: NodeID<Expression>,
-    pub rhs: NodeID<Expression>,
-    linked: bool,
-}
+use crate::ast::NodeID;
+use crate::node::{AstContext, Expression};
 
-impl ExpressionChain {
-    pub fn new(lhs: NodeID<Expression>, rhs: NodeID<Expression>) -> Self {
-        Self {
-            lhs,
-            rhs,
-            linked: false,
-        }
-    }
-}
-
-impl NodeBody for ExpressionChain {
-    type Root = AstRootNode;
-    type NodeType = NodeType;
-    type AstContext = AstContext;
-    type Variable = Variable;
-
-    fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
-        let body = ast.get_body(node_id);
-        get_node_type(ast, body.rhs, usage)
-    }
-
-    fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
-        NodeIterator::dual(
-            self.lhs,
-            NodeIDContext {
-                node_id: self.rhs.into(),
-                context: AstContext::Chain(self.lhs.into()),
-            },
-        )
-    }
-
-    fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> Result<()> {
+fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> Result<()> {
         let node = ast.get_body(node_id);
 
         if node.linked {

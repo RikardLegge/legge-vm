@@ -14,20 +14,20 @@ use crate::Error;
 //     type NodeType = NodeType;
 //     type AstContext = AstContext;
 //     type Variable = Variable;
-
-    fn node_type(
-        node_id: NodeID<Self>,
-        ast: &Ast,
-        node_usage: NodeUsage,
-    ) -> crate::Result<NodeType> {
-        match node_usage {
-            // NodeUsage::Type | NodeUsage::Value => Ok(NodeType::Function(node_id)),
-            NodeUsage::Call => {
-                let body = ast.get_body(node_id);
-                Ok(body.returns.clone())
-            }
-        }
-    }
+//
+//     fn node_type(
+//         node_id: NodeID<Self>,
+//         ast: &Ast,
+//         node_usage: NodeUsage,
+//     ) -> crate::Result<NodeType> {
+//         match node_usage {
+//             // NodeUsage::Type | NodeUsage::Value => Ok(NodeType::Function(node_id)),
+//             NodeUsage::Call => {
+//                 let body = ast.get_body(node_id);
+//                 Ok(body.returns.clone())
+//             }
+//         }
+//     }
     //
     // fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
     //     NodeIterator::chained(

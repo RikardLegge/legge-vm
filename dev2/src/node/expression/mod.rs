@@ -1,11 +1,21 @@
 mod block;
+mod expr_chain;
+mod expr_if;
+mod expr_loop;
+mod function_call;
 mod function_declaration;
-mod r#loop;
+mod operation;
+mod value;
 mod variable_value;
 
 pub use block::*;
+pub use expr_chain::*;
+pub use expr_if::*;
+pub use expr_loop::*;
+pub use function_call::*;
 pub use function_declaration::*;
-pub use r#loop::*;
+pub use operation::*;
+pub use value::*;
 pub use variable_value::*;
 
 use crate::ast::AstNodeRef;

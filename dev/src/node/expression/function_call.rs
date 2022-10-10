@@ -2,51 +2,51 @@ use crate::ast::{NodeBody, NodeID, NodeIDContext, NodeIterator, NodeIteratorBody
 use crate::node::{
     get_node_type, Ast, AstContext, AstRootNode, Expression, NodeType, Variable, VariableValue,
 };
-use crate::Error;
-
-#[derive(Debug, Clone)]
-pub struct FunctionCall {
-    pub variable: NodeID<VariableValue>,
-    pub args: Vec<NodeID<Expression>>,
-}
-
-impl FunctionCall {
-    pub fn new(variable: NodeID<VariableValue>, args: Vec<NodeID<Expression>>) -> Self {
-        Self { variable, args }
-    }
-}
-
-impl NodeBody for FunctionCall {
-    type Root = AstRootNode;
-    type NodeType = NodeType;
-    type AstContext = AstContext;
-    type Variable = Variable;
-
-    fn node_type(
-        node_id: NodeID<Self>,
-        ast: &Ast,
-        node_usage: NodeUsage,
-    ) -> crate::Result<NodeType> {
-        match node_usage {
-            NodeUsage::Type => {
-                let body = ast.get_body(node_id);
-                get_node_type(ast, body.variable, node_usage)
-            }
-            NodeUsage::Call | NodeUsage::Value => {
-                let body = ast.get_body(node_id);
-                get_node_type(ast, body.variable, NodeUsage::Call)
-            }
-        }
-    }
-
-    fn children(&self, context: AstContext) -> NodeIterator<'_, Self::AstContext> {
-        let variable = NodeIterator::new(NodeIteratorBody::Single(NodeIDContext {
-            node_id: self.variable.into(),
-            context,
-        }));
-        let arguments = NodeIterator::slice(&self.args);
-        NodeIterator::chained(variable, arguments)
-    }
+// use crate::Error;
+//
+// #[derive(Debug, Clone)]
+// pub struct FunctionCall {
+//     pub variable: NodeID<VariableValue>,
+//     pub args: Vec<NodeID<Expression>>,
+// }
+//
+// impl FunctionCall {
+//     pub fn new(variable: NodeID<VariableValue>, args: Vec<NodeID<Expression>>) -> Self {
+//         Self { variable, args }
+//     }
+// }
+//
+// impl NodeBody for FunctionCall {
+//     type Root = AstRootNode;
+//     type NodeType = NodeType;
+//     type AstContext = AstContext;
+//     type Variable = Variable;
+    //
+    // fn node_type(
+    //     node_id: NodeID<Self>,
+    //     ast: &Ast,
+    //     node_usage: NodeUsage,
+    // ) -> crate::Result<NodeType> {
+    //     match node_usage {
+    //         NodeUsage::Type => {
+    //             let body = ast.get_body(node_id);
+    //             get_node_type(ast, body.variable, node_usage)
+    //         }
+    //         NodeUsage::Call | NodeUsage::Value => {
+    //             let body = ast.get_body(node_id);
+    //             get_node_type(ast, body.variable, NodeUsage::Call)
+    //         }
+    //     }
+    // }
+    //
+    // fn children(&self, context: AstContext) -> NodeIterator<'_, Self::AstContext> {
+    //     let variable = NodeIterator::new(NodeIteratorBody::Single(NodeIDContext {
+    //         node_id: self.variable.into(),
+    //         context,
+    //     }));
+    //     let arguments = NodeIterator::slice(&self.args);
+    //     NodeIterator::chained(variable, arguments)
+    // }
 
     fn check(node_id: NodeID<Self>, ast: &mut Ast) -> crate::Result<()> {
         let call = ast.get_body(node_id);

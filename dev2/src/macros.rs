@@ -6,10 +6,7 @@ macro_rules! impl_node_conversions {
     ) => {
         impl From<$crate::ast::NodeID<$enum>> for $crate::ast::NodeID<$parent> {
             fn from(id: $crate::ast::NodeID<$enum>) -> Self {
-                // Safety: Only affects the marker type. The marker traits are
-                // never trusted and real conversion checks are always executed
-                // when extracting data.
-                unsafe { std::mem::transmute(id) }
+                $crate::ast::NodeID::new(id.into())
             }
         }
 
