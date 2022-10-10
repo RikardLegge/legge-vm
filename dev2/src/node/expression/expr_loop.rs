@@ -10,6 +10,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Deref;
 
+#[derive(Debug)]
 pub struct LoopStorage {
     pub body: NodeID<Block>,
     pub value: Option<NodeType>,

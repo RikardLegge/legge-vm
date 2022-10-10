@@ -6,7 +6,7 @@ macro_rules! impl_node_conversions {
     ) => {
         impl From<$crate::ast::NodeID<$enum>> for $crate::ast::NodeID<$parent> {
             fn from(id: $crate::ast::NodeID<$enum>) -> Self {
-                $crate::ast::NodeID::new(id.into())
+                $crate::ast::NodeID::new(id.inner())
             }
         }
 

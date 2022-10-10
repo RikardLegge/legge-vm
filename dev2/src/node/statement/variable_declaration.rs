@@ -4,6 +4,7 @@ use crate::node::{Ast, Expression, NodeID, Result, Variable, VariableDeclaration
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 
+#[derive(Debug)]
 pub struct VariableDeclarationStorage {
     variable: NodeID<Variable>,
     value: NodeID<Expression>,

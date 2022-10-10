@@ -1,17 +1,18 @@
+use std::convert::Infallible;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
 // All nodes have to implement this
-pub trait NodeBody {
+pub trait NodeBody: Debug {
     // The root node to enable simple type erasure.
     type Root: NodeBody + NodeDataStorage;
     // The data type used to store the body of this node. Must cast
     // to the a variant in the Storage enum.
-    type Data: Into<<Self::Root as NodeDataStorage>::Storage>;
+    type Data: Into<<Self::Root as NodeDataStorage>::Storage> + Debug;
 }
 
-pub trait NodeDataStorage {
-    type Storage: Default;
+pub trait NodeDataStorage: Debug {
+    type Storage: Default + Debug;
 }
 
 /// Implemented by all data types, ensures a 1-1 relation between
@@ -29,8 +30,8 @@ pub unsafe trait NodeData {
 #[derive(Debug)]
 pub struct NodeID<T: NodeBody + ?Sized>(usize, PhantomData<T>);
 
-impl<T: NodeBody + ?Sized> Into<usize> for NodeID<T> {
-    fn into(self) -> usize {
+impl<T: NodeBody + ?Sized> NodeID<T> {
+    pub fn inner(self) -> usize {
         self.0
     }
 }
@@ -57,6 +58,7 @@ impl<T: NodeBody> NodeID<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct Ast<Any: NodeBody<Root = Any> + NodeDataStorage> {
     nodes: Vec<AstNode<Any>>,
 }
@@ -66,11 +68,11 @@ impl<Any: NodeBody<Root = Any> + NodeDataStorage> Ast<Any> {
         Self { nodes: Vec::new() }
     }
 
-    pub fn node<T: NodeData>(
+    pub fn node<T: NodeData, E>(
         &mut self,
         parent_id: Option<NodeID<<Any as NodeBody>::Root>>,
-        body: impl FnOnce(&mut Self, NodeID<T::Node>) -> T,
-    ) -> NodeID<T::Node>
+        body: impl FnOnce(&mut Self, NodeID<T::Node>) -> Result<T, E>,
+    ) -> Result<NodeID<T::Node>, E>
     where
         T: Into<<Any as NodeDataStorage>::Storage>,
         NodeID<T::Node>: Into<NodeID<Any>>,
@@ -87,9 +89,22 @@ impl<Any: NodeBody<Root = Any> + NodeDataStorage> Ast<Any> {
             data: Default::default(),
         });
 
-        let data = body(self, id).into();
+        let data = body(self, id)?.into();
         self.nodes[index].data = data;
-        id
+        Ok(id)
+    }
+
+    pub fn node_body<T: NodeData>(
+        &mut self,
+        parent_id: Option<NodeID<<Any as NodeBody>::Root>>,
+        body: T,
+    ) -> NodeID<T::Node>
+    where
+        T: Into<<Any as NodeDataStorage>::Storage>,
+        NodeID<T::Node>: Into<NodeID<Any>>,
+    {
+        self.node::<T, Infallible>(parent_id, |_, _| Ok(body))
+            .unwrap()
     }
 
     pub fn get<T: NodeBody>(&self, id: NodeID<T>) -> &AstNode<T>
@@ -138,11 +153,11 @@ impl<Any: NodeBody<Root = Any> + NodeDataStorage> Ast<Any> {
         self.get_mut(id).body_mut()
     }
 
-    pub fn walk_up<T: NodeBody>(
+    pub fn walk_up<T: NodeBody, E>(
         &self,
         node_id: impl Into<NodeID<Any>>,
-        test: impl Fn(&AstNode<Any>) -> Result<Option<NodeID<T>>, ()>,
-    ) -> Result<Option<NodeID<T>>, ()> {
+        test: impl Fn(&AstNode<Any>) -> Result<Option<NodeID<T>>, E>,
+    ) -> Result<Option<NodeID<T>>, E> {
         let mut node_id: NodeID<Any> = node_id.into();
         loop {
             let node = self.get(node_id);
@@ -175,6 +190,7 @@ impl<Body: NodeBody> Clone for AstNodeRef<Body> {
 
 impl<Body: NodeBody> Copy for AstNodeRef<Body> {}
 
+#[derive(Debug)]
 #[repr(C)]
 pub struct AstNode<Body: NodeBody> {
     pub id: NodeID<Body>,

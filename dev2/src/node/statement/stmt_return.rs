@@ -1,12 +1,15 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
+use crate::linker::{Linker, LinkerContext};
 use crate::node::{
-    Ast, Expression, FunctionDeclaration, NodeID, Result, Return, TypeDeclaration, Variable,
+    Ast, Break, Expression, FunctionDeclaration, Loop, NodeID, Result, Return, TypeDeclaration,
+    Variable,
 };
 use crate::state::State;
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 
+#[derive(Debug)]
 pub struct ReturnStorage {
     pub func: State<(), NodeID<FunctionDeclaration>>,
     pub value: Option<NodeID<Expression>>,
@@ -37,6 +40,24 @@ impl Children for AstNodeRef<Return> {
         match node.value {
             Some(value) => ChildIterator::new(([value.into()].into())),
             None => ChildIterator::new([].into()),
+        }
+    }
+}
+
+impl Linker for AstNodeRef<Return> {
+    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+        let func = ast.walk_up(
+            self.id,
+            |node| match <&AstNode<FunctionDeclaration>>::try_from(node) {
+                Ok(node) => Ok(Some(node.id)),
+                Err(_) => Ok(None),
+            },
+        )?;
+        if let Some(func) = func {
+            ast.body_mut(self.id).func = State::Linked(func);
+            Ok(())
+        } else {
+            panic!();
         }
     }
 }

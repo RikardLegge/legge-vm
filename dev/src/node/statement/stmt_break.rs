@@ -22,40 +22,40 @@ use crate::{Error, State};
 //             None => NodeIterator::empty(),
 //         }
 //     }
-
-    fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> crate::Result<()> {
-        let node = ast.get_body(node_id);
-        let loop_id = match node.r#loop {
-            State::Unlinked(_) => {
-                let loop_id =
-                    ast.walk_up(node_id, |node| match <&AstNode<Loop>>::try_from(node) {
-                        Ok(node) => Ok(Some(node.id)),
-                        Err(_) => Ok(None),
-                    })?;
-                if let Some(loop_id) = loop_id {
-                    ast.get_body_mut(node_id).r#loop = State::Linked(loop_id);
-                    loop_id
-                } else {
-                    unimplemented!();
-                }
-            }
-            State::Linked(id) => id,
-        };
-
-        let loop_node = ast.get_body(loop_id);
-        if loop_node.value.is_none() {
-            let node = ast.get_body(node_id);
-            let tp = if let Some(value) = node.value {
-                get_node_type(ast, value, NodeUsage::Value)?
-            } else {
-                NodeType::Void
-            };
-            let loop_node = ast.get_body_mut(loop_id);
-            loop_node.value = Some(tp);
-        };
-
-        Ok(())
-    }
+//
+//     fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> crate::Result<()> {
+//         let node = ast.get_body(node_id);
+//         let loop_id = match node.r#loop {
+//             State::Unlinked(_) => {
+//                 let loop_id =
+//                     ast.walk_up(node_id, |node| match <&AstNode<Loop>>::try_from(node) {
+//                         Ok(node) => Ok(Some(node.id)),
+//                         Err(_) => Ok(None),
+//                     })?;
+//                 if let Some(loop_id) = loop_id {
+//                     ast.get_body_mut(node_id).r#loop = State::Linked(loop_id);
+//                     loop_id
+//                 } else {
+//                     unimplemented!();
+//                 }
+//             }
+//             State::Linked(id) => id,
+//         };
+//
+//         let loop_node = ast.get_body(loop_id);
+//         if loop_node.value.is_none() {
+//             let node = ast.get_body(node_id);
+//             let tp = if let Some(value) = node.value {
+//                 get_node_type(ast, value, NodeUsage::Value)?
+//             } else {
+//                 NodeType::Void
+//             };
+//             let loop_node = ast.get_body_mut(loop_id);
+//             loop_node.value = Some(tp);
+//         };
+//
+//         Ok(())
+//     }
 
     fn check(node_id: NodeID<Self>, ast: &mut Ast) -> crate::Result<()> {
         let node = ast.get_body(node_id);

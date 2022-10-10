@@ -8,6 +8,7 @@ use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::{Borrow, Cow};
 use std::ops::Deref;
 
+#[derive(Debug)]
 pub struct FunctionCallStorage {
     pub variable: NodeID<VariableValue>,
     pub args: Vec<NodeID<Expression>>,

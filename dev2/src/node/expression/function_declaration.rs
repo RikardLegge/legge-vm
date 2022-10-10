@@ -5,6 +5,7 @@ use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 use std::ops::Deref;
 
+#[derive(Debug)]
 pub struct FunctionDeclarationStorage {
     pub arguments: Vec<NodeID<Variable>>,
     pub returns: NodeType,

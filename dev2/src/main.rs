@@ -9,6 +9,7 @@ mod macros;
 mod node;
 mod state;
 mod token;
+mod tree_builder;
 mod types;
 
 fn main() {

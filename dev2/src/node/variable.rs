@@ -4,6 +4,7 @@ use crate::node::{Ast, NodeID, Result, Statement, TypeDeclaration, Variable, Var
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 
+#[derive(Debug)]
 pub struct VariableStorage {
     pub name: String,
     pub tp: Option<NodeType>,

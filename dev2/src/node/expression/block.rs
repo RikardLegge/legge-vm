@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Deref;
 
+#[derive(Debug)]
 pub struct BlockStorage {
     pub variables: HashMap<String, NodeID<Variable>>,
     pub children: Vec<NodeID<Statement>>,
@@ -15,16 +16,34 @@ pub struct BlockStorage {
 
 impl BlockStorage {
     pub fn new(children: Vec<NodeID<Statement>>, ast: &Ast) -> Self {
-        let variables = children
+        let variables = Self::variables(&children, ast);
+        let mut block = Self {
+            variables: Default::default(),
+            children: Default::default(),
+        };
+        block.set(children, variables);
+        block
+    }
+
+    pub fn variables(
+        children: &[NodeID<Statement>],
+        ast: &Ast,
+    ) -> HashMap<String, NodeID<Variable>> {
+        children
             .iter()
             .map(|id| ast.get(*id))
             .filter_map(|statement| statement.variable())
             .map(|id| (ast.body(id).name.to_string(), id))
-            .collect();
-        Self {
-            variables,
-            children,
-        }
+            .collect()
+    }
+
+    pub fn set(
+        &mut self,
+        children: Vec<NodeID<Statement>>,
+        variables: HashMap<String, NodeID<Variable>>,
+    ) {
+        self.variables = variables;
+        self.children = children;
     }
 }
 

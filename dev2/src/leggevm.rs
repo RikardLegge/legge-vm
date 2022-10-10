@@ -2,13 +2,12 @@ use crate::ast::AstNode;
 use crate::children::Children;
 use crate::node;
 use crate::node::{Any, Variable};
-use crate::types::{NodeUsage, Types};
 
 pub fn run() {
     let mut ast = node::Ast::new();
 
     // Create a new node of type Value
-    let id = ast.node(None, |_, _| node::VariableStorage::new("test".into()));
+    let id = ast.node_body(None, node::VariableStorage::new("test".into()));
 
     // Erase the type of the node handle
     // let id: node::NodeID = id.into();
