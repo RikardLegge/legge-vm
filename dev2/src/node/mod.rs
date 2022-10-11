@@ -4,6 +4,7 @@ mod variable;
 
 pub use crate::node::variable::*;
 
+use crate::linker::{Linker, LinkerContext};
 pub use crate::node::expression::{
     BlockStorage, ExpressionChainStorage, FunctionCallStorage, FunctionDeclarationStorage,
     IfStorage, LoopStorage, OperationStorage, ValueStorage, VariableValueStorage,
@@ -134,5 +135,12 @@ impl Types for ast::AstNodeRef<Any> {
     ) -> Result<Cow<'ast, NodeType>> {
         let node = ast.get(self.id);
         reified! {node.get_type(ast, usage)}
+    }
+}
+
+impl Linker for ast::AstNodeRef<Any> {
+    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+        let node = ast.get(self.id);
+        reified! {node.link(ast, context)}
     }
 }

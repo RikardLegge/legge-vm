@@ -1,7 +1,9 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
+use crate::linker::{Linker, LinkerContext};
 use crate::node::statement::ReturnStorage;
 use crate::node::{Ast, Block, Expression, NodeID, Result, Statement, TypeDeclaration, Variable};
+use crate::reified;
 use crate::state::State;
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
@@ -81,4 +83,8 @@ impl Children for AstNodeRef<Block> {
         let node = ast.body(self.id);
         ChildIterator::new(([node.children.deref().into()].into()))
     }
+}
+
+impl Linker for AstNodeRef<Block> {
+    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {}
 }

@@ -574,6 +574,7 @@ where
                     TokenType::ConstDeclaration => {
                         self.tokens.next()?;
 
+                        // TODO: Investigate if removing the explicit type parameter is a compiler bug
                         self.node::<StaticAssignmentStorage>(move |mut builder| {
                             let assign_to = builder.variable_value(name);
                             let variable = builder.variable(field);

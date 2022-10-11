@@ -15,7 +15,8 @@ pub use variable_assignment::*;
 pub use variable_declaration::*;
 
 use crate::ast::{AstNode, AstNodeRef};
-use crate::node::{Ast, NodeID, Result, Statement, Storage, Variable};
+use crate::linker::{Linker, LinkerContext};
+use crate::node::{Ast, Expression, NodeID, Result, Statement, Storage, Variable};
 use crate::reified;
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
@@ -28,6 +29,13 @@ impl Types for AstNodeRef<Statement> {
     ) -> Result<Cow<'ast, NodeType>> {
         let node = ast.get(self.id);
         reified! {node.get_type(ast, usage)}
+    }
+}
+
+impl Linker for AstNodeRef<Statement> {
+    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+        let node = ast.get(self.id);
+        reified! {node.link(ast, context)}
     }
 }
 

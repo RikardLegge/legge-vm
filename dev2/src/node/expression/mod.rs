@@ -19,11 +19,12 @@ pub use value::*;
 pub use variable_value::*;
 
 use crate::ast::AstNodeRef;
+use crate::linker::{Linker, LinkerContext};
 use crate::node::{Ast, Expression, Result};
 use std::borrow::Cow;
 
-use crate::reified;
 use crate::types::{NodeType, NodeUsage, Types};
+use crate::{ast, reified};
 
 impl Types for AstNodeRef<Expression> {
     fn get_type<'this, 'ast>(
@@ -33,5 +34,12 @@ impl Types for AstNodeRef<Expression> {
     ) -> Result<Cow<'ast, NodeType>> {
         let node = ast.get(self.id);
         reified! {node.get_type(ast, usage)}
+    }
+}
+
+impl Linker for AstNodeRef<Expression> {
+    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+        let node = ast.get(self.id);
+        reified! {node.link(ast, context)}
     }
 }
