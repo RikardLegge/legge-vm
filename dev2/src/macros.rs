@@ -172,7 +172,7 @@ macro_rules! build_ast_node_child {
 
         // Safety: Unclear why this has to be unsafe.
         // Better (un)safe than sorry?
-        unsafe impl $crate::ast::NodeData for $data {
+        impl $crate::ast::NodeData for $data {
             type Node = $leaf;
         }
 

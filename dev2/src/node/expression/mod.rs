@@ -37,9 +37,9 @@ impl Types for AstNodeRef<Expression> {
     }
 }
 
-impl Linker for AstNodeRef<Expression> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
-        let node = ast.get(self.id);
-        reified! {node.link(ast, context)}
-    }
-}
+// impl Linker for AstNodeRef<Expression> {
+// fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+//     let node = ast.get(self.id);
+// reified! {node.link(ast, context)}
+// }
+// }

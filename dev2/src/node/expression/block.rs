@@ -84,7 +84,3 @@ impl Children for AstNodeRef<Block> {
         ChildIterator::new(([node.children.deref().into()].into()))
     }
 }
-
-impl Linker for AstNodeRef<Block> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {}
-}

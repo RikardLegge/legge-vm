@@ -138,9 +138,9 @@ impl Types for ast::AstNodeRef<Any> {
     }
 }
 
-impl Linker for ast::AstNodeRef<Any> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
-        let node = ast.get(self.id);
-        reified! {node.link(ast, context)}
-    }
-}
+// impl Linker for ast::AstNodeRef<Any> {
+//     fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+//         let node = ast.get(self.id);
+//         reified! {node.link(ast, context)}
+//     }
+// }

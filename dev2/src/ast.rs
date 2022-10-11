@@ -21,7 +21,7 @@ pub trait NodeDataStorage: Debug {
 ///
 /// # Safety
 /// TODO: Does this have to be unsafe?
-pub unsafe trait NodeData {
+pub trait NodeData {
     type Node: NodeBody<Data = Self>;
 }
 
@@ -89,9 +89,10 @@ impl<Any: NodeBody<Root = Any> + NodeDataStorage> Ast<Any> {
             data: Default::default(),
         });
 
-        let data = body(self, id)?.into();
-        self.nodes[index].data = data;
-        Ok(id)
+        unimplemented!()
+        // let data = body(self, id)?.into();
+        // self.nodes[index].data = data;
+        // Ok(id)
     }
 
     pub fn node_body<T: NodeData>(
@@ -103,8 +104,7 @@ impl<Any: NodeBody<Root = Any> + NodeDataStorage> Ast<Any> {
         T: Into<<Any as NodeDataStorage>::Storage>,
         NodeID<T::Node>: Into<NodeID<Any>>,
     {
-        self.node::<T, Infallible>(parent_id, |_, _| Ok(body))
-            .unwrap()
+        unimplemented!()
     }
 
     pub fn get<T: NodeBody>(&self, id: NodeID<T>) -> &AstNode<T>
