@@ -4,10 +4,7 @@ mod variable;
 
 pub use crate::node::variable::*;
 
-use crate::node::expression::{BlockStorage, FunctionDeclarationStorage, LoopStorage};
-use crate::node::statement::{
-    BreakStorage, ReturnStorage, TypeDeclarationStorage, VariableDeclarationStorage,
-};
+use crate::node::statement::{TypeDeclarationStorage, VariableDeclarationStorage};
 use crate::types::{NodeType, NodeUsage, Types};
 use crate::{ast, build_ast};
 use std::borrow::Cow;
@@ -23,16 +20,10 @@ build_ast! {
     Storage = Storage,
     Any [
         Variable(VariableStorage),
-        Expression [
-            Block(BlockStorage),
-            Loop(LoopStorage),
-            FunctionDeclaration(FunctionDeclarationStorage)
-        ],
+        Expression [],
         Statement [
             VariableDeclaration(VariableDeclarationStorage),
-            TypeDeclaration(TypeDeclarationStorage),
-            Return(ReturnStorage),
-            Break(BreakStorage)
+            TypeDeclaration(TypeDeclarationStorage)
         ]
     ]
 }
@@ -43,15 +34,10 @@ pub enum Storage {
     Any(()),
 
     Expression(()),
-    Block(BlockStorage),
-    Loop(LoopStorage),
-    FunctionDeclaration(FunctionDeclarationStorage),
 
     Statement(()),
     VariableDeclaration(VariableDeclarationStorage),
     TypeDeclaration(TypeDeclarationStorage),
-    Return(ReturnStorage),
-    Break(BreakStorage),
 
     Variable(VariableStorage),
 }
@@ -64,10 +50,7 @@ macro_rules! reified {
         $crate::reified! {@matches $node
             Any |
             Expression |
-                Block | FunctionDeclaration | Loop |
-            Statement |
-                VariableDeclaration | TypeDeclaration |
-                Return | Break |
+            Statement | VariableDeclaration | TypeDeclaration |
             Variable
                 => { $node $($rest)* }
         }

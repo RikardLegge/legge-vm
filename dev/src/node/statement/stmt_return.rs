@@ -4,25 +4,25 @@ use crate::node::{
     NodeType, Variable,
 };
 use crate::{Error, State};
-//
-// #[derive(Debug, Clone)]
-// pub struct Return {
-//     pub func: State<(), NodeID<FunctionDeclaration>>,
-//     pub value: Option<NodeID<Expression>>,
-// }
-//
-// impl NodeBody for Return {
-//     type Root = AstRootNode;
-//     type NodeType = NodeType;
-//     type AstContext = AstContext;
-//     type Variable = Variable;
-//
-//     fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
-//         match self.value {
-//             Some(value) => NodeIterator::single(value),
-//             None => NodeIterator::empty(),
-//         }
-//     }
+
+#[derive(Debug, Clone)]
+pub struct Return {
+    pub func: State<(), NodeID<FunctionDeclaration>>,
+    pub value: Option<NodeID<Expression>>,
+}
+
+impl NodeBody for Return {
+    type Root = AstRootNode;
+    type NodeType = NodeType;
+    type AstContext = AstContext;
+    type Variable = Variable;
+
+    fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
+        match self.value {
+            Some(value) => NodeIterator::single(value),
+            None => NodeIterator::empty(),
+        }
+    }
 
     fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> crate::Result<()> {
         let func = ast.walk_up(
