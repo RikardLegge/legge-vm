@@ -1,50 +1,45 @@
-use crate::ast::{NodeID, NodeIDContext};
-use std::fmt::Debug;
+use crate::ast::AstContext;
+use crate::node::NodeIDContext;
+use crate::NodeID;
 
-pub enum NodeIteratorBody<'a, AstContext: Copy + Debug> {
+pub enum NodeIteratorBody<'a> {
     Empty,
-    Single(NodeIDContext<AstContext>),
-    Dual(NodeIDContext<AstContext>, NodeIDContext<AstContext>),
+    Single(NodeIDContext),
+    Dual(NodeIDContext, NodeIDContext),
     Slice(&'a [NodeID]),
-    Chained(
-        Box<NodeIterator<'a, AstContext>>,
-        Box<NodeIterator<'a, AstContext>>,
-    ),
+    Chained(Box<NodeIterator<'a>>, Box<NodeIterator<'a>>),
 }
 
-pub struct NodeIterator<'a, AstContext: Copy + Debug> {
+pub struct NodeIterator<'a> {
     index: usize,
-    items: NodeIteratorBody<'a, AstContext>,
+    items: NodeIteratorBody<'a>,
 }
 
-impl<'a, AstContext: Copy + Debug> NodeIterator<'a, AstContext> {
-    pub fn new(items: NodeIteratorBody<'a, AstContext>) -> NodeIterator<'a, AstContext> {
+impl<'a> NodeIterator<'a> {
+    pub fn new(items: NodeIteratorBody<'a>) -> NodeIterator<'a> {
         Self { index: 0, items }
     }
 
-    pub fn empty() -> NodeIterator<'a, AstContext> {
+    pub fn empty() -> NodeIterator<'a> {
         Self::new(NodeIteratorBody::Empty)
     }
 
-    pub fn single(first: impl Into<NodeIDContext<AstContext>>) -> NodeIterator<'a, AstContext> {
+    pub fn single(first: impl Into<NodeIDContext>) -> NodeIterator<'a> {
         Self::new(NodeIteratorBody::Single(first.into()))
     }
 
     pub fn dual(
-        first: impl Into<NodeIDContext<AstContext>>,
-        second: impl Into<NodeIDContext<AstContext>>,
-    ) -> NodeIterator<'a, AstContext> {
+        first: impl Into<NodeIDContext>,
+        second: impl Into<NodeIDContext>,
+    ) -> NodeIterator<'a> {
         Self::new(NodeIteratorBody::Dual(first.into(), second.into()))
     }
 
-    pub fn chained(
-        first: NodeIterator<'a, AstContext>,
-        second: NodeIterator<'a, AstContext>,
-    ) -> NodeIterator<'a, AstContext> {
+    pub fn chained(first: NodeIterator<'a>, second: NodeIterator<'a>) -> NodeIterator<'a> {
         Self::new(NodeIteratorBody::Chained(Box::new(first), Box::new(second)))
     }
 
-    pub fn slice<T>(slice: &[NodeID<T>]) -> NodeIterator<'a, AstContext> {
+    pub fn slice<T>(slice: &[NodeID<T>]) -> NodeIterator<'a> {
         // Safety: A slice is a contiguous piece of memory and can not change it's
         // bit representation. NodeID is also repr(transparent) to ensure that the
         // marker trait does not have an affect on the layout in future versions.
@@ -53,8 +48,8 @@ impl<'a, AstContext: Copy + Debug> NodeIterator<'a, AstContext> {
     }
 }
 
-impl<'a, AstContext: Copy + Debug + Default> Iterator for NodeIterator<'a, AstContext> {
-    type Item = NodeIDContext<AstContext>;
+impl<'a> Iterator for NodeIterator<'a> {
+    type Item = NodeIDContext;
 
     fn next(&mut self) -> Option<Self::Item> {
         let result = match self.items {
@@ -66,7 +61,7 @@ impl<'a, AstContext: Copy + Debug + Default> Iterator for NodeIterator<'a, AstCo
             NodeIteratorBody::Slice(slice) => {
                 slice.get(self.index).cloned().map(|node| NodeIDContext {
                     node_id: node,
-                    context: AstContext::default(),
+                    context: AstContext::Default,
                 })
             }
 

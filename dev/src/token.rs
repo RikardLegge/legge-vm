@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fmt::Formatter;
 
 macro_rules! collect_while {
     ($self:ident, $val:pat) => {{
@@ -76,7 +77,7 @@ pub enum KeyName {
 }
 
 impl fmt::Display for KeyName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use KeyName::*;
         match self {
             Import => write!(f, "import"),
@@ -140,7 +141,7 @@ impl TryFrom<&str> for ArithmeticOP {
 }
 
 impl fmt::Display for ArithmeticOP {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use ArithmeticOP::*;
         match self {
             Add => write!(f, "+"),
@@ -201,7 +202,7 @@ impl TryFrom<&str> for KeyName {
 }
 
 impl<'a> fmt::Display for TokenType<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use TokenType::*;
         match self {
             Comment(comment) => write!(f, "// {comment}"),

@@ -1,7 +1,8 @@
-use crate::ast::{NodeBody, NodeID, NodeIterator, NodeUsage};
-use crate::node::{get_node_type, Ast, AstContext, AstRootNode, NodeType, Statement, Variable};
-use crate::{Error, Result};
+use crate::ast::AstContext;
+use crate::node::{Node, NodeID, NodeIterator, NodeType, NodeUsage, Statement};
+use crate::{Ast, Error, Result, Variable};
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -24,12 +25,7 @@ impl Block {
     }
 }
 
-impl NodeBody for Block {
-    type Root = AstRootNode;
-    type NodeType = NodeType;
-    type AstContext = AstContext;
-    type Variable = Variable;
-
+impl Node for Block {
     fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
         match usage {
             NodeUsage::Type => Err(Error::InternalError),
@@ -39,13 +35,13 @@ impl NodeBody for Block {
                 let last = node.body().children.last();
                 match last {
                     None => Ok(NodeType::Void),
-                    Some(last) => get_node_type(ast, *last, usage),
+                    Some(last) => ast.get_node_type(*last, usage),
                 }
             }
         }
     }
 
-    fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
+    fn children(&self, _context: AstContext) -> NodeIterator<'_> {
         NodeIterator::slice(&self.children)
     }
 
