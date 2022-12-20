@@ -1,11 +1,11 @@
 #![feature(associated_type_defaults)]
 
 mod ast;
-mod leggevm;
+mod legge_vm;
 mod macros;
 mod node;
 mod types;
 
 fn main() {
-    leggevm::run();
+    legge_vm::run();
 }
