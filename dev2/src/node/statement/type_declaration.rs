@@ -1,6 +1,9 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
-use crate::node::{Ast, Expression, NodeID, Result, TypeDeclaration, Variable};
+use crate::linker::Linker;
+use crate::node::{
+    Ast, Expression, FunctionDeclaration, NodeID, Result, TypeDeclaration, Variable, VariableValue,
+};
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -9,13 +12,13 @@ use std::ops::Deref;
 #[derive(Debug)]
 pub struct TypeDeclarationStorage {
     pub variable: NodeID<Variable>,
-    pub constructor: NodeID<Expression>,
+    pub constructor: NodeID<FunctionDeclaration>,
     pub fields: Vec<NodeID<Variable>>,
     pub associated_values: HashMap<String, NodeID<Variable>>,
 }
 
 impl TypeDeclarationStorage {
-    pub fn new(variable: NodeID<Variable>, constructor: NodeID<Expression>) -> Self {
+    pub fn new(variable: NodeID<Variable>, constructor: NodeID<FunctionDeclaration>) -> Self {
         Self {
             variable,
             constructor,
@@ -61,3 +64,5 @@ impl Children for AstNodeRef<TypeDeclaration> {
         )
     }
 }
+
+impl Linker for AstNodeRef<TypeDeclaration> {}

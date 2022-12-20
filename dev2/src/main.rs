@@ -13,5 +13,5 @@ mod tree_builder;
 mod types;
 
 fn main() {
-    leggevm::run();
+    leggevm::run().unwrap();
 }

@@ -1,11 +1,19 @@
 use std::convert::Infallible;
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
+
+#[derive(Debug)]
+pub enum Error<Any: NodeBody> {
+    NodeCasting,
+    Other(PhantomData<Any>),
+}
+
+trait System {}
 
 // All nodes have to implement this
 pub trait NodeBody: Debug {
     // The root node to enable simple type erasure.
-    type Root: NodeBody + NodeDataStorage;
+    type System: NodeBody + NodeDataStorage;
     // The data type used to store the body of this node. Must cast
     // to the a variant in the Storage enum.
     type Data: Into<<Self::Root as NodeDataStorage>::Storage> + Debug;
@@ -27,8 +35,13 @@ pub unsafe trait NodeData {
 
 // A typed array index into the Ast
 #[repr(transparent)]
-#[derive(Debug)]
 pub struct NodeID<T: NodeBody + ?Sized>(usize, PhantomData<T>);
+
+impl<T: NodeBody> Debug for NodeID<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Node({})", self.0)
+    }
+}
 
 impl<T: NodeBody + ?Sized> NodeID<T> {
     pub fn inner(self) -> usize {
@@ -58,12 +71,19 @@ impl<T: NodeBody> NodeID<T> {
     }
 }
 
-#[derive(Debug)]
 pub struct Ast<Any: NodeBody<Root = Any> + NodeDataStorage> {
     nodes: Vec<AstNode<Any>>,
 }
 
 impl<Any: NodeBody<Root = Any> + NodeDataStorage> Ast<Any> {
+    pub fn root(&self) -> Option<NodeID<Any>> {
+        if self.nodes.is_empty() {
+            None
+        } else {
+            Some(NodeID(0, PhantomData::default()))
+        }
+    }
+
     pub fn new() -> Self {
         Self { nodes: Vec::new() }
     }
@@ -176,7 +196,7 @@ impl<Any: NodeBody<Root = Any> + NodeDataStorage> Ast<Any> {
 
 pub struct AstNodeRef<Body: NodeBody + ?Sized> {
     pub id: NodeID<Body>,
-    pub parent_id: Option<NodeID<Body::Root>>,
+    pub parent_id: Option<NodeID<Body::System>>,
 }
 
 impl<Body: NodeBody> Clone for AstNodeRef<Body> {
@@ -198,38 +218,38 @@ pub struct AstNode<Body: NodeBody> {
     data: <Body::Root as NodeDataStorage>::Storage,
 }
 
-impl<Body: NodeBody> AstNode<Body> {
-    pub fn storage(&self) -> &<Body::Root as NodeDataStorage>::Storage {
+impl<Any: NodeBody> AstNode<Any> {
+    pub fn storage(&self) -> &<Any::Root as NodeDataStorage>::Storage {
         &self.data
     }
 
-    pub fn get_ref(&self) -> AstNodeRef<Body> {
+    pub fn get_ref(&self) -> AstNodeRef<Any> {
         AstNodeRef {
             id: self.id,
             parent_id: self.parent_id,
         }
     }
 
-    pub fn body<'a>(&'a self) -> &'a Body::Data
+    pub fn body<'a>(&'a self) -> &'a Any::Data
     where
-        Body::Data: NodeData,
-        &'a <Body::Root as NodeDataStorage>::Storage: TryInto<&'a Body::Data>,
-        <&'a <Body::Root as NodeDataStorage>::Storage as TryInto<&'a Body::Data>>::Error: Debug,
+        Any::Data: NodeData,
+        &'a <Any::Root as NodeDataStorage>::Storage: TryInto<&'a Any::Data>,
+        <&'a <Any::Root as NodeDataStorage>::Storage as TryInto<&'a Any::Data>>::Error: Debug,
     {
-        let storage: &<Body::Root as NodeDataStorage>::Storage = &self.data;
-        let body: &Body::Data = storage.try_into().unwrap();
+        let storage: &<Any::Root as NodeDataStorage>::Storage = &self.data;
+        let body: &Any::Data = storage.try_into().unwrap();
         body
     }
 
-    pub fn body_mut<'a>(&'a mut self) -> &'a mut Body::Data
+    pub fn body_mut<'a>(&'a mut self) -> &'a mut Any::Data
     where
-        Body::Data: NodeData,
-        &'a mut <Body::Root as NodeDataStorage>::Storage: TryInto<&'a mut Body::Data>,
-        <&'a mut <Body::Root as NodeDataStorage>::Storage as TryInto<&'a mut Body::Data>>::Error:
+        Any::Data: NodeData,
+        &'a mut <Any::Root as NodeDataStorage>::Storage: TryInto<&'a mut Any::Data>,
+        <&'a mut <Any::Root as NodeDataStorage>::Storage as TryInto<&'a mut Any::Data>>::Error:
             Debug,
     {
-        let storage: &mut <Body::Root as NodeDataStorage>::Storage = &mut self.data;
-        let body: &mut Body::Data = storage.try_into().unwrap();
+        let storage: &mut <Any::Root as NodeDataStorage>::Storage = &mut self.data;
+        let body: &mut Any::Data = storage.try_into().unwrap();
         body
     }
 }

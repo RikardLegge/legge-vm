@@ -1,9 +1,9 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
-use crate::linker::{Linker, LinkerContext, LinkerExt};
+use crate::linker::{LinkContext, Linker, LinkerExt};
 use crate::node::{
-    Ast, Break, Expression, FunctionDeclaration, Loop, NodeID, Result, Return, TypeDeclaration,
-    Variable,
+    Ast, Break, Error, Expression, FunctionDeclaration, Loop, NodeID, Result, Return,
+    TypeDeclaration, Variable,
 };
 use crate::state::State;
 use crate::types::{NodeType, NodeUsage, Types};
@@ -45,13 +45,13 @@ impl Children for AstNodeRef<Break> {
 }
 
 impl Linker for AstNodeRef<Break> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+    fn link(&self, ast: &mut Ast, context: LinkContext) -> Result<()> {
         let node = ast.body(self.id);
         let loop_id = match node.r#loop {
             State::Unlinked(_) => {
                 let loop_id =
                     ast.walk_up(self.id, |node| match <&AstNode<Loop>>::try_from(node) {
-                        Ok(node) => Ok(Some(node.id)),
+                        Ok(node) => Ok::<_, Error>(Some(node.id)),
                         Err(_) => Ok(None),
                     })?;
                 if let Some(loop_id) = loop_id {

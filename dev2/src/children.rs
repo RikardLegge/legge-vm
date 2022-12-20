@@ -1,4 +1,5 @@
 use crate::ast::{AstNode, AstNodeRef, NodeBody};
+use crate::linker::{LinkContext, Linker};
 use crate::node::{Ast, NodeID};
 
 // Example of dynamically adding methods to the AST, which respect the node types

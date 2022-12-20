@@ -1,14 +1,15 @@
 use crate::ast::AstNodeRef;
 use crate::children::{ChildIterator, Children};
-use crate::node::{Ast, Expression, NodeID, Result, Variable, VariableDeclaration};
+use crate::linker::Linker;
+use crate::node::{Ast, Expression, NodeID, Result, Variable, VariableDeclaration, VariableValue};
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 
 #[derive(Debug)]
 pub struct VariableDeclarationStorage {
-    variable: NodeID<Variable>,
-    value: NodeID<Expression>,
-    is_const: bool,
+    pub variable: NodeID<Variable>,
+    pub value: NodeID<Expression>,
+    pub is_const: bool,
 }
 
 impl VariableDeclarationStorage {
@@ -43,3 +44,5 @@ impl Children for AstNodeRef<VariableDeclaration> {
         ChildIterator::new([node.variable.into(), node.value.into()].into())
     }
 }
+
+impl Linker for AstNodeRef<VariableDeclaration> {}

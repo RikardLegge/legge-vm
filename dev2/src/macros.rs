@@ -1,7 +1,9 @@
 #[macro_export]
 macro_rules! impl_node_conversions {
     (
+        Root = $root:ident,
         Storage = $storage:ident,
+        Children = [$($child:ident),* $(,)?],
         $enum:ident for $parent:ident
     ) => {
         impl From<$crate::ast::NodeID<$enum>> for $crate::ast::NodeID<$parent> {
@@ -40,33 +42,33 @@ macro_rules! impl_node_conversions {
         }
 
         impl TryFrom<$crate::ast::AstNode<$parent>> for $crate::ast::AstNode<$enum> {
-            type Error = ();
+            type Error = $crate::ast::Error<$root>;
 
             fn try_from(node: $crate::ast::AstNode<$parent>) -> Result<Self, Self::Error> {
                 match node.storage() {
-                    $storage::$enum(value) => {
+                    $($storage::$child(_))|* => {
                         // Safety: Only affects the marker type. The marker traits are
                         // never trusted and real conversion checks are always executed
                         // when extracting data.
-                        unsafe { std::mem::transmute(node) }
+                        Ok(unsafe { std::mem::transmute(node) })
                     }
-                    _ => Err(()),
+                    _ => Err($crate::ast::Error::NodeCasting),
                 }
             }
         }
 
         impl<'a> TryFrom<&'a $crate::ast::AstNode<$parent>> for &'a $crate::ast::AstNode<$enum> {
-            type Error = ();
+            type Error = $crate::ast::Error<$root>;
 
             fn try_from(node: &'a $crate::ast::AstNode<$parent>) -> Result<Self, Self::Error> {
                 match node.storage() {
-                    $storage::$enum(value) => {
+                    $($storage::$child(_))|* => {
                         // Safety: Only affects the marker type. The marker traits are
                         // never trusted and real conversion checks are always executed
                         // when extracting data.
-                        unsafe { std::mem::transmute(node) }
+                        Ok(unsafe { std::mem::transmute(node) })
                     }
-                    _ => Err(()),
+                    _ => Err($crate::ast::Error::NodeCasting),
                 }
             }
         }
@@ -74,17 +76,17 @@ macro_rules! impl_node_conversions {
         impl<'a> TryFrom<&'a mut $crate::ast::AstNode<$parent>>
             for &'a mut $crate::ast::AstNode<$enum>
         {
-            type Error = ();
+            type Error = $crate::ast::Error<$root>;
 
             fn try_from(node: &'a mut $crate::ast::AstNode<$parent>) -> Result<Self, Self::Error> {
                 match node.storage() {
-                    $storage::$enum(value) => {
+                    $($storage::$child(_))|* => {
                         // Safety: Only affects the marker type. The marker traits are
                         // never trusted and real conversion checks are always executed
                         // when extracting data.
-                        unsafe { std::mem::transmute(node) }
+                        Ok(unsafe { std::mem::transmute(node) })
                     }
-                    _ => Err(()),
+                    _ => Err($crate::ast::Error::NodeCasting),
                 }
             }
         }
@@ -107,11 +109,15 @@ macro_rules! build_ast_node_child {
         );
 
         $($crate::impl_node_conversions!(
+            Root = $root,
             Storage = $storage,
+            Children = [$enum],
             $enum for $parent
         );)*
         $crate::impl_node_conversions!(
+            Root = $root,
             Storage = $storage,
+            Children = [$enum],
             $enum for $item
         );
     };
@@ -176,13 +182,19 @@ macro_rules! build_ast_node_child {
             type Node = $leaf;
         }
 
-        $crate::impl_storage_conversions!($leaf($data) for $storage);
+        $crate::impl_storage_conversions!(
+            Root = $root,
+            $leaf($data) for $storage
+        );
     };
 }
 
 #[macro_export]
 macro_rules! impl_storage_conversions {
-    ($leaf:ident($data:ident) for $storage:ident) => {
+    (
+        Root = $root:ident,
+        $leaf:ident($data:ident) for $storage:ident
+    ) => {
         impl From<$data> for $storage {
             fn from(value: $data) -> Self {
                 Storage::$leaf(value)
@@ -190,34 +202,34 @@ macro_rules! impl_storage_conversions {
         }
 
         impl TryFrom<$storage> for $data {
-            type Error = ();
+            type Error = $crate::ast::Error<$root>;
 
             fn try_from(storage: $storage) -> Result<Self, Self::Error> {
                 match storage {
                     $storage::$leaf(value) => Ok(value),
-                    _ => Err(()),
+                    _ => Err($crate::ast::Error::NodeCasting),
                 }
             }
         }
 
         impl<'a> TryFrom<&'a $storage> for &'a $data {
-            type Error = ();
+            type Error = $crate::ast::Error<$root>;
 
             fn try_from(storage: &'a $storage) -> Result<Self, Self::Error> {
                 match storage {
                     $storage::$leaf(value) => Ok(value),
-                    _ => Err(()),
+                    _ => Err($crate::ast::Error::NodeCasting),
                 }
             }
         }
 
         impl<'a> TryFrom<&'a mut $storage> for &'a mut $data {
-            type Error = ();
+            type Error = $crate::ast::Error<$root>;
 
             fn try_from(storage: &'a mut $storage) -> Result<Self, Self::Error> {
                 match storage {
                     $storage::$leaf(value) => Ok(value),
-                    _ => Err(()),
+                    _ => Err($crate::ast::Error::NodeCasting),
                 }
             }
         }

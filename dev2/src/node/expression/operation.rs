@@ -1,5 +1,6 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
+use crate::linker::Linker;
 use crate::node::expression::ExpressionChainStorage;
 use crate::node::statement::ReturnStorage;
 use crate::node::{
@@ -57,3 +58,5 @@ impl Children for AstNodeRef<Operation> {
         ChildIterator::new([node.lhs.into(), node.rhs.into()].into())
     }
 }
+
+impl Linker for AstNodeRef<Operation> {}

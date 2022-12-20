@@ -1,6 +1,6 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
-use crate::linker::{Linker, LinkerContext, LinkerExt};
+use crate::linker::{LinkContext, Linker, LinkerExt};
 use crate::node::{
     Ast, Break, Error, EvaluateExpression, Expression, FunctionDeclaration, Loop, NodeID, Result,
     Return, StaticAssignment, TypeDeclaration, Variable, VariableAssignment,
@@ -42,12 +42,12 @@ impl Children for AstNodeRef<VariableAssignment> {
 }
 
 impl Linker for AstNodeRef<VariableAssignment> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+    fn link(&self, ast: &mut Ast, context: LinkContext) -> Result<()> {
         let node = ast.body(self.id);
         if let State::Unlinked(var) = &node.variable {
             let var = ast
                 .closest_variable(self.id, var, context)?
-                .ok_or_else(|| Error::VariableNotFound(var.into()))?;
+                .ok_or_else(|| Error::VariableNotFound(var.into(), context))?;
 
             let node = ast.body_mut(self.id);
             node.variable = State::Linked(var);

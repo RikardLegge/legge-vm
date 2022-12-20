@@ -1,7 +1,7 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
-use crate::linker::LinkerContext::Node;
-use crate::linker::{Linker, LinkerContext, LinkerExt};
+use crate::linker::LinkContext::Node;
+use crate::linker::{LinkContext, Linker, LinkerExt};
 use crate::node::statement::ReturnStorage;
 use crate::node::{
     Ast, Block, Error, Expression, Loop, NodeID, Result, Statement, Storage, TypeDeclaration,
@@ -47,12 +47,16 @@ impl Children for AstNodeRef<VariableValue> {
 }
 
 impl Linker for AstNodeRef<VariableValue> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+    fn link(&self, ast: &mut Ast, context: LinkContext) -> Result<()> {
         let body = ast.body(self.id);
         if let State::Unlinked(var) = &body.variable {
             let var = ast
                 .closest_variable(self.id, var, context)?
-                .ok_or_else(|| panic!("variable not found {}", var))?; //Error::VariableNotFound(var.into()))?;
+                .ok_or_else(|| Error::VariableNotFound(var.into(), context))
+                .map_err(|err| {
+                    panic!("{:?}", err);
+                    err
+                })?;
 
             let body = ast.body_mut(self.id);
             body.variable = State::Linked(var);

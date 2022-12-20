@@ -1,23 +1,28 @@
-use crate::ast::{AstNode, AstNodeRef};
+use crate::ast::{AstNode, AstNodeRef, NodeBody};
 use crate::children::{ChildIterator, Children};
-use crate::linker::{Linker, LinkerContext};
-use crate::node::statement::ReturnStorage;
-use crate::node::{Ast, Block, Expression, NodeID, Result, Statement, TypeDeclaration, Variable};
-use crate::reified;
-use crate::state::State;
+use crate::linker::Linker;
+use crate::node::{
+    Any, Ast, Block, Error, NodeID, Result, Statement, Storage, TypeDeclaration, Variable,
+};
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Deref;
 
+impl From<()> for Storage {
+    fn from(_: ()) -> Self {
+        Storage::Any(())
+    }
+}
+
 #[derive(Debug)]
 pub struct BlockStorage {
     pub variables: HashMap<String, NodeID<Variable>>,
-    pub children: Vec<NodeID<Statement>>,
+    pub children: Vec<NodeID<dyn Statement>>,
 }
 
 impl BlockStorage {
-    pub fn new(children: Vec<NodeID<Statement>>, ast: &Ast) -> Self {
+    pub fn new(children: Vec<NodeID<dyn Statement>>, ast: &Ast) -> Self {
         let variables = Self::variables(&children, ast);
         let mut block = Self {
             variables: Default::default(),
@@ -66,8 +71,7 @@ impl Types for AstNodeRef<Block> {
         usage: NodeUsage,
     ) -> Result<Cow<'ast, NodeType>> {
         match usage {
-            NodeUsage::Type => panic!(),
-            NodeUsage::Value => {
+            NodeUsage::Type | NodeUsage::Value => {
                 let last = ast.body(self.id).children.last();
                 match last {
                     None => Ok(Cow::Owned(NodeType::Void)),
@@ -85,6 +89,4 @@ impl Children for AstNodeRef<Block> {
     }
 }
 
-impl Linker for AstNodeRef<Block> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {}
-}
+impl Linker for AstNodeRef<Block> {}

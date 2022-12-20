@@ -1,23 +1,53 @@
-use crate::ast::AstNode;
-use crate::children::Children;
-use crate::node;
-use crate::node::{Any, Variable};
+use crate::node::{Result, Variable};
+use crate::{checker, linker, token, tree_builder};
 
-pub fn run() {
-    let mut ast = node::Ast::new();
+pub fn run() -> Result<()> {
+    let tokens = token::from_chars(
+        r#"
+    A -> type {};
+    // A.value :: 2;
+    
+    // test();
+    
+    // test :: fn () {
+    // };
+    
+    A.func :: fn(self) -> Int {
+        return 1;
+    };
+    
+    // c := if 1 == 1 {
+    //     1
+    // } else loop {
+    //     break 2;
+    // };
+    
+    // loop {
+    //     break 2;
+    // };
+     
+    a := A(); 
+    a.func();
+    // A.func(a);
+    // b := a.value;
+    "#,
+    );
+    println!(
+        "[\n  {}\n]",
+        tokens
+            .iter()
+            .map(|t| format!("{:?}", t))
+            .collect::<Vec<String>>()
+            .join(",\n  ")
+    );
 
-    // Create a new node of type Value
-    let id = ast.node_body(None, node::VariableStorage::new("test".into()));
+    let ast = tree_builder::from_tokens(tokens);
+    println!("{:?}", ast);
+    let (ast, root) = ast?;
 
-    // Erase the type of the node handle
-    // let id: node::NodeID = id.into();
-    let node: &AstNode<Variable> = ast.get(id);
-    let node: &AstNode<Any> = node.into();
-    let node: &AstNode<Variable> = node.try_into().unwrap();
+    let ast = linker::link(ast, root)?;
+    println!("{:?}", ast);
 
-    // Ensure that dynamic dispatch works as expected
-    // node.get_type(&ast, NodeUsage::Value);
-    for child in node.children(&ast) {
-        println!("{:?}", child);
-    }
+    // let _ast = checker::check(ast, root)?;
+    Ok(())
 }

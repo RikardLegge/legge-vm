@@ -48,8 +48,8 @@ fn main() -> Result<()> {
     };
      
     a := A(); 
-    a.func();
-    A.func(a);
+    // a.func();
+    // A.func(a);
     // b := a.value;
     "#,
     );

@@ -1,8 +1,9 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
+use crate::linker::Linker;
 use crate::node::{
     Ast, Break, EvaluateExpression, Expression, FunctionDeclaration, Loop, NodeID, Result, Return,
-    TypeDeclaration, Variable,
+    TypeDeclaration, Variable, VariableValue,
 };
 use crate::state::State;
 use crate::types::{NodeType, NodeUsage, Types};
@@ -40,3 +41,5 @@ impl Children for AstNodeRef<EvaluateExpression> {
         ChildIterator::new([node.value.into()].into())
     }
 }
+
+impl Linker for AstNodeRef<EvaluateExpression> {}

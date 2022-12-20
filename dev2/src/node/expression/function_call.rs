@@ -1,7 +1,8 @@
 use crate::ast::AstNodeRef;
 use crate::children::{ChildIterator, Children};
+use crate::linker::{LinkContext, Linker};
 use crate::node::{
-    Ast, Block, Expression, FunctionCall, FunctionDeclaration, NodeID, Result, Variable,
+    Ast, Block, Error, Expression, FunctionCall, FunctionDeclaration, NodeID, Result, Variable,
     VariableValue,
 };
 use crate::types::{NodeType, NodeUsage, Types};
@@ -28,16 +29,24 @@ impl Types for AstNodeRef<FunctionCall> {
     ) -> Result<Cow<'ast, NodeType>> {
         let node = ast.body(self.id);
         let value = ast.body(node.variable);
-        let variable_id = (&value.variable).try_into().unwrap();
+        let variable_id = (&value.variable).try_into().map_err(|_| {
+            Error::InternalError(format!("Variable state unresolved: {:?}", value.variable))
+        })?;
         let variable = ast.get(variable_id);
         let variable_type = variable.get_type(ast, usage)?;
-        if let NodeType::Function(func) = variable_type.borrow() {
-            match usage {
+        match variable_type.borrow() {
+            NodeType::Function(func) => match usage {
                 NodeUsage::Type => ast.get(*func).get_type(ast, usage),
                 NodeUsage::Value => Ok(Cow::Borrowed(&ast.body(*func).returns)),
-            }
-        } else {
-            unimplemented!()
+            },
+            NodeType::Custom(tp) => match usage {
+                NodeUsage::Type => ast.get(*tp).get_type(ast, usage),
+                NodeUsage::Value => {
+                    let tp = ast.body(*tp);
+                    Ok(Cow::Borrowed(&ast.body(tp.constructor).returns))
+                }
+            },
+            _ => unimplemented!("{:?}", variable_type),
         }
     }
 }
@@ -46,5 +55,21 @@ impl Children for AstNodeRef<FunctionCall> {
     fn children<'this, 'ast>(&'this self, ast: &'ast Ast) -> ChildIterator<'ast> {
         let node = ast.body(self.id);
         ChildIterator::new([node.variable.into(), node.args.deref().into()].into())
+    }
+}
+
+impl Linker for AstNodeRef<FunctionCall> {
+    fn link_context(
+        &self,
+        ast: &Ast,
+        child_id: impl Into<NodeID>,
+        context: LinkContext,
+    ) -> Result<LinkContext> {
+        let node = ast.body(self.id);
+        if child_id.into() == node.variable.into() {
+            Ok(context)
+        } else {
+            Ok(LinkContext::Ast)
+        }
     }
 }

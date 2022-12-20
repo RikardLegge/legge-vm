@@ -1,6 +1,9 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
-use crate::node::{Ast, NodeID, Result, Statement, TypeDeclaration, Variable, VariableDeclaration};
+use crate::linker::Linker;
+use crate::node::{
+    Ast, Error, NodeID, Result, Statement, TypeDeclaration, Variable, VariableDeclaration,
+};
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 
@@ -26,14 +29,22 @@ impl Types for AstNodeRef<Variable> {
             return Ok(Cow::Borrowed(tp));
         }
 
-        let parent_id = self.parent_id.ok_or_else(|| panic!())?;
+        let parent_id = self.parent_id.ok_or_else(|| {
+            let err = Error::ExpectedParent(self.id.into());
+            panic!("{:?}", err);
+            err
+        })?;
         let parent = ast.get(parent_id);
 
-        let statement: &AstNode<Statement> = parent.try_into().unwrap();
+        let statement: &AstNode<Statement> = parent.try_into()?;
         match usage {
             NodeUsage::Type => ast.get(parent_id).get_type(ast, usage),
             NodeUsage::Value => {
-                let value_id = statement.value().ok_or_else(|| panic!())?;
+                let value_id = statement.value().ok_or_else(|| {
+                    let err = Error::ExpectedValue(statement.id.into());
+                    panic!("{:?}", err);
+                    err
+                })?;
                 ast.get(value_id).get_type(ast, usage)
             }
         }
@@ -67,3 +78,5 @@ impl Children for AstNodeRef<Variable> {
         ChildIterator::new([].into())
     }
 }
+
+impl Linker for AstNodeRef<Variable> {}

@@ -1,9 +1,9 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
-use crate::linker::{Linker, LinkerContext};
+use crate::linker::{LinkContext, Linker};
 use crate::node::{
-    Ast, Break, Expression, FunctionDeclaration, Loop, NodeID, Result, Return, TypeDeclaration,
-    Variable,
+    Ast, Break, Error, Expression, FunctionDeclaration, Loop, NodeID, Result, Return,
+    TypeDeclaration, Variable,
 };
 use crate::state::State;
 use crate::types::{NodeType, NodeUsage, Types};
@@ -45,11 +45,11 @@ impl Children for AstNodeRef<Return> {
 }
 
 impl Linker for AstNodeRef<Return> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+    fn link(&self, ast: &mut Ast, context: LinkContext) -> Result<()> {
         let func = ast.walk_up(
             self.id,
             |node| match <&AstNode<FunctionDeclaration>>::try_from(node) {
-                Ok(node) => Ok(Some(node.id)),
+                Ok(node) => Ok::<_, Error>(Some(node.id)),
                 Err(_) => Ok(None),
             },
         )?;

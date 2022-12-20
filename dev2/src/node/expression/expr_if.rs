@@ -1,5 +1,6 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
+use crate::linker::Linker;
 use crate::node::statement::ReturnStorage;
 use crate::node::{
     Ast, Block, Expression, If, Loop, NodeID, Result, Statement, TypeDeclaration, Variable,
@@ -49,3 +50,5 @@ impl Children for AstNodeRef<If> {
         }
     }
 }
+
+impl Linker for AstNodeRef<If> {}

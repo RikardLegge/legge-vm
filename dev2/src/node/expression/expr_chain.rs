@@ -1,6 +1,6 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
-use crate::linker::{Linker, LinkerContext};
+use crate::linker::{LinkContext, Linker};
 use crate::node::expression::VariableValueStorage;
 use crate::node::statement::ReturnStorage;
 use crate::node::{
@@ -49,7 +49,7 @@ impl Children for AstNodeRef<ExpressionChain> {
 }
 
 impl Linker for AstNodeRef<ExpressionChain> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
+    fn link(&self, ast: &mut Ast, _context: LinkContext) -> Result<()> {
         let node = ast.body(self.id);
 
         if node.linked {
@@ -86,5 +86,19 @@ impl Linker for AstNodeRef<ExpressionChain> {
 
         ast.body_mut(self.id).linked = true;
         Ok(())
+    }
+
+    fn link_context(
+        &self,
+        ast: &Ast,
+        child_id: impl Into<NodeID>,
+        context: LinkContext,
+    ) -> Result<LinkContext> {
+        let node = ast.body(self.id);
+        if child_id.into() == node.rhs.into() {
+            Ok(LinkContext::Node(node.lhs.into()))
+        } else {
+            Ok(context)
+        }
     }
 }

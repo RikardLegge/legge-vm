@@ -1,5 +1,6 @@
 use crate::ast::AstNodeRef;
 use crate::children::{ChildIterator, Children};
+use crate::linker::Linker;
 use crate::node::{Ast, Block, FunctionDeclaration, NodeID, Result, Variable};
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
@@ -30,3 +31,5 @@ impl Children for AstNodeRef<FunctionDeclaration> {
         ChildIterator::new([node.arguments.deref().into(), node.body.into()].into())
     }
 }
+
+impl Linker for AstNodeRef<FunctionDeclaration> {}
