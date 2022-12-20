@@ -1,17 +1,17 @@
 use crate::ast::AstNodeRef;
-use crate::node::{Ast, Expression, Result};
-use std::borrow::Cow;
+use crate::node::{Any, Ast, Expression};
+
+mod call;
+mod value;
 
 use crate::reified;
-use crate::types::{NodeType, NodeUsage, Types};
+use crate::types::Types;
+pub use call::*;
+pub use value::*;
 
-impl Types for AstNodeRef<Expression> {
-    fn get_type<'this, 'ast>(
-        &'this self,
-        ast: &'ast Ast,
-        usage: NodeUsage,
-    ) -> Result<Cow<'ast, NodeType>> {
+impl Types<Any> for AstNodeRef<Expression> {
+    fn get_type(&self, ast: &Ast) {
         let node = ast.get(self.id);
-        reified! {node.get_type(ast, usage)}
+        reified! {node.get_type(ast)}
     }
 }
