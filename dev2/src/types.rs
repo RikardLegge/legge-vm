@@ -1,5 +1,5 @@
 use crate::ast::{AstNode, AstNodeRef, NodeBody};
-use crate::node::{Ast, FunctionDeclaration, NodeID, Result, TypeDeclaration, VariableValue};
+use crate::node::{Ast, FunctionDeclaration, NodeID, Result, TypeDeclaration};
 use std::borrow::Cow;
 
 // Example of dynamically adding methods to the AST, which respect the node types
@@ -31,7 +31,7 @@ pub enum NodeType {
     Float,
     String,
     Boolean,
-    Indirect(NodeID<VariableValue>),
+    // Indirect(NodeID<VariableValue>),
     Custom(NodeID<TypeDeclaration>),
     Function(NodeID<FunctionDeclaration>),
 }

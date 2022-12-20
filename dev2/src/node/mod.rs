@@ -5,8 +5,7 @@ mod variable;
 pub use crate::node::variable::*;
 
 use crate::node::expression::{
-    BlockStorage, ExpressionChainStorage, FunctionCallStorage, FunctionDeclarationStorage,
-    IfStorage, LoopStorage, OperationStorage, ValueStorage, VariableValueStorage,
+    BlockStorage, FunctionDeclarationStorage, LoopStorage, VariableValueStorage,
 };
 use crate::node::statement::{
     BreakStorage, EvaluateExpressionStorage, ReturnStorage, StaticAssignmentStorage,
@@ -28,13 +27,8 @@ build_ast! {
     Any [
         Variable(VariableStorage),
         Expression [
-            If(IfStorage),
             Block(BlockStorage),
-            Value(ValueStorage),
             Loop(LoopStorage),
-            Operation(OperationStorage),
-            ExpressionChain(ExpressionChainStorage),
-            FunctionCall(FunctionCallStorage),
             FunctionDeclaration(FunctionDeclarationStorage),
             VariableValue(VariableValueStorage),
         ],
@@ -56,15 +50,10 @@ pub enum Storage {
     Any(()),
 
     Expression(()),
-    ExpressionChain(ExpressionChainStorage),
     Block(BlockStorage),
     Loop(LoopStorage),
-    If(IfStorage),
-    Operation(OperationStorage),
-    FunctionCall(FunctionCallStorage),
     FunctionDeclaration(FunctionDeclarationStorage),
     VariableValue(VariableValueStorage),
-    Value(ValueStorage),
 
     Statement(()),
     VariableDeclaration(VariableDeclarationStorage),
@@ -87,7 +76,6 @@ macro_rules! reified {
             Any |
             Expression |
                 Block | FunctionDeclaration | Loop | VariableValue |
-                Value | If | FunctionCall | ExpressionChain | Operation |
             Statement |
                 VariableDeclaration | TypeDeclaration |
                 Return | Break | EvaluateExpression |

@@ -2,14 +2,14 @@ use crate::ast::{NodeBody, NodeID, NodeIterator, NodeUsage};
 use crate::node::{
     get_node_type, Ast, AstContext, AstRootNode, Block, Expression, NodeType, Variable,
 };
-// use crate::{Error, Result};
-//
-// #[derive(Debug, Clone)]
-// pub struct If {
-//     pub cond: NodeID<Expression>,
-//     pub body: NodeID<Block>,
-//     pub r#else: Option<NodeID<Expression>>,
-// }
+use crate::{Error, Result};
+
+#[derive(Debug, Clone)]
+pub struct If {
+    pub cond: NodeID<Expression>,
+    pub body: NodeID<Block>,
+    pub r#else: Option<NodeID<Expression>>,
+}
 
 impl NodeBody for If {
     type Root = AstRootNode;
@@ -17,24 +17,24 @@ impl NodeBody for If {
     type AstContext = AstContext;
     type Variable = Variable;
 
-    // fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
-    //     match usage {
-    //         NodeUsage::Type => Err(Error::InternalError),
-    //         NodeUsage::Call => Err(Error::InternalError),
-    //         NodeUsage::Value => {
-    //             let node = ast.get_body(node_id);
-    //             get_node_type(ast, node.body, usage)
-    //         }
-    //     }
-    // }
-    //
-    // fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
-    //     let elements = NodeIterator::dual(self.cond, self.body);
-    //     match self.r#else {
-    //         Some(r#else) => NodeIterator::chained(elements, NodeIterator::single(r#else)),
-    //         None => elements,
-    //     }
-    // }
+    fn node_type(node_id: NodeID<Self>, ast: &Ast, usage: NodeUsage) -> Result<NodeType> {
+        match usage {
+            NodeUsage::Type => Err(Error::InternalError),
+            NodeUsage::Call => Err(Error::InternalError),
+            NodeUsage::Value => {
+                let node = ast.get_body(node_id);
+                get_node_type(ast, node.body, usage)
+            }
+        }
+    }
+
+    fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
+        let elements = NodeIterator::dual(self.cond, self.body);
+        match self.r#else {
+            Some(r#else) => NodeIterator::chained(elements, NodeIterator::single(r#else)),
+            None => elements,
+        }
+    }
 
     fn check(node_id: NodeID<Self>, ast: &mut Ast) -> Result<()> {
         let body = ast.get_body(node_id);
