@@ -1,42 +1,39 @@
-// use crate::ast::{NodeBody, NodeID, NodeIterator, NodeUsage};
-// use crate::node::{
-//     closest_variable, get_node_type, Ast, AstContext, AstRootNode, Expression, NodeType, Variable,
-// };
-// use crate::{Error, State};
-//
-// #[derive(Debug, Clone)]
-// pub struct VariableAssignment {
-//     pub variable: State<String, NodeID<Variable>>,
-//     pub value: NodeID<Expression>,
-// }
-//
-// impl VariableAssignment {
-//     pub fn new(ident: String, value: NodeID<Expression>) -> Self {
-//         VariableAssignment {
-//             variable: State::Unlinked(ident),
-//             value,
-//         }
-//     }
-// }
-//
-// impl NodeBody for VariableAssignment {
-//     type Root = AstRootNode;
-//     type NodeType = NodeType;
-//     type AstContext = AstContext;
-//     type Variable = Variable;
-//
-//     fn node_type(_: NodeID<Self>, _: &Ast, _node_usage: NodeUsage) -> crate::Result<NodeType> {
-//         Ok(NodeType::Void)
-//     }
-//
-//     fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
-//         NodeIterator::single(self.value)
-//     }
+use crate::ast::{NodeBody, NodeID, NodeIterator, NodeUsage};
+use crate::node::{
+    closest_variable, get_node_type, Ast, AstContext, AstRootNode, Expression, NodeType, Variable,
+};
+use crate::{Error, State};
 
-use crate::ast::{NodeID, NodeUsage};
-use crate::node::{AstContext, closest_variable, get_node_type};
+#[derive(Debug, Clone)]
+pub struct VariableAssignment {
+    pub variable: State<String, NodeID<Variable>>,
+    pub value: NodeID<Expression>,
+}
 
-fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> crate::Result<()> {
+impl VariableAssignment {
+    pub fn new(ident: String, value: NodeID<Expression>) -> Self {
+        VariableAssignment {
+            variable: State::Unlinked(ident),
+            value,
+        }
+    }
+}
+
+impl NodeBody for VariableAssignment {
+    type Root = AstRootNode;
+    type NodeType = NodeType;
+    type AstContext = AstContext;
+    type Variable = Variable;
+
+    fn node_type(_: NodeID<Self>, _: &Ast, _node_usage: NodeUsage) -> crate::Result<NodeType> {
+        Ok(NodeType::Void)
+    }
+
+    fn children(&self, _context: AstContext) -> NodeIterator<'_, Self::AstContext> {
+        NodeIterator::single(self.value)
+    }
+
+    fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> crate::Result<()> {
         let node: &Self = ast.get_body(node_id);
         if let State::Unlinked(var) = &node.variable {
             let var = closest_variable(ast, node_id, var, context)?

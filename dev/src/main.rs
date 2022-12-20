@@ -72,27 +72,27 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-// #[derive(Debug, Clone, Eq, PartialEq)]
-// pub enum State<Unlinked, Linked> {
-//     Unlinked(Unlinked),
-//     Linked(Linked),
-// }
-//
-// impl<'a, Unlinked, T> TryFrom<&'a State<Unlinked, ast::NodeID<T>>> for ast::NodeID<T> {
-//     type Error = ();
-//
-//     fn try_from(
-//         value: &'a State<Unlinked, ast::NodeID<T>>,
-//     ) -> std::result::Result<Self, Self::Error> {
-//         match value {
-//             State::Unlinked(_) => Err(()),
-//             State::Linked(inner) => Ok(*inner),
-//         }
-//     }
-// }
-//
-// impl<Unlinked, Linked> From<Unlinked> for State<Unlinked, Linked> {
-//     fn from(value: Unlinked) -> Self {
-//         State::Unlinked(value)
-//     }
-// }
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum State<Unlinked, Linked> {
+    Unlinked(Unlinked),
+    Linked(Linked),
+}
+
+impl<'a, Unlinked, T> TryFrom<&'a State<Unlinked, ast::NodeID<T>>> for ast::NodeID<T> {
+    type Error = ();
+
+    fn try_from(
+        value: &'a State<Unlinked, ast::NodeID<T>>,
+    ) -> std::result::Result<Self, Self::Error> {
+        match value {
+            State::Unlinked(_) => Err(()),
+            State::Linked(inner) => Ok(*inner),
+        }
+    }
+}
+
+impl<Unlinked, Linked> From<Unlinked> for State<Unlinked, Linked> {
+    fn from(value: Unlinked) -> Self {
+        State::Unlinked(value)
+    }
+}
