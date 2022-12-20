@@ -1,21 +1,16 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
-use crate::linker::LinkerContext::Node;
-use crate::linker::{Linker, LinkerContext, LinkerExt};
 use crate::node::statement::ReturnStorage;
 use crate::node::{
-    Ast, Block, Error, Expression, Loop, NodeID, Result, Statement, Storage, TypeDeclaration,
-    Variable, VariableValue,
+    Ast, Block, Expression, Loop, NodeID, Result, Statement, TypeDeclaration, Variable,
+    VariableValue,
 };
 use crate::state::State;
 use crate::types::{NodeType, NodeUsage, Types};
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::ops::Deref;
-use std::os::unix::process::parent_id;
 
-#[derive(Debug)]
 pub struct VariableValueStorage {
     pub variable: State<String, NodeID<Variable>>,
 }
@@ -35,7 +30,7 @@ impl Types for AstNodeRef<VariableValue> {
         let node = ast.body(self.id);
         match node.variable {
             State::Linked(var) => ast.get(var).get_type(ast, usage),
-            _ => Err(Error::UnlinkedNode(self.id.into())),
+            _ => panic!(), //Err(Error::UnlinkedNode(node_id.into())),
         }
     }
 }
@@ -43,20 +38,5 @@ impl Types for AstNodeRef<VariableValue> {
 impl Children for AstNodeRef<VariableValue> {
     fn children<'this, 'ast>(&'this self, _ast: &'ast Ast) -> ChildIterator<'ast> {
         ChildIterator::new([].into())
-    }
-}
-
-impl Linker for AstNodeRef<VariableValue> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
-        let body = ast.body(self.id);
-        if let State::Unlinked(var) = &body.variable {
-            let var = ast
-                .closest_variable(self.id, var, context)?
-                .ok_or_else(|| panic!("variable not found {}", var))?; //Error::VariableNotFound(var.into()))?;
-
-            let body = ast.body_mut(self.id);
-            body.variable = State::Linked(var);
-        }
-        Ok(())
     }
 }

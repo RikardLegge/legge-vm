@@ -8,7 +8,6 @@ use crate::state::State;
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 
-#[derive(Debug)]
 pub struct EvaluateExpressionStorage {
     pub value: NodeID<Expression>,
     pub has_end_statement: bool,

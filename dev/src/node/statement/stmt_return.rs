@@ -23,22 +23,22 @@ use crate::{Error, State};
 //             None => NodeIterator::empty(),
 //         }
 //     }
-//
-//     fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> crate::Result<()> {
-//         let func = ast.walk_up(
-//             node_id,
-//             |node| match <&AstNode<FunctionDeclaration>>::try_from(node) {
-//                 Ok(node) => Ok(Some(node.id)),
-//                 Err(_) => Ok(None),
-//             },
-//         )?;
-//         if let Some(func) = func {
-//             ast.get_body_mut(node_id).func = State::Linked(func);
-//             Ok(())
-//         } else {
-//             panic!();
-//         }
-//     }
+
+    fn link(node_id: NodeID<Self>, ast: &mut Ast, _context: AstContext) -> crate::Result<()> {
+        let func = ast.walk_up(
+            node_id,
+            |node| match <&AstNode<FunctionDeclaration>>::try_from(node) {
+                Ok(node) => Ok(Some(node.id)),
+                Err(_) => Ok(None),
+            },
+        )?;
+        if let Some(func) = func {
+            ast.get_body_mut(node_id).func = State::Linked(func);
+            Ok(())
+        } else {
+            panic!();
+        }
+    }
 
     fn check(node_id: NodeID<Self>, ast: &mut Ast) -> crate::Result<()> {
         let body = ast.get_body(node_id);

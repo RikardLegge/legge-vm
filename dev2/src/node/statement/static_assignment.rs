@@ -1,15 +1,13 @@
 use crate::ast::{AstNode, AstNodeRef};
 use crate::children::{ChildIterator, Children};
-use crate::linker::{Linker, LinkerContext, LinkerExt};
 use crate::node::{
-    Ast, Break, Error, EvaluateExpression, Expression, FunctionDeclaration, Loop, NodeID, Result,
-    Return, StaticAssignment, TypeDeclaration, Variable, VariableValue,
+    Ast, Break, EvaluateExpression, Expression, FunctionDeclaration, Loop, NodeID, Result, Return,
+    StaticAssignment, TypeDeclaration, Variable, VariableValue,
 };
 use crate::state::State;
 use crate::types::{NodeType, NodeUsage, Types};
 use std::borrow::Cow;
 
-#[derive(Debug)]
 pub struct StaticAssignmentStorage {
     pub assign_to: NodeID<VariableValue>,
     pub variable: NodeID<Variable>,
@@ -59,33 +57,5 @@ impl Children for AstNodeRef<StaticAssignment> {
             ]
             .into(),
         )
-    }
-}
-
-impl Linker for AstNodeRef<StaticAssignment> {
-    fn link(&self, ast: &mut Ast, context: LinkerContext) -> Result<()> {
-        let node = ast.body(self.id);
-        let assign_to = ast.body(node.assign_to);
-        if let State::Unlinked(variable_name) = &assign_to.variable {
-            let variable_id = ast
-                .closest_variable(self.id, variable_name, context)?
-                .ok_or_else(|| Error::VariableNotFound(variable_name.into()))?;
-
-            let body = ast.body_mut(node.assign_to);
-            body.variable = State::Linked(variable_id);
-
-            if let Some(type_id) = AstNode::type_declaration_id(variable_id, ast) {
-                let body = ast.body_mut(self.id);
-                body.is_associated_field = true;
-
-                let body = ast.body(self.id);
-                let variable = body.variable;
-                let path = ast.body(variable).name.clone();
-
-                let tp = ast.body_mut(type_id);
-                tp.associated_values.insert(path, variable);
-            }
-        }
-        Ok(())
     }
 }

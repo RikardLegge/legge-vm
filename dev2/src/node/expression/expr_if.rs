@@ -10,7 +10,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Deref;
 
-#[derive(Debug)]
 pub struct IfStorage {
     pub cond: NodeID<Expression>,
     pub body: NodeID<Block>,

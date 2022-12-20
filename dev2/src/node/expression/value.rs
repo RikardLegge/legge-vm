@@ -10,7 +10,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Deref;
 
-#[derive(Debug)]
 pub enum ValueStorage {
     Int(isize),
     Float(f64),

@@ -33,20 +33,20 @@
 //         NodeIterator::single(self.value)
 //     }
 
-// use crate::ast::{NodeID, NodeUsage};
-// use crate::node::{AstContext, closest_variable, get_node_type};
-// 
-// fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> crate::Result<()> {
-//         let node: &Self = ast.get_body(node_id);
-//         if let State::Unlinked(var) = &node.variable {
-//             let var = closest_variable(ast, node_id, var, context)?
-//                 .ok_or_else(|| Error::VariableNotFound(var.into()))?;
-// 
-//             let node: &mut Self = ast.get_body_mut(node_id);
-//             node.variable = State::Linked(var);
-//         }
-//         Ok(())
-//     }
+use crate::ast::{NodeID, NodeUsage};
+use crate::node::{AstContext, closest_variable, get_node_type};
+
+fn link(node_id: NodeID<Self>, ast: &mut Ast, context: AstContext) -> crate::Result<()> {
+        let node: &Self = ast.get_body(node_id);
+        if let State::Unlinked(var) = &node.variable {
+            let var = closest_variable(ast, node_id, var, context)?
+                .ok_or_else(|| Error::VariableNotFound(var.into()))?;
+
+            let node: &mut Self = ast.get_body_mut(node_id);
+            node.variable = State::Linked(var);
+        }
+        Ok(())
+    }
 
     fn check(node_id: NodeID<Self>, ast: &mut Ast) -> crate::Result<()> {
         let node = ast.get_body(node_id);

@@ -6,7 +6,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Deref;
 
-#[derive(Debug)]
 pub struct TypeDeclarationStorage {
     pub variable: NodeID<Variable>,
     pub constructor: NodeID<Expression>,
