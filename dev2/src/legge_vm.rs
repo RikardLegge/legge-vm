@@ -1,7 +1,7 @@
 use crate::ast::AstNode;
 use crate::node;
+use crate::node::plugins::Types;
 use crate::node::Any;
-use crate::types::Types;
 
 pub fn run() {
     let mut ast = node::Ast::new();
