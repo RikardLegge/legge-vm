@@ -66,7 +66,7 @@ macro_rules! build_ast_node_child {
             type Variants = $variants;
             type Data = $empty;
 
-            unsafe fn variant() -> Self::Variants {
+            fn variant() -> Self::Variants {
                 Self::Variants::$enum($enum {})
             }
         }
@@ -89,7 +89,7 @@ macro_rules! build_ast_node_child {
             type Variants = $variants;
             type Data = $data;
 
-            unsafe fn variant() -> Self::Variants {
+            fn variant() -> Self::Variants {
                 Self::Variants::$leaf($leaf {})
             }
         }
