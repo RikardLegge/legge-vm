@@ -7,4 +7,4 @@ impl Types for AstNodeRef<Value> {
     }
 }
 
-pub struct ValueStorage();
+pub struct ValueData();
