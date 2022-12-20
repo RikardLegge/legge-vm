@@ -54,27 +54,27 @@ impl<Any: NodeBody<Root = Any> + NodeDataStorage> Ast<Any> {
     pub fn node<T: NodeData>(
         &mut self,
         parent_id: Option<NodeID<<Any as NodeBody>::Root>>,
-        body: impl FnOnce(&mut Self, NodeID<T::Node>) -> T,
+        body: impl FnOnce(&mut Self) -> T,
     ) -> NodeID<T::Node>
     where
         T: Into<<Any as NodeDataStorage>::Storage>,
-        NodeID<T::Node>: Into<NodeID<Any>>,
     {
         let index = self.nodes.len();
-        let id = NodeID::new(index);
-
-        // Create placeholder, trying to extract
-        // the data inside the `body` function will
-        // cause a panic.
+        // This placeholder value is never accessible since there exists
+        // no external instances to the nodeID.
         self.nodes.push(AstNode {
-            id: id.into(),
-            parent_id,
+            id: NodeID::new(0),
+            parent_id: None,
             data: Default::default(),
         });
 
-        let data = body(self, id).into();
-        self.nodes[index].data = data;
-        id
+        let node = AstNode {
+            id: NodeID::new(index),
+            parent_id,
+            data: body(self).into(),
+        };
+        self.nodes[index] = node;
+        NodeID::new(index)
     }
 
     pub fn get<T: NodeBody>(&self, id: NodeID<T>) -> &AstNode<T>
